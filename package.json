@@ -1,0 +1,36 @@
+{
+  "name": "hear-it-once",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hear It Once — AI-assisted credit card service line prototype (SIMULATED, synthetic data only)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "tsx watch --disable-warning=ExperimentalWarning src/server.ts",
+    "start": "tsx --disable-warning=ExperimentalWarning src/server.ts",
+    "db:migrate": "tsx --disable-warning=ExperimentalWarning src/db/cli.ts migrate",
+    "db:seed": "tsx --disable-warning=ExperimentalWarning src/db/cli.ts seed",
+    "db:reset": "tsx --disable-warning=ExperimentalWarning src/db/cli.ts reset",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "audit:deps": "npm audit --omit=dev",
+    "check:secrets": "tsx scripts/check-secrets.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.3",
+    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/static": "^10.1.6",
+    "fastify": "^5.12.7",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "playwright-core": "^1.64.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.4"
+  }
+}
