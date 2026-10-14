@@ -60,6 +60,15 @@ export function subscribeAll(fn: (e: TimelineEvent) => void): () => void {
   return () => bus.off('*', fn);
 }
 
+/** Lightweight "a transcript line was added" signal for live staff screens (not persisted). */
+export function emitTurnNotice(sessionId: string): void {
+  bus.emit('turn', sessionId);
+}
+export function subscribeTurns(fn: (sessionId: string) => void): () => void {
+  bus.on('turn', fn);
+  return () => bus.off('turn', fn);
+}
+
 export function listTimeline(sessionId: string, afterId = 0): TimelineEvent[] {
   return all<Record<string, unknown>>('SELECT * FROM timeline_events WHERE session_id = ? AND id > ? ORDER BY id', [sessionId, afterId]).map((r) => ({
     id: Number(r.id),

@@ -11,6 +11,7 @@ import { audit, ASSISTANT } from '../audit/audit.ts';
 import { emitTimeline } from '../events/timeline.ts';
 import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
 import { handleInput, getContext } from '../conversation/orchestrator.ts';
+import { policy } from '../config/policy.ts';
 import { TOOL } from './lily.ts';
 
 export interface ToolContext {
@@ -45,7 +46,7 @@ function stateSummary(sessionId: string) {
   const pending = ctx.pending;
   return {
     identity: s.verification_status === 'verified' ? 'verified' : s.verification_status === 'failed' ? 'locked_after_failed_attempts' : 'not_yet_verified',
-    awaiting: pending?.kind === 'consent' ? 'customer_yes_or_no_to_the_proposed_action' : pending?.kind === 'choice' ? 'customer_to_choose_one_option' : pending?.kind === 'yes_no' ? 'customer_yes_or_no' : ctx.stage === 'awaiting_dob' ? 'date_of_birth' : ctx.stage === 'awaiting_otp' ? 'one_time_passcode' : ctx.stage === 'identifying' ? 'customer_number' : 'nothing_specific',
+    awaiting: pending?.kind === 'consent' ? 'customer_yes_or_no_to_the_proposed_action' : pending?.kind === 'choice' ? 'customer_to_choose_one_option' : pending?.kind === 'yes_no' ? 'customer_yes_or_no' : ctx.stage === 'awaiting_card' ? 'full_16_digit_card_number' : ctx.stage === 'awaiting_dob' ? 'date_of_birth' : ctx.stage === 'awaiting_otp' ? 'one_time_passcode' : ctx.stage === 'identifying' ? 'customer_number' : 'nothing_specific',
     options: pending?.kind === 'choice' ? pending.options.map((o) => o.label) : [],
     handoff: h ? { status: h.status === 'queued' || h.status === 'requested' ? 'waiting_for_an_agent_not_yet_accepted' : h.status === 'connected' ? 'accepted_by_an_agent' : h.status } : null,
     callEnded: ctx.stage === 'ended',
@@ -71,7 +72,7 @@ export async function runTool(name: string, args: Record<string, unknown>, c: To
 }
 
 function toolVerb(name: string): string {
-  return name === TOOL.banking ? 'handle that request' : name === TOOL.human ? 'start a human handover' : name === TOOL.kb ? 'search guidance' : name;
+  return name === TOOL.banking ? 'handle that request' : name === TOOL.human ? 'start a human handover' : name === TOOL.kb ? 'search guidance' : name === TOOL.card ? 'check the card number' : name;
 }
 
 async function dispatch(name: string, args: Record<string, unknown>, c: ToolContext): Promise<Record<string, unknown>> {
@@ -83,6 +84,30 @@ async function dispatch(name: string, args: Record<string, unknown>, c: ToolCont
       const before = maxSeq(c.sessionId);
       await handleInput(c.sessionId, { kind: 'utterance', text, clientMessageId: `voice-${c.turnId}`, asrConfidence: estimateAsrConfidence(text) });
       return { ok: true, backend_said: turnsAfter(c.sessionId, before).map((t) => t.text), ...stateSummary(c.sessionId), instruction: GUIDE };
+    }
+    case TOOL.card: {
+      const ctx0 = getContext(c.sessionId);
+      if (ctx0.stage !== 'awaiting_card') return { ok: false, error: 'not_expecting_a_card_number', ...stateSummary(c.sessionId), message: 'The back end is not asking for a card number right now. Do not collect one. Use the banking tool for what the customer said.' };
+      const text = c.customerText.trim();
+      if (text.replace(/\D/g, '').length < 1) return { ok: false, error: 'no_card_number_heard', message: 'No card number was heard. Ask the customer to read the 16-digit number from the card shown on their screen.' };
+      c.consumeCustomerText();
+      const before = maxSeq(c.sessionId);
+      // The server uses the customer's own transcribed digits, never digits supplied by the model.
+      await handleInput(c.sessionId, { kind: 'utterance', text, clientMessageId: `voice-${c.turnId}-card`, asrConfidence: estimateAsrConfidence(text) });
+      const after = getContext(c.sessionId);
+      const ver = after.verification;
+      const max = policy().verification.maxCardAttempts;
+      return {
+        ok: true,
+        verified: ver.status === 'verified',
+        card_number_matched: ver.status === 'verified',
+        attempts_used: ver.cardAttempts ?? 0,
+        attempts_remaining: ver.status === 'verified' ? max - (ver.cardAttempts ?? 0) : Math.max(0, max - (ver.cardAttempts ?? 0)),
+        locked: ver.status === 'failed',
+        backend_said: turnsAfter(c.sessionId, before).map((t) => t.text),
+        ...stateSummary(c.sessionId),
+        instruction: GUIDE + ' Never say or hint at the correct card number.',
+      };
     }
     case TOOL.human: {
       const text = c.customerText.trim();

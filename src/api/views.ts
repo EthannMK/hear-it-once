@@ -22,7 +22,7 @@ function currentStage(ctx: CallContext, ops: { status: string }[], ended: boolea
   if (handedOff || ctx.stage === 'handoff' || ctx.stage === 'fallback') return 'handoff';
   if (ended || ctx.stage === 'wrap_up' || ctx.stage === 'awaiting_survey' || ctx.stage === 'ended') return 'resolve';
   if (ctx.stage === 'awaiting_issue' || ctx.stage === 'clarifying_issue') return 'understand';
-  if (ctx.stage === 'identifying' || ctx.stage === 'awaiting_dob' || ctx.stage === 'awaiting_otp') return 'verify';
+  if (ctx.stage === 'identifying' || ctx.stage === 'awaiting_dob' || ctx.stage === 'awaiting_otp' || ctx.stage === 'awaiting_card') return 'verify';
   if (ops.some((o) => o.status === 'submitted' || o.status === 'unknown')) return 'act';
   if (ctx.pending?.kind === 'consent') return 'confirm';
   return 'explain';
