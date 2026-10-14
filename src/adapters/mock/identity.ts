@@ -6,7 +6,7 @@
  * code is shown in the simulator's clearly labelled "simulated device" panel.
  * A real deployment must replace this with the bank-approved identity method.
  */
-import { get, run } from '../../db/db.ts';
+import { all, get, run } from '../../db/db.ts';
 import { env } from '../../config/env.ts';
 import { policy } from '../../config/policy.ts';
 import { hmac, newId, randomDigits, safeEqual, sha256 } from '../../lib/ids.ts';
@@ -36,6 +36,15 @@ export const mockIdentity: IdentityVerificationAdapter = {
     await simulatedLatency(30, 30);
     const r = get<{ dob_hash: string }>('SELECT dob_hash FROM bank_customers WHERE id = ?', [customerId]);
     return !!r && safeEqual(r.dob_hash, hashDob(isoDob));
+  },
+  async checkCardNumber(_ctx, customerId, cardNumber) {
+    await simulatedLatency(30, 30);
+    const given = cardNumber.replace(/\D/g, '');
+    const rows = all<{ demo_pan: string | null }>('SELECT demo_pan FROM bank_cards WHERE customer_id = ?', [customerId]);
+    // Compare against every card the customer holds, constant-time per comparison.
+    let ok = false;
+    for (const r of rows) if (r.demo_pan && safeEqual(sha256(r.demo_pan.replace(/\D/g, '')), sha256(given))) ok = true;
+    return ok;
   },
   async issueOtp(ctx, customerId) {
     await simulatedLatency(30, 30);

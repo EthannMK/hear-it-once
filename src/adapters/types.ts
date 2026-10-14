@@ -39,6 +39,8 @@ export interface IdentityVerificationAdapter {
   /** Identification only (who the caller claims to be). Never proof of identity. */
   identifyByAni(ctx: AdapterContext, ani: string): Promise<{ customerId: string } | null>;
   identifyByCustomerNumber(ctx: AdapterContext, customerNumber: string): Promise<{ customerId: string } | null>;
+  /** Demo knowledge factor: the full card number. Returns only pass/fail, never the expected value. */
+  checkCardNumber(ctx: AdapterContext, customerId: string, cardNumber: string): Promise<boolean>;
   /** Knowledge factor. */
   checkDateOfBirth(ctx: AdapterContext, customerId: string, isoDob: string): Promise<boolean>;
   /** Possession factor: one-time passcode sent to the registered device. */

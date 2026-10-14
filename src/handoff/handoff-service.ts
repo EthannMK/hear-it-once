@@ -16,7 +16,7 @@ import { caseEvent, regenerateSummary, updateCase } from '../cases/case-service.
 import { ISSUE_LABELS, HANDOFF_REASON_LABELS, OP_STATUS_LABELS, ACTION_LABELS, formatMoney, formatDate } from '../conversation/format.ts';
 import { loadSnapshot, sourceData } from '../retrieval/retrieval.ts';
 import { currentSnapshotId } from '../actions/action-service.ts';
-import { emitTimeline } from '../events/timeline.ts';
+import { emitTimeline, emitTurnNotice } from '../events/timeline.ts';
 import { kbReferencesFor } from '../kb/kb.ts';
 
 export type HandoffReason = keyof typeof HANDOFF_REASON_LABELS;
@@ -252,6 +252,7 @@ export function addTurn(sessionId: string, speaker: 'customer' | 'assistant' | '
     'INSERT INTO conversation_turns (session_id, seq, speaker, kind, text, sensitive_redacted, client_message_id, asr_confidence, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
     [sessionId, seq, speaker, extra.kind ?? 'utterance', redactText(text), extra.sensitive ? 1 : 0, extra.clientMessageId ?? null, extra.asrConfidence ?? null, nowIso()],
   );
+  emitTurnNotice(sessionId);
   return r.lastInsertRowid;
 }
 

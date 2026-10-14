@@ -8,7 +8,7 @@ export const GREETING_NOTICE =
   '[DEMO: this is a simulation with synthetic data — nothing is actually recorded and no real account, card or payment is affected.]';
 
 export const GREETING =
-  "Hello, you've reached Card Services. I'm an AI assistant — a computer program, not a person. You can ask to speak to a person at any time. In a few words, how can I help you today?";
+  "Hello, you've reached Northstar Bank Card Services. I'm an AI assistant — a computer program, not a person. You can ask to speak to a person at any time. In a few words, how can I help you today?";
 
 export const CLARIFY_ISSUE = 'Just so I get this right — which of these is closest to what you need help with?';
 
@@ -29,6 +29,7 @@ const ISSUE_PHRASES: Record<string, string> = {
   payment_not_showing: "a payment that isn't showing",
   fee_query: 'a fee on your account',
   card_declined: 'a declined card payment',
+  account_inquiry: 'your account information',
 };
 
 export function ackIssue(issueType: string): string {
@@ -37,13 +38,19 @@ export function ackIssue(issueType: string): string {
 }
 
 export const ASK_DOB = 'Please tell me your date of birth.';
+export const ASK_CARD = 'To verify it\'s you, please read me the 16-digit card number on your Northstar card. [Demo only: use the demo card number shown on screen — it is fictional.]';
 export const ASK_CUSTOMER_NUMBER = "I couldn't match the number you're calling from to an account. Please tell me your 8-digit customer number.";
 export const otpSent = (to: string) => `Thank you. I've sent a 6-digit passcode by text message to your registered phone (${to}). Please read me the code when it arrives.`;
 export const VERIFIED = "Thank you — you're verified. I'm checking our systems now.";
 export const LOCKED =
   "I'm sorry, I wasn't able to verify your identity, so I can't access or change anything on the account. For your security, I'm transferring you to an agent who can verify you another way.";
 
-export function retryVerification(step: 'identify' | 'dob' | 'otp', remaining: number, unparsed: boolean): string {
+export function retryVerification(step: 'identify' | 'dob' | 'otp' | 'card', remaining: number, unparsed: boolean): string {
+  if (step === 'card') {
+    return unparsed
+      ? "I didn't catch the whole card number. Could you read all 16 digits again, slowly?"
+      : `I'm sorry, that number doesn't match the card on file. Could you check the card and read the number again? You have ${remaining} attempt${remaining === 1 ? '' : 's'} left.`;
+  }
   if (unparsed) {
     if (step === 'dob') return 'Please tell me your date of birth, including the year — for example "April 12, 1986".';
     if (step === 'otp') return 'Please read me the 6-digit code from the text message.';

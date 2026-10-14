@@ -23,8 +23,12 @@ describe('journey front end', () => {
       expect(b, u).not.toMatch(/\sstyle\s*=/i);
     }
   });
-  it('the journey data endpoint lists exactly the four scenarios', async () => {
-    const r = await app.inject({ method: 'GET', url: '/api/journey/scenarios' });
-    expect(r.json().items.map((i: { id: string }) => i.id)).toEqual(['unexpected_charge', 'card_declined', 'fee_question', 'speak_to_human']);
+  it('the demo customers endpoint lists Northstar Bank profiles with full demo card numbers', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/demo/customers' });
+    expect(r.statusCode).toBe(200);
+    const j = r.json();
+    expect(j.bank).toBe('Northstar Bank');
+    expect(j.items.length).toBeGreaterThanOrEqual(5);
+    for (const c of j.items) expect(String(c.cardNumber).replace(/\D/g, '')).toHaveLength(16);
   });
 });

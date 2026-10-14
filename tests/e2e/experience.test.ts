@@ -128,8 +128,8 @@ describe('tags, knowledge base and workflow stage', () => {
     await c.say("There's a charge I don't recognise");
     for (const d of ['1990-01-01', '1990-01-02', '1990-01-03']) await c.say(d);
     const ids = c.view.knowledge.map((k: { id: string }) => k.id);
-    expect(ids).toContain('KB-107');
-    expect(c.view.knowledge.find((k: { id: string }) => k.id === 'KB-107').agentReview).toBe(true);
+    expect(ids).toContain('KB-111');
+    expect(c.view.knowledge.find((k: { id: string }) => k.id === 'KB-111').agentReview).toBe(true);
   });
 });
 

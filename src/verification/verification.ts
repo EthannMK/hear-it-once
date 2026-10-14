@@ -16,9 +16,9 @@ import { policy } from '../config/policy.ts';
 import { run } from '../db/db.ts';
 import { nowIso } from '../lib/clock.ts';
 import { audit, type Actor } from '../audit/audit.ts';
-import { parseCustomerNumber, parseDob, parseOtp } from '../ai/parsers.ts';
+import { parseCardNumber, parseCustomerNumber, parseDob, parseOtp } from '../ai/parsers.ts';
 
-export type VerificationStatus = 'not_started' | 'identifying' | 'awaiting_dob' | 'awaiting_otp' | 'verified' | 'failed';
+export type VerificationStatus = 'not_started' | 'identifying' | 'awaiting_dob' | 'awaiting_otp' | 'awaiting_card' | 'verified' | 'failed';
 
 export interface VerificationState {
   status: VerificationStatus;
@@ -27,6 +27,8 @@ export interface VerificationState {
   idAttempts: number;
   dobAttempts: number;
   otpAttempts: number;
+  /** Failed card-number checks (card_number verification mode). */
+  cardAttempts?: number;
   challengeId: string | null;
   deliveredTo: string | null;
   verifiedAt: string | null;
@@ -49,10 +51,11 @@ export const initialVerification = (): VerificationState => ({
 export type VerificationEvent =
   | { type: 'need_identifier' }
   | { type: 'need_dob' }
+  | { type: 'need_card' }
   | { type: 'otp_sent'; deliveredTo: string }
-  | { type: 'retry'; step: 'identify' | 'dob' | 'otp'; remaining: number; unparsed: boolean }
+  | { type: 'retry'; step: 'identify' | 'dob' | 'otp' | 'card'; remaining: number; unparsed: boolean }
   | { type: 'verified' }
-  | { type: 'locked'; step: 'identify' | 'dob' | 'otp' };
+  | { type: 'locked'; step: 'identify' | 'dob' | 'otp' | 'card' };
 
 interface Ctx {
   sessionId: string;
@@ -61,7 +64,7 @@ interface Ctx {
   actor: Actor;
 }
 
-function record(ctx: Ctx, customerId: string | null, step: 'identify' | 'dob' | 'otp', method: string, outcome: 'passed' | 'failed' | 'locked' | 'issued', reason?: string) {
+function record(ctx: Ctx, customerId: string | null, step: 'identify' | 'dob' | 'otp' | 'card', method: string, outcome: 'passed' | 'failed' | 'locked' | 'issued', reason?: string) {
   run('INSERT INTO verification_attempts (session_id, customer_id, step, method, outcome, failure_reason, created_at) VALUES (?,?,?,?,?,?,?)', [
     ctx.sessionId, customerId, step, method, outcome, reason ?? null, nowIso(),
   ]);
@@ -87,7 +90,7 @@ function syncSession(ctx: Ctx, s: VerificationState): void {
 }
 
 /** Begin verification: try to identify the caller from the ANI (caller ID). */
-export async function startVerification(ctx: Ctx, s: VerificationState, ani: string | null): Promise<VerificationEvent> {
+export async function startVerification(ctx: Ctx, s: VerificationState, ani: string | null, mode: 'dob_otp' | 'card_number' = 'dob_otp'): Promise<VerificationEvent> {
   const a = adapters().identity;
   const actx = { correlationId: ctx.correlationId, sessionId: ctx.sessionId, scenarioId: ctx.scenarioId };
   if (ani) {
@@ -95,10 +98,10 @@ export async function startVerification(ctx: Ctx, s: VerificationState, ani: str
     if (hit) {
       s.identifiedCustomerId = hit.customerId;
       s.identifiedBy = 'ani';
-      s.status = 'awaiting_dob';
+      s.status = mode === 'card_number' ? 'awaiting_card' : 'awaiting_dob';
       record(ctx, hit.customerId, 'identify', 'ani', 'passed');
       syncSession(ctx, s);
-      return { type: 'need_dob' };
+      return mode === 'card_number' ? { type: 'need_card' } : { type: 'need_dob' };
     }
   }
   s.status = 'identifying';
@@ -111,6 +114,27 @@ export async function submitVerificationAnswer(ctx: Ctx, s: VerificationState, a
   const cfg = policy().verification;
   const a = adapters().identity;
   const actx = { correlationId: ctx.correlationId, sessionId: ctx.sessionId, scenarioId: ctx.scenarioId, customerId: s.identifiedCustomerId };
+
+  if (s.status === 'awaiting_card' && s.identifiedCustomerId) {
+    const maxTries = cfg.maxCardAttempts;
+    const number = parseCardNumber(answer);
+    // Too little was captured to be an answer: ask again without using up an attempt.
+    if (!number) return { type: 'retry', step: 'card', remaining: maxTries - (s.cardAttempts ?? 0), unparsed: true };
+    s.cardAttempts = (s.cardAttempts ?? 0) + 1;
+    const ok = await a.checkCardNumber(actx, s.identifiedCustomerId, number);
+    if (ok) {
+      s.status = 'verified';
+      s.level = 'standard';
+      s.verifiedAt = nowIso();
+      record(ctx, s.identifiedCustomerId, 'card', 'card_number', 'passed');
+      syncSession(ctx, s);
+      return { type: 'verified' };
+    }
+    if (s.cardAttempts >= maxTries) return lock(ctx, s, 'card', 'card_number');
+    // The supplied number is never stored or logged — only that it did not match.
+    record(ctx, s.identifiedCustomerId, 'card', 'card_number', 'failed', 'mismatch');
+    return { type: 'retry', step: 'card', remaining: maxTries - s.cardAttempts, unparsed: false };
+  }
 
   if (s.status === 'identifying') {
     const num = parseCustomerNumber(answer);
@@ -169,7 +193,7 @@ export async function submitVerificationAnswer(ctx: Ctx, s: VerificationState, a
   return { type: 'locked', step: 'identify' };
 }
 
-function lock(ctx: Ctx, s: VerificationState, step: 'identify' | 'dob' | 'otp', method: string, reason = 'max_attempts'): VerificationEvent {
+function lock(ctx: Ctx, s: VerificationState, step: 'identify' | 'dob' | 'otp' | 'card', method: string, reason = 'max_attempts'): VerificationEvent {
   s.status = 'failed';
   record(ctx, s.identifiedCustomerId, step, method, 'locked', reason);
   syncSession(ctx, s);

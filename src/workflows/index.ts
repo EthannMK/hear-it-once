@@ -6,6 +6,7 @@ import { duplicateWorkflow } from './duplicate.ts';
 import { paymentWorkflow } from './payment.ts';
 import { feeWorkflow } from './fee.ts';
 import { declinedWorkflow } from './declined.ts';
+import { inquiryWorkflow } from './inquiry.ts';
 
 export const WORKFLOWS: Record<IssueType, Workflow> = {
   unrecognised_transaction: unrecognisedWorkflow,
@@ -14,4 +15,5 @@ export const WORKFLOWS: Record<IssueType, Workflow> = {
   payment_not_showing: paymentWorkflow,
   fee_query: feeWorkflow,
   card_declined: declinedWorkflow,
+  account_inquiry: inquiryWorkflow,
 };

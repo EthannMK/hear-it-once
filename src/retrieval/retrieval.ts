@@ -72,6 +72,7 @@ const SOURCE_SETS: Record<IssueType, SourceName[]> = {
   payment_not_showing: ['customer_profile', 'card_status', 'transactions', 'fraud_alerts', 'prior_cases', 'payment_status'],
   fee_query: ['customer_profile', 'card_status', 'transactions', 'fraud_alerts', 'prior_cases', 'fee_policy', 'payment_status'],
   card_declined: ['customer_profile', 'card_status', 'card_declines', 'fraud_alerts', 'prior_cases'],
+  account_inquiry: ['customer_profile', 'card_status', 'transactions', 'prior_cases'],
 };
 export const sourcesForIssue = (t: IssueType) => SOURCE_SETS[t];
 

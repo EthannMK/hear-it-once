@@ -6,6 +6,7 @@ export const ISSUE_LABELS: Record<string, string> = {
   payment_not_showing: 'Payment not showing',
   fee_query: 'Fee query',
   card_declined: 'Card declined',
+  account_inquiry: 'Account enquiry',
 };
 
 export const ACTION_LABELS: Record<string, string> = {
