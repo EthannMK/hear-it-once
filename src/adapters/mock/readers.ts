@@ -11,6 +11,8 @@ import {
   type CardAdapter,
   type CardSummary,
   type CustomerProfileAdapter,
+  type DeclineAdapter,
+  type DeclineRecord,
   type DisputeRulesAdapter,
   type FeeAdapter,
   type FraudAdapter,
@@ -205,4 +207,22 @@ export const mockFees: FeeAdapter = {
         latePaymentsLast12Months: lateFees,
       };
     }),
+};
+
+export const mockDeclines: DeclineAdapter = {
+  listDeclines: (ctx, customerId, sinceDays) =>
+    readWithFaults('card_declines', ctx, 70, () =>
+      all<Record<string, unknown>>('SELECT * FROM bank_declines WHERE customer_id = ? AND declined_at >= ? ORDER BY declined_at DESC', [customerId, daysAgoIso(sinceDays)]).map(
+        (d): DeclineRecord => ({
+          declineId: String(d.id),
+          cardRef: (d.card_id as string) ?? null,
+          merchant: String(d.merchant_name),
+          amountMinor: Number(d.amount_minor),
+          currency: String(d.currency),
+          declinedAt: String(d.declined_at),
+          reasonCode: d.reason_code as DeclineRecord['reasonCode'],
+          suggestedAction: (d.customer_action as string) ?? null,
+        }),
+      ),
+    ),
 };

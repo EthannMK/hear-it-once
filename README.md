@@ -75,6 +75,10 @@ npm start               # http://127.0.0.1:3000
 
 Data lives in `data/hear-it-once.db` and **persists across restarts**. Tests use an in-memory database.
 
+## Talk to Lily (live voice)
+
+The home page is a live two-way voice agent (Gemini Live on Vertex AI) with a four-scenario journey, a real-time “Behind the conversation” panel, in-app human handover and a post-call summary. See [docs/LILY_VOICE.md](docs/LILY_VOICE.md) for architecture, configuration and what is/isn't verified. The earlier demo remains at `/classic.html`.
+
 ## Deploy to Google Cloud Run
 
 ```bash

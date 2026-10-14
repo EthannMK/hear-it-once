@@ -18,6 +18,7 @@ export const ISSUE_CHOICES = [
   { id: 'wrong_or_duplicate_charge', label: 'A duplicate or wrong charge' },
   { id: 'payment_not_showing', label: "A payment that isn't showing" },
   { id: 'fee_query', label: 'A fee on my account' },
+  { id: 'card_declined', label: 'My card was declined' },
   { id: 'other', label: 'Something else' },
 ];
 
@@ -27,6 +28,7 @@ const ISSUE_PHRASES: Record<string, string> = {
   wrong_or_duplicate_charge: 'a duplicate or wrong charge',
   payment_not_showing: "a payment that isn't showing",
   fee_query: 'a fee on your account',
+  card_declined: 'a declined card payment',
 };
 
 export function ackIssue(issueType: string): string {

@@ -78,6 +78,8 @@ export interface CallContext {
   persona?: { scenarioId: string; name: string; customerNumber: string; phoneMasked: string } | null;
   sentiment?: { sentiment: CallTags['sentiment']; basis: string } | null;
   tags?: CallTags | null;
+  /** Further banking topics raised after the first was handled, in the same verified call. */
+  secondary?: { issueType: IssueType; at: string }[];
 }
 
 /** Default synthetic persona per issue type for free-talk demos (no injected faults). */
@@ -87,13 +89,14 @@ export const FREE_TALK_PERSONA: Record<IssueType, string> = {
   wrong_or_duplicate_charge: 'S03',
   payment_not_showing: 'S04',
   fee_query: 'S05',
+  card_declined: 'S19',
 };
 
 export type CallInput =
   | { kind: 'utterance'; text: string; clientMessageId?: string; asrConfidence?: number }
   | { kind: 'choice'; optionId: string; clientMessageId?: string }
   | { kind: 'consent'; proposalId: string; decision: 'accept' | 'decline'; clientMessageId?: string }
-  | { kind: 'request_human'; clientMessageId?: string }
+  | { kind: 'request_human'; clientMessageId?: string; spokenText?: string }
   | { kind: 'silence' }
   | { kind: 'interrupt' }
   | { kind: 'reconcile'; clientMessageId?: string }
@@ -156,7 +159,7 @@ function tl(s: Session, e: TimelineInput): void {
 
 /** Recompute live call tags and record how the classification changed. */
 function refreshTags(s: Session, stage: TStage): void {
-  const t = computeTags(s.id, { issue: s.ctx.issue, sentiment: s.ctx.sentiment, flags: s.ctx.flags });
+  const t = computeTags(s.id, { issue: s.ctx.issue, sentiment: s.ctx.sentiment, flags: s.ctx.flags, secondary: s.ctx.secondary?.map((x) => x.issueType) });
   const changes = diffTags(s.ctx.tags, t);
   if (!s.ctx.tags && t.intent) {
     tl(s, { type: 'call.tagged', stage, title: `Call tagged: ${t.intentLabel} · ${t.category}`, detail: `Urgency ${t.urgency} (${t.urgencyReason}). Sentiment ${t.sentiment} — indicative only.`, source: 'classification', data: { tags: t } });
@@ -267,8 +270,12 @@ export async function startCall(input: StartCallInput): Promise<string> {
   }
   tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: `Channel: ${input.channel === 'voice_browser' ? 'browser voice' : 'text simulator'}${sc ? `; demo scenario ${sc.id}` : ctx.freeMode ? '; free-talk demo' : ''}.`, status: 'ok', source: 'telephony (simulated)', ref: correlationId });
   say(s, M.GREETING_NOTICE, 'system');
-  say(s, M.GREETING);
-  tl(s, { type: 'disclosure.given', stage: 'understand', title: 'AI and recording disclosure given', detail: 'The caller was told they are speaking with an AI assistant and given the recording/privacy notice before any assistance.', status: 'ok', source: 'conversation', ref: correlationId });
+  // On a live voice call Lily speaks her own greeting; the AI disclosure is recorded when she has
+  // actually said it (see the voice bridge), not assumed here.
+  if (input.channel !== 'voice_browser') {
+    say(s, M.GREETING);
+    tl(s, { type: 'disclosure.given', stage: 'understand', title: 'AI and recording disclosure given', detail: 'The caller was told they are speaking with an AI assistant and given the recording/privacy notice before any assistance.', status: 'ok', source: 'conversation', ref: correlationId });
+  }
   event(s, 'call_answered', { channel: input.channel ?? 'text_simulator' });
   audit({ actor: s.actor, event: 'call.started', status: 'ok', resourceType: 'session', resourceId: id, sessionId: id, correlationId, metadata: { scenarioId: input.scenarioId ?? null, channel: input.channel } });
   save(s);
@@ -313,8 +320,9 @@ async function dispatch(s: Session, input: CallInput): Promise<void> {
     case 'survey':
       return onSurvey(s, input.score);
     case 'request_human':
-      addTurn(s.id, 'customer', '[Pressed "Talk to a person"]', { kind: 'button', clientMessageId: input.clientMessageId });
-      return handoff(s, 'customer_requested', 'customer pressed the agent button', 'Of course. I’ll connect you with a member of our team.');
+      if (input.spokenText) addTurn(s.id, 'customer', input.spokenText.slice(0, 1000), { kind: 'voice', clientMessageId: input.clientMessageId });
+      else addTurn(s.id, 'customer', '[Pressed "Talk to a person"]', { kind: 'button', clientMessageId: input.clientMessageId });
+      return handoff(s, 'customer_requested', input.spokenText ? 'customer asked for a person' : 'customer pressed the agent button', 'Of course. I’ll connect you with a member of our team.');
     case 'reconcile':
       addTurn(s.id, 'customer', '[Asked to check action status]', { kind: 'button', clientMessageId: input.clientMessageId });
       return onReconcile(s);
@@ -419,6 +427,11 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
       return onWorkflowText(s, text);
     case 'wrap_up': {
       const yn = parseYesNo(text);
+      // A new, supported banking topic in an already verified call is handled here, not handed off.
+      if (yn === null && isVerified(c.verification) && text.length > 8) {
+        const cls = await classify(s, redactText(text));
+        if (cls.issueType && cls.confidence >= policy().conversation.minIntentConfidence) return startSecondaryTopic(s, cls, text);
+      }
       if (yn === 'yes' || (yn === null && text.length > 12)) return handoff(s, 'customer_accepted_offer', 'additional request after resolution', "I'll connect you to an agent for that — they'll see everything from this call, so you won't need to repeat it.");
       return goSurvey(s);
     }
@@ -611,6 +624,33 @@ async function onVerified(s: Session): Promise<void> {
   }
   c.stage = 'workflow';
   refreshTags(s, 'investigate');
+  const r = WORKFLOWS[issueType].start(wfCtx(s, snap));
+  await retrieveGuidance(s, 'explain', [], { supportsNextStep: r.kind === 'propose', agentReview: r.kind === 'handoff' });
+  await applyResult(s, r);
+}
+
+/**
+ * A further banking topic raised after the first one was handled. Identity is already verified,
+ * so no second verification is asked; the new topic gets its own fresh lookups and the same
+ * consent/policy rules. The PRIMARY intent (and KPI attribution) stays the first topic.
+ */
+async function startSecondaryTopic(s: Session, cls: Classification, text: string): Promise<void> {
+  const c = s.ctx;
+  const issueType = cls.issueType!;
+  const customerId = c.verification.identifiedCustomerId!;
+  c.secondary = [...(c.secondary ?? []), { issueType, at: nowIso() }];
+  c.issue = { ...cls, statement: redactText(text), slots: cls.slots, clarifications: 0 };
+  c.pending = null;
+  c.unclearCount = 0;
+  event(s, 'secondary_topic', { issueType });
+  tl(s, { type: 'intent.secondary', stage: 'understand', title: `New topic in the same call: ${ISSUE_LABELS[issueType]}`, detail: `Already verified, so no second identity check. The primary intent stays “${ISSUE_LABELS[get<{ issue_type: string }>('SELECT issue_type FROM call_sessions WHERE id = ?', [s.id])?.issue_type ?? issueType] ?? ISSUE_LABELS[issueType]}”.`, status: 'ok', source: `intent model: ${cls.model}` });
+  say(s, M.ackIssue(issueType));
+  c.stage = 'workflow';
+  refreshTags(s, 'investigate');
+  const snap = await retrieveFacts({ sessionId: s.id, correlationId: s.correlationId, scenarioId: s.scenarioId, customerId, issueType });
+  c.snapshotId = snap.id;
+  if (c.caseId) caseEvent(c.caseId, 'secondary_topic', { issueType, snapshotId: snap.id });
+  c.wf = { name: issueType, step: 'start', clarifications: 0 };
   const r = WORKFLOWS[issueType].start(wfCtx(s, snap));
   await retrieveGuidance(s, 'explain', [], { supportsNextStep: r.kind === 'propose', agentReview: r.kind === 'handoff' });
   await applyResult(s, r);

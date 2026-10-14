@@ -9,4 +9,5 @@ export const SOURCE_DISPLAY: Record<SourceName, string> = {
   dispute_rules: 'Dispute rules',
   payment_status: 'Payment status',
   fee_policy: 'Fee policy',
+  card_declines: 'Card authorisations',
 };

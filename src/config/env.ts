@@ -28,6 +28,18 @@ const EnvSchema = z.object({
   ACTION_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
   ADAPTER_READ_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
   TRANSCRIPT_RETENTION_DAYS: z.coerce.number().int().min(0).default(30),
+  /**
+   * Live voice (Lily). "gemini" streams audio to Gemini Live on Vertex AI through the server-side
+   * bridge; "off" leaves the text fallback only. "scripted" is a test/offline stand-in and is
+   * refused outside NODE_ENV=test and DEMO_MODE.
+   */
+  LIVE_PROVIDER: z.enum(['gemini', 'scripted', 'off']).default('gemini'),
+  /** Vertex AI project; on Cloud Run this is picked up from GOOGLE_CLOUD_PROJECT. */
+  GOOGLE_CLOUD_PROJECT: z.string().optional(),
+  /** Live models are regional; keep this independent of the Cloud Run region. */
+  GOOGLE_CLOUD_LOCATION: z.string().default('us-central1'),
+  LIVE_MODEL: z.string().default('gemini-live-2.5-flash-native-audio'),
+  LIVE_VOICE: z.string().default('Aoede'),
 });
 
 export type Env = z.infer<typeof EnvSchema> & { SESSION_SECRET: string };

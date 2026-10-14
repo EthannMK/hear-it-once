@@ -160,6 +160,10 @@ export function seedScenario(s: ScenarioDef): void {
         run(`INSERT INTO bank_payments (id, customer_id, amount_minor, initiated_at, channel, source_account_masked, status, status_detail, status_as_of, created_at)
              VALUES (?,?,50000,?, 'online_banking', 'Checking ••••6612', 'pending', 'received_awaiting_settlement', ?, ?)`, [newId('PAY'), cu.id, iso(2, 9), nowIso(), nowIso()]);
         break;
+      case 'S19':
+        run(`INSERT INTO bank_declines (id, customer_id, card_id, merchant_name, amount_minor, declined_at, reason_code, customer_action, created_at)
+             VALUES (?,?,?,?,?,?, 'travel_security_rule', 'Confirm the trip with an agent so a travel note can be added.', ?)`, [newId('DEC'), cu.id, card, 'EuroRail Booking', 18900, iso(0, 8), nowIso()]);
+        break;
       case 'S05':
       case 'S18':
         insertFee(cu.id, 'late_payment', 2900, 5);
@@ -232,7 +236,7 @@ export function seedAll(opts: { history?: boolean } = {}): void {
 const DATA_TABLES = [
   'qa_reviews', 'session_events', 'hold_intervals', 'handoffs', 'disputes', 'action_status_history', 'action_operations', 'consents', 'proposals',
   'case_events', 'cases', 'integration_calls', 'retrieval_snapshots', 'otp_challenges', 'verification_attempts', 'conversation_turns', 'call_sessions',
-  'audit_events', 'bank_operations', 'bank_fees', 'bank_payments', 'bank_fraud_alerts', 'bank_transactions', 'bank_cards', 'bank_customers',
+  'audit_events', 'bank_operations', 'bank_declines', 'bank_fees', 'bank_payments', 'bank_fraud_alerts', 'bank_transactions', 'bank_cards', 'bank_customers',
   'bank_dispute_rules', 'bank_fee_policies', 'mock_faults', 'staff_users', 'role_permissions', 'roles', 'app_settings',
 ];
 
@@ -275,6 +279,7 @@ export function resetScenario(id: string): boolean {
     run(`DELETE FROM proposals WHERE session_id IN (${inList})`, sessions);
     run(`DELETE FROM cases WHERE customer_id = ? OR session_id IN (${inList})`, [cid, ...sessions]);
     run(`DELETE FROM call_sessions WHERE id IN (${inList})`, sessions);
+    run('DELETE FROM bank_declines WHERE customer_id = ?', [cid]);
     run('DELETE FROM bank_fees WHERE customer_id = ?', [cid]);
     run('DELETE FROM bank_payments WHERE customer_id = ?', [cid]);
     run('DELETE FROM bank_fraud_alerts WHERE customer_id = ?', [cid]);

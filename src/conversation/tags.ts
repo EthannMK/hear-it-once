@@ -10,6 +10,8 @@ export interface CallTags {
   intent: string | null;
   intentLabel: string;
   intentConfidence: number | null;
+  /** Further topics raised in the same call; the primary intent above never changes. */
+  secondaryIntents: { intent: string; label: string }[];
   category: string;
   urgency: 'normal' | 'elevated';
   urgencyReason: string;
@@ -26,6 +28,7 @@ const CATEGORY: Record<string, string> = {
   wrong_or_duplicate_charge: 'Transaction dispute',
   payment_not_showing: 'Payments',
   fee_query: 'Fees and charges',
+  card_declined: 'Card troubleshooting',
 };
 
 const FRUSTRATED = /\b(again|still|ridiculous|annoyed|annoying|frustrat\w*|angry|upset|useless|unacceptable|third time|second time|fed up|panick?\w*|scared|worried)\b/i;
@@ -38,7 +41,7 @@ export function sentimentFrom(text: string, prev: CallTags['sentiment'] | undefi
   return prev ? null : { sentiment: 'neutral', basis: 'no strong cue in the caller’s words' };
 }
 
-export function computeTags(sessionId: string, ctx: { issue?: { issueType: string | null; confidence: number } | null; sentiment?: { sentiment: CallTags['sentiment']; basis: string } | null; flags?: string[] }): CallTags {
+export function computeTags(sessionId: string, ctx: { issue?: { issueType: string | null; confidence: number } | null; sentiment?: { sentiment: CallTags['sentiment']; basis: string } | null; flags?: string[]; secondary?: string[] }): CallTags {
   const s = get<{ verification_status: string; outcome: string | null; ended_at: string | null; issue_type: string | null }>(
     'SELECT verification_status, outcome, ended_at, issue_type FROM call_sessions WHERE id = ?',
     [sessionId],
@@ -48,7 +51,9 @@ export function computeTags(sessionId: string, ctx: { issue?: { issueType: strin
   const handoff = get<{ status: string }>("SELECT status FROM handoffs WHERE session_id = ? AND status != 'cancelled' ORDER BY requested_at DESC LIMIT 1", [sessionId]);
   const blockFailed = !!get("SELECT 1 FROM action_operations WHERE session_id = ? AND action_type = 'block_card' AND status IN ('failed','unknown')", [sessionId]);
   const fraudAlert = flags.includes('fraud_alert') || ctx.flags?.includes('fraud_alert');
-  const issue = ctx.issue?.issueType ?? s.issue_type ?? null;
+  // The first captured topic is the primary intent; later topics are listed as secondary.
+  const issue = s.issue_type ?? ctx.issue?.issueType ?? null;
+  const secondary = [...new Set(ctx.secondary ?? [])].filter((x) => x !== issue).map((x) => ({ intent: x, label: ISSUE_LABELS[x] }));
 
   let urgency: CallTags['urgency'] = 'normal';
   let urgencyReason = 'no elevated-urgency rule applies';
@@ -67,6 +72,7 @@ export function computeTags(sessionId: string, ctx: { issue?: { issueType: strin
     intent: issue,
     intentLabel: issue ? ISSUE_LABELS[issue] : 'Not yet identified',
     intentConfidence: ctx.issue?.confidence ?? null,
+    secondaryIntents: secondary,
     category: issue ? CATEGORY[issue] : '—',
     urgency,
     urgencyReason,
@@ -82,5 +88,9 @@ export function computeTags(sessionId: string, ctx: { issue?: { issueType: strin
 export function diffTags(a: CallTags | null | undefined, b: CallTags): string[] {
   if (!a) return [];
   const keys: (keyof CallTags)[] = ['intent', 'urgency', 'identity', 'sentiment', 'outcome', 'caseStatus'];
-  return keys.filter((k) => a[k] !== b[k]).map((k) => `${k}: ${String(a[k])} → ${String(b[k])}`);
+  const out = keys.filter((k) => a[k] !== b[k]).map((k) => `${k}: ${String(a[k])} → ${String(b[k])}`);
+  const sa = (a.secondaryIntents ?? []).map((x) => x.label).join(', ');
+  const sb = b.secondaryIntents.map((x) => x.label).join(', ');
+  if (sa !== sb) out.push(`secondary topics: ${sa || 'none'} → ${sb}`);
+  return out;
 }
