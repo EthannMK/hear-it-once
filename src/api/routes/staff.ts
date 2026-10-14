@@ -14,6 +14,7 @@ import { getCaseDetail } from '../../cases/case-service.ts';
 import { acceptHandoff, agentMessage, completeHandoff, getHandoff, listHandoffs } from '../../handoff/handoff-service.ts';
 import { approveAction, getOp, opHistory, reconcile, rejectApproval } from '../../actions/action-service.ts';
 import { computeKpis, KpiFilterSchema } from '../../reporting/kpi.ts';
+import { listCompleted } from '../../analysis/analysis.ts';
 import { buildWorkspace, crmSearch, editWorkspace } from '../../workspace/workspace.ts';
 import { buildCallView, listCalls, listCases, opsOverview } from '../views.ts';
 import { STAFF_COOKIE } from '../app.ts';
@@ -71,6 +72,12 @@ export function registerStaffRoutes(app: FastifyInstance): void {
   app.patch<{ Params: { id: string } }>('/api/handoffs/:id/workspace', async (req) => {
     const p = requirePermission(req.staff, 'case.update');
     return editWorkspace(req.params.id, { ...staffActor(p), id: p.userId }, req.body ?? {});
+  });
+
+  /** Calls that ended without needing a person, with their post-call analysis status. */
+  app.get('/api/completed-calls', async (req) => {
+    requirePermission(req.staff, 'call.read');
+    return { items: listCompleted(15) };
   });
 
   app.get('/api/crm/search', async (req) => {

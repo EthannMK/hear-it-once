@@ -27,7 +27,7 @@ export const LILY_TOOLS: LiveToolDecl[] = [
   {
     name: TOOL.card,
     description:
-      'Check the full 16-digit card number the customer has just read out. Call this ONLY when the back end has asked for the card number and the customer has just said it. The server compares it with the active customer on file and returns whether it matched and how many attempts remain. It never reveals the correct number. You never decide that verification passed: only this tool\'s result does.',
+      'Check the full 16-digit card number the customer has just read out. Call this ONLY while the back end is collecting the card number: when the customer says the number, says a corrected number, or answers yes or no to the read-back of the last four digits. The server compares it with the active customer on file and returns whether it matched and how many attempts remain. It never reveals the correct number. You never decide that verification passed: only this tool\'s result does.',
     parameters: { type: 'object', properties: { note: { type: 'string', description: 'Optional: how confident you are that you heard all 16 digits, e.g. "heard all 16".' } }, required: [] },
   },
   {

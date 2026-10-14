@@ -26,7 +26,7 @@ staffSignin(signinEl, {
       loadQueue();
       connectLive();
       // Safety net only: the live stream normally delivers changes instantly.
-      state.timer = setInterval(() => { tickDuration(); if (!state.live) { loadQueue(); if (state.selected) loadWorkspace(true); } }, 1000);
+      state.timer = setInterval(() => { tickDuration(); state.tick = (state.tick ?? 0) + 1; if (state.tick % 5 === 0) loadQueue(); if (!state.live) { loadQueue(); if (state.selected) loadWorkspace(true); } }, 1000);
     } else {
       mount(queueEl, h('div.wx-empty', me.authenticated ? 'This workspace needs the agent role.' : 'Sign in with a demo agent to see the queue.'));
       mount(centerEl); mount(sideEl);
@@ -54,7 +54,7 @@ function setLive() { liveEl.textContent = state.live ? '● Live — new cases a
 
 /* ------------------------------------------------------------------ queue */
 async function loadQueue() {
-  try { state.items = (await api('/api/handoffs')).items; renderQueue(); }
+  try { state.items = (await api('/api/handoffs')).items; state.done = (await api('/api/completed-calls')).items; renderQueue(); }
   catch (e) { mount(queueEl, h('div.wx-empty', e.message)); }
 }
 function renderQueue() {
@@ -70,10 +70,39 @@ function renderQueue() {
         h('span.nm', i.customerName ?? 'Unidentified caller'),
         h('span.wx-small', i.issueLabel ?? 'Issue not identified'),
         h('span.wx-small.wx-muted', `${i.reasonLabel} · ${fmtTime(i.requestedAt)}${i.priority === 'urgent' ? ' · urgent' : ''}`))))) : h('div.wx-empty', label === 'Waiting' ? 'No one is waiting. Ask Lily for a person on the customer page.' : 'None.'),
-    ]));
+    ]),
+    h('h3', `Ended calls (${(state.done ?? []).length})`),
+    (state.done ?? []).length ? h('ul', state.done.map((d) => h('li', h('button', { type: 'button', 'aria-pressed': String(state.selectedCall === d.sessionId), onclick: () => selectCall(d.sessionId) },
+      h('span.nm', d.customerName ?? 'Unidentified caller'),
+      h('span.wx-small', d.reason ?? 'Reason not recorded'),
+      h('span.wx-small.wx-muted', `${(d.resolution ?? 'not analysed').replace('_', ' ')} · analysis ${d.analysisStatus} · ${fmtTime(d.endedAt)}`))))) : h('div.wx-empty', 'None yet.'));
 }
 
-function select(id) { state.selected = id; state.form = null; state.crm = null; state.flash = null; renderQueue(); loadWorkspace(false); }
+/** An ended call: the saved transcript and the post-call analysis, with a retry if the analysis failed. */
+async function selectCall(id) {
+  state.selected = null; state.ws = null; state.selectedCall = id; renderQueue();
+  mount(sideEl);
+  try {
+    const [a, t] = await Promise.all([api(`/api/calls/${id}/analysis`), api(`/api/calls/${id}/transcript`)]);
+    const body = a.status === 'ready' ? [
+      h('p', a.summary),
+      h('div.wx-two',
+        h('div.wx-box', h('div.wx-sub', 'Call reason'), h('p', `${a.reason?.label ?? 'Unknown'}${a.reason?.secondary?.length ? ' (also: ' + a.reason.secondary.join(', ') + ')' : ''}`), h('div.wx-sub', 'Resolution'), h('p', (a.resolution ?? '').replace('_', ' '))),
+        h('div.wx-box', h('div.wx-sub', 'Suggested solutions'), h('ul', a.suggestedSolutions.map((x) => h('li', x))), a.unresolved.length ? [h('div.wx-sub', 'Still open'), h('ul', a.unresolved.map((x) => h('li', x)))] : null)),
+      h('div.wx-sub', 'Tags'), h('p', a.tags.map((x) => h('span.wx-chip', x))),
+      a.knowledge.length ? [h('div.wx-sub', 'Relevant guidance'), h('ul', a.knowledge.map((k) => h('li', k.title)))] : null,
+    ] : a.status === 'failed' ? [
+      h('p.wx-note.bad', 'The analysis failed. The transcript and call record are saved.'),
+      h('button.wx-btn', { type: 'button', onclick: async () => { await api(`/api/calls/${id}/analysis/retry`, { method: 'POST', body: {} }); selectCall(id); loadQueue(); } }, 'Retry analysis'),
+    ] : [h('p.wx-muted', 'The analysis is still running or has not started.')];
+    mount(centerEl, h('div.wsx-stack',
+      h('section.wx-card', { 'aria-label': 'Post-call analysis' }, h('header', h('h2', 'Ended call'), h('span.wx-chip', `Analysis ${a.status}`)), h('div.wx-pad', body)),
+      h('section.wx-card', { 'aria-label': 'Full transcript' }, h('header', h('h2', 'Full transcript'), h('span.wx-chip', `${t.count} turns`)),
+        h('div.wx-log', t.segments.map((s) => h('div', h('b', (s.speaker === 'ai' ? 'Lily' : s.speaker) + ': '), s.text))))));
+  } catch (e) { mount(centerEl, h('div.wx-note.bad', e.message)); }
+}
+
+function select(id) { state.selectedCall = null; state.selected = id; state.form = null; state.crm = null; state.flash = null; renderQueue(); loadWorkspace(false); }
 
 /* ------------------------------------------------------------------ workspace */
 async function loadWorkspace(quiet) {

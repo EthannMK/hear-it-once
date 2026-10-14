@@ -23,6 +23,7 @@ import { activeFaults } from '../adapters/mock/faults.ts';
 import { adapters } from '../adapters/registry.ts';
 import { AnthropicIntentModel, RulesIntentModel, detectSignals, extractSlots, type Classification, type IntentModel, type IssueSlots } from '../ai/intent.ts';
 import { isCorrection, normaliseMerchant, parseOrdinalChoice, parseYesNo } from '../ai/parsers.ts';
+import { analyseCall } from '../analysis/analysis.ts';
 import { initialVerification, isVerified, startVerification, submitVerificationAnswer, type VerificationState } from '../verification/verification.ts';
 import { retrieveFacts, loadSnapshot, sourceData, type Snapshot } from '../retrieval/retrieval.ts';
 import { WORKFLOWS } from '../workflows/index.ts';
@@ -571,10 +572,70 @@ const vctx = (s: Session) => ({ sessionId: s.id, correlationId: s.correlationId,
 
 /* ------------------------------------------------------------------------- verification */
 
+/** Card numbers waiting for the caller's "yes". Held in memory only and never written to the database, logs or prompts. */
+const pendingCards = new Map<string, string>();
+
+/**
+ * Card collection reads the number back (last four only), waits for confirmation and takes corrections.
+ * Returns the digits to verify once the caller has confirmed, otherwise answers the caller and returns null.
+ */
+function collectCard(s: Session, text: string): string | null {
+  const pending = pendingCards.get(s.id);
+  const digits = text.replace(/\D/g, '');
+  const yn = parseYesNo(text);
+  if (digits.length === 0) {
+    if (pending && yn === 'yes') { pendingCards.delete(s.id); return pending; }
+    if (pending && yn === 'no') { pendingCards.delete(s.id); say(s, M.CARD_REASK); return null; }
+    if (pending) { say(s, M.CARD_YESNO); return null; }
+    // "Try again" after the check was unavailable reuses the number the caller already confirmed.
+    const saved = unavailableCards.get(s.id);
+    if (saved && (yn === 'yes' || /\b(try|check)\b.*\bagain\b|\bretry\b/i.test(text))) return saved;
+    // Nothing usable was said: the verifier asks again without using an attempt.
+    return text;
+  }
+  if (digits.length !== 16) {
+    pendingCards.delete(s.id);
+    s.ctx.unclearCount++;
+    tl(s, { type: 'verification.unclear', stage: 'verify', title: `Card number not captured fully (${digits.length} of 16 digits) — asked again, no attempt used`, status: 'info', source: 'identity verification (simulated)' });
+    if (s.ctx.unclearCount >= 3) { void handoff(s, 'communication_breakdown', 'could not capture the card number', "I'm having trouble capturing that. Let me connect you with an agent who can help verify you."); return null; }
+    say(s, M.CARD_WRONG_LENGTH(digits.length));
+    return null;
+  }
+  pendingCards.set(s.id, digits);
+  s.ctx.unclearCount = 0;
+  tl(s, { type: 'verification.readback', stage: 'verify', title: pending ? 'Card number corrected — read back for confirmation' : 'Card number heard — read back for confirmation', detail: 'Only the last four digits are repeated. The full number is held in memory until confirmed and is never stored.', status: 'info', source: 'identity verification (simulated)' });
+  say(s, M.cardReadback(digits.slice(-4), !!pending));
+  return null;
+}
+
 async function onVerificationAnswer(s: Session, text: string): Promise<void> {
   const c = s.ctx;
-  const ev = await submitVerificationAnswer(vctx(s), c.verification, text);
+  if (c.stage === 'awaiting_card' && c.verificationMode === 'card_number') {
+    const confirmed = collectCard(s, text);
+    if (confirmed === null) return;
+    // Only a confirmed 16-digit number is acknowledged and checked; anything else goes to the verifier to ask again.
+    if (/^\d{16}$/.test(confirmed)) say(s, M.CARD_ACK);
+    return runVerification(s, confirmed);
+  }
+  return runVerification(s, text);
+}
+
+/** Confirmed numbers whose check could not run; kept in memory so "try again" works without re-reading 16 digits. */
+const unavailableCards = new Map<string, string>();
+
+async function runVerification(s: Session, answer: string): Promise<void> {
+  const c = s.ctx;
+  const t0 = Date.now();
+  const ev = await submitVerificationAnswer(vctx(s), c.verification, answer);
+  if (ev.type === 'unavailable') unavailableCards.set(s.id, answer); else unavailableCards.delete(s.id);
+  pendingCards.delete(s.id);
+  if (c.verificationMode === 'card_number' && ev.type !== 'in_progress') tl(s, { type: 'verification.timing', stage: 'verify', title: `Card check finished in ${Date.now() - t0} ms`, detail: `Outcome: ${ev.type === 'verified' ? 'verified' : ev.type === 'unavailable' ? 'temporarily_unavailable' : ev.type === 'retry' && ev.unparsed ? 'invalid_input' : 'not_verified'}`, status: ev.type === 'unavailable' ? 'warn' : 'info', source: 'identity verification (simulated)', data: { latencyMs: Date.now() - t0 } });
   switch (ev.type) {
+    case 'in_progress':
+      return;
+    case 'unavailable':
+      tl(s, { type: 'verification.unavailable', stage: 'verify', title: 'Card check could not run — nothing decided, no attempt used', detail: `The check did not answer within the time limit (${ev.latencyMs} ms across one retry). The conversation state is kept.`, status: 'warn', source: 'identity verification (simulated)' });
+      return say(s, M.CARD_UNAVAILABLE);
     case 'need_card':
       c.stage = 'awaiting_card';
       return say(s, M.ASK_CARD);
@@ -1180,6 +1241,8 @@ async function onSurvey(s: Session, score: number | null): Promise<void> {
 
 export async function endCall(s: Session, forced?: 'abandoned' | 'ended_unresolved' | 'fallback'): Promise<void> {
   const c = s.ctx;
+  // Ending is idempotent: a repeated click or event must not create a second record or re-run post-call work.
+  if (c.stage === 'ended') return;
   const row = get<{ outcome: string | null; resolution_status: string | null; verification_status: string }>('SELECT outcome, resolution_status, verification_status FROM call_sessions WHERE id = ?', [s.id])!;
   const handedOff = !!get("SELECT 1 FROM handoffs WHERE session_id = ? AND status IN ('queued','connected','completed')", [s.id]);
   let outcome: string | null = forced ?? null;
@@ -1207,6 +1270,9 @@ export async function endCall(s: Session, forced?: 'abandoned' | 'ended_unresolv
   refreshTags(s, 'resolve');
   tl(s, { type: 'call.closed', stage: outcome === 'handed_off' || outcome === 'fallback' ? 'handoff' : 'resolve', title: `Call closed — ${String(outcome).replace(/_/g, ' ')}`, status: outcome === 'resolved' ? 'ok' : outcome === 'abandoned' ? 'info' : 'warn', source: 'conversation', ref: c.caseId ?? s.correlationId });
   audit({ actor: s.actor, event: 'call.ended', status: 'ok', resourceType: 'session', resourceId: s.id, sessionId: s.id, correlationId: s.correlationId, metadata: { outcome } });
+  // Post-call analysis has its own status. If it fails the call stays saved and the analysis can be retried.
+  const status = analyseCall(s.id, s.actor);
+  tl(s, { type: 'analysis.' + status, stage: 'record', title: status === 'ready' ? 'Post-call summary, reason and tags saved' : 'Post-call analysis failed — transcript and call record are kept; it can be retried', status: status === 'ready' ? 'ok' : 'failed', source: 'post-call analysis' });
 }
 
 /** Staff-side hangup / end (used by the simulator "End call" and tests). */

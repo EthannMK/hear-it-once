@@ -104,3 +104,10 @@ export function describeOutcome(op: Operation): string {
 export const ANYTHING_ELSE = 'Is there anything else I can help you with today?';
 export const SURVEY = 'Before you go: on a scale of 1 (poor) to 5 (excellent), how would you rate this call? [Demo survey — simulated]';
 export const GOODBYE = 'Thank you for calling. Goodbye.';
+
+export const CARD_ACK = 'Thank you. Let me check that for you.';
+export const CARD_WRONG_LENGTH = (n: number) => `I caught ${n} digit${n === 1 ? '' : 's'}, but I need all 16. Could you read the full card number again, slowly?`;
+export const cardReadback = (last4: string, updated: boolean) => `${updated ? "No problem, I've updated it. " : 'Thank you. '}I heard a card number ending in ${[...last4].join(' ')}. Is that correct?`;
+export const CARD_REASK = 'No problem. Please read the 16-digit card number again.';
+export const CARD_YESNO = 'Sorry, was that number correct? Please say yes or no, or read the card number again.';
+export const CARD_UNAVAILABLE = "I'm sorry, our verification check is taking longer than expected, so I can't confirm that yet. I've kept what you told me. Say \"try again\" and I'll check once more, or I can bring in a person.";

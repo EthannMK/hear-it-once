@@ -60,6 +60,8 @@ export interface PolicyConfig {
     maxOtpAttempts: number;
     /** Card-number verification (Northstar demo): failed tries allowed before handover. */
     maxCardAttempts: number;
+    /** Longest the back end waits for the card-number check before reporting it as temporarily unavailable. */
+    cardCheckTimeoutMs: number;
     otpTtlSeconds: number;
     otpLength: number;
   };
@@ -147,7 +149,7 @@ export function buildPolicy(profile: PolicyConfig['profile']): PolicyConfig {
   }
   return {
     profile,
-    verification: { maxDobAttempts: 3, maxOtpAttempts: 3, maxCardAttempts: 3, otpTtlSeconds: 300, otpLength: 6 },
+    verification: { maxDobAttempts: 3, maxOtpAttempts: 3, maxCardAttempts: 3, cardCheckTimeoutMs: 4000, otpTtlSeconds: 300, otpLength: 6 },
     retrieval: {
       maxStalenessSeconds: {
         card_status: 120,
