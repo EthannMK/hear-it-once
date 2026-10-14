@@ -6,16 +6,12 @@ Hear It Once answers a credit-card services call without an IVR menu, discloses 
 
 > **One conversation. Every action handled. Nothing lost.**
 
-It ships these screens on top of one backend:
+It has two screens on one backend:
 
 | Screen | Path | Who |
 |---|---|---|
-| Landing — signature mic orb, text fallback, example requests, judge scenarios, what's simulated | `/` | Anyone |
-| Live call workspace — voice or text conversation beside a live operations view (stage stepper, call tags, parallel system checks, actions with their authorisation lifecycle, event stream, knowledge used, case) | `/#/call` | Anyone |
-| Resolution / agent brief — customer's words, verified facts vs AI interpretation, actions by outcome, unresolved items, evidence, KB references, next step, copy summary, event history | `/#/brief/<call>` | The caller's browser, or staff |
-| Operations — live overview (active calls by stage, action outcomes, categories, drill-down event trails) plus pilot KPIs, QA review, audit, admin | `/dashboard.html` | Demo QA / admin roles |
-| Agent console (warm-handoff briefs, approvals, outcome) | `/agent.html` | Demo agent role |
-| Scenario lab — all 18 scripted scenarios in the original simulator | `/lab.html` | Anyone |
+| Customer page — test identities with dummy card and phone numbers beside a live voice call with Lily, in English, Burmese or Tagalog | `/` | Anyone |
+| Agent workspace — handover queue, suggested solution, CRM search, editable case with audit | `/agent.html` | Demo agent role |
 
 ### What's real and what's simulated
 
@@ -77,7 +73,7 @@ Data lives in `data/hear-it-once.db` and **persists across restarts**. Tests use
 
 ## Talk to Lily (live voice)
 
-The home page is a live two-way voice agent (Gemini Live on Vertex AI) for the fictional **Northstar Bank**: demo customers and test data beside the call, card-number verification with retries, a real-time “Behind the conversation” panel, in-app human handover and a post-call summary. The agent console is a call-centre workspace (suggested solution, knowledge, CRM, case edits with audit). See [docs/NORTHSTAR.md](docs/NORTHSTAR.md) and [docs/LILY_VOICE.md](docs/LILY_VOICE.md) for architecture, configuration and what is/isn't verified. The earlier demo remains at `/classic.html`.
+The home page is a live two-way voice agent (Gemini Live on Vertex AI) for the fictional **Northstar Bank**: demo customers and test data beside the call, card-number verification with retries, a real-time “Behind the conversation” panel, in-app human handover and a post-call summary. The agent console is a call-centre workspace (suggested solution, knowledge, CRM, case edits with audit). See [docs/NORTHSTAR.md](docs/NORTHSTAR.md) and [docs/LILY_VOICE.md](docs/LILY_VOICE.md) for architecture, configuration and what is/isn't verified.
 
 ## Deploy to Google Cloud Run
 
@@ -100,15 +96,13 @@ Staff screens use **demo role selection, not real authentication** (BRD §5 allo
 
 Callers need no sign-in: starting a call issues a per-call token (HttpOnly cookie) that binds the browser to that one call.
 
-## Running a scenario (60 seconds)
+## Trying it (60 seconds)
 
-1. Open `/`, press **Start** on **Unrecognised transaction** (S01).
-2. Say or click the suggested line, press **Say it** next to the date of birth, then **Read it to the assistant** on the simulated phone.
-3. Watch the right-hand operations view: the stepper moves Understand → Verify → Investigate…, the six system lanes run concurrently, tags update, KB-101 is retrieved.
-4. Press **Yes, go ahead**. Each action walks Proposed → You confirmed → Authorised → Submitted → Confirmed as the simulated systems respond.
-5. **Open the brief**, then open `/dashboard.html` (one-click QA or admin sign-in) to see the call in Live operations and drill into its event trail.
+1. Open `/`, choose a language, pick a test identity and press **Start talking to Lily**.
+2. Ask anything about banking. For questions about the test account, read the full dummy card number shown on screen when Lily asks. A wrong number gets a retry, three wrong ones prepare a handover.
+3. Say "I want to speak to a person", then open `/agent.html` in another tab and accept the request.
 
-All 18 scenarios are scripted in [`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHROUGH.md) and available in the scenario lab. Changes persist (a blocked card stays blocked) — scenario starts from the landing page reset that customer automatically; `npm run db:reset` resets everything.
+`npm run db:reset` resets all demo data.
 
 ## Documentation
 
@@ -116,13 +110,11 @@ All 18 scenarios are scripted in [`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHRO
 |---|---|
 | [docs/PLAN.md](docs/PLAN.md) | Phase 0 assessment and stack decision |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, state machines, data model, request flow |
-| [docs/TRACEABILITY.md](docs/TRACEABILITY.md) | Every BRD requirement → implementation → tests → status |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Assumptions and unresolved business decisions, with conservative defaults |
 | [docs/API.md](docs/API.md) | API contracts, auth, errors, pagination |
 | [docs/KPIS.md](docs/KPIS.md) | Metric definitions and what can / cannot be measured locally |
 | [docs/SECURITY.md](docs/SECURITY.md) | Security and privacy checklist |
 | [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | Known limitations; simulated vs real |
-| [docs/DEMO_WALKTHROUGH.md](docs/DEMO_WALKTHROUGH.md) | Step-by-step for all 18 scenarios |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deployment guide for this stack |
 | [docs/PILOT_READINESS.md](docs/PILOT_READINESS.md) | What must be true before a controlled pilot |
 

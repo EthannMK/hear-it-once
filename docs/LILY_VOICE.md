@@ -11,7 +11,7 @@ One page, two interfaces. The judge page (`/`) shows **Demo customers and test d
 | Judge: demo customers + call + summary | `/` (`public/lily/*`) | Stitch light design system, no build step |
 | Agent workspace | `/agent.html` | Live over SSE (`/api/handoffs/stream`), no refresh |
 
-There are only these two screens. `/classic.html`, `/dashboard.html` and `/lab.html` were removed and redirect to `/`. Their APIs remain.
+There are only these two screens. Older pages redirect to `/`.
 
 ## Architecture
 
@@ -62,3 +62,7 @@ gcloud run deploy hear-it-once --source . --region=asia-southeast1 --allow-unaut
 Tested automatically (`tests/e2e/live.test.ts`, `tests/e2e/frontend.test.ts`): the WebSocket bridge, tool dispatch, verification/consent/policy enforcement, small-talk and topic changes, secondary intents, barge-in handling, reconnect, handover, audit/timeline events, no inline scripts/styles under the CSP — against a **scripted stand-in** for the speech model. A browser smoke test (Playwright with a fake microphone) covered landing → call → handover accepted in the agent console in real time → summary.
 
 **Not tested here:** the real Gemini Live connection and real human speech (no Google credentials or microphone in the build environment). Please do a real microphone test on the deployed service and confirm the model ID, voice, and echo behaviour on your device (use headphones if Lily hears herself).
+
+## Languages and scope
+The customer page offers English, Burmese and Tagalog (`?lang=en|my|fil` on the live WebSocket). Screen text lives in `public/lily/i18n.js`. Lily speaks the chosen language. Backend replies and the agent workspace stay in English. Burmese voice quality on the native-audio model is not verified from the build sandbox.
+Lily answers any banking or personal-finance question from general knowledge. Facts about the test account come only from tools (`get_account_details`, `handle_banking_request`) after card-number verification. Balances and limits are not in the demo data.

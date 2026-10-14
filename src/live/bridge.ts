@@ -22,6 +22,7 @@ import { addTurn } from '../handoff/handoff-service.ts';
 import { buildCallView } from '../api/views.ts';
 import type { LiveConnectOptions, LiveProvider, LiveSession, LiveToolCall } from './provider.ts';
 import { LILY_TOOLS, lilySystemInstruction } from './lily.ts';
+import type { LangCode } from './languages.ts';
 import { runTool } from './tools.ts';
 import { normaliseSpoken } from './speech.ts';
 
@@ -71,6 +72,7 @@ export class LiveBridge {
     readonly sessionId: string,
     private readonly send: (m: ServerMessage) => void,
     private readonly provider: LiveProvider,
+    private readonly language: LangCode = 'en',
   ) {}
 
   /* ------------------------------------------------------------------ lifecycle */
@@ -99,7 +101,7 @@ export class LiveBridge {
 
   private async openProviderSession(resumed: boolean): Promise<void> {
     const opts: LiveConnectOptions = {
-      systemInstruction: lilySystemInstruction({ recap: resumed ? this.recap() : null }),
+      systemInstruction: lilySystemInstruction({ recap: resumed ? this.recap() : null, language: this.language }),
       tools: LILY_TOOLS,
       events: {
         onAudio: (b64) => {
