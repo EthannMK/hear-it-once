@@ -2,14 +2,14 @@
 
 Lily is the voice of Hear It Once: a two-way, interruptible conversation in the browser, built on **Gemini Live on Vertex AI**. Everything she says about a customer's account comes from the existing deterministic back end; the speech model handles language and turn-taking only.
 
-## Journey
+## Journey (Northstar Bank)
 
-Landing (four demo scenarios) → **Connect with Lily** → connection animation → live call (real microphone, real playback, live transcript, "Behind the conversation" panel) → optional in-app handover to a person in the Agent console → summary with **What Lily did** → **Start another demo**.
+One page, two interfaces. The judge page (`/`) shows **Demo customers and test data** beside the live call. Pick who you are calling as, press **Call as ...**, then talk about anything: a charge, a decline, a fee, or a new topic half way through. Nothing is scripted and no scenario is chosen. Lily asks for the **full 16-digit demo card number** (shown on screen, fictional), the server checks it, and wrong numbers are retried (three failures prepare a human handover). The agent page (`/agent.html`) is the call-centre workspace: queue, customer and call, AI summary, suggested solution, knowledge, prefilled CRM search and case management. See [NORTHSTAR.md](NORTHSTAR.md).
 
 | Screen | Where | Notes |
 |---|---|---|
-| Landing + call + summary | `/` (`public/lily/*`) | Stitch light design system, no build step |
-| Agent console | `/agent.html` | Live over SSE (`/api/handoffs/stream`) — no refresh |
+| Judge: demo customers + call + summary | `/` (`public/lily/*`) | Stitch light design system, no build step |
+| Agent workspace | `/agent.html` | Live over SSE (`/api/handoffs/stream`), no refresh |
 | Operations dashboard, lab | `/dashboard.html`, `/lab.html` | Same theme |
 | Previous hackathon demo | `/classic.html` | Kept intact |
 
