@@ -14,7 +14,7 @@ import { getCaseDetail } from '../../cases/case-service.ts';
 import { acceptHandoff, agentMessage, completeHandoff, getHandoff, listHandoffs } from '../../handoff/handoff-service.ts';
 import { approveAction, getOp, opHistory, reconcile, rejectApproval } from '../../actions/action-service.ts';
 import { computeKpis, KpiFilterSchema } from '../../reporting/kpi.ts';
-import { buildCallView, listCalls, listCases } from '../views.ts';
+import { buildCallView, listCalls, listCases, opsOverview } from '../views.ts';
 import { STAFF_COOKIE } from '../app.ts';
 
 const Page = z.object({ limit: z.coerce.number().int().min(1).max(100).default(25), cursor: z.string().max(64).optional() });
@@ -130,6 +130,11 @@ export function registerStaffRoutes(app: FastifyInstance): void {
     requirePermission(req.staff, 'kpi.read');
     const f = KpiFilterSchema.parse(req.query);
     return computeKpis(f);
+  });
+
+  app.get('/api/ops/overview', async (req) => {
+    requirePermission(req.staff, 'kpi.read');
+    return opsOverview();
   });
 
   app.get('/api/policy', async (req) => {
