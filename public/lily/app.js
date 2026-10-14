@@ -1,4 +1,4 @@
-// Hear It Once × Lily — customer journey: landing → connecting → live voice call → summary.
+// Hear It Once × Lily (Northstar Bank) — one page: demo customers and test data beside the live call, then a summary.
 import { api, h } from '/js/lib.js';
 import { Mic, Player } from '/lily/audio.js';
 
@@ -33,61 +33,81 @@ function top(extra) {
 }
 function render(...n) { root.replaceChildren(...n.flat().filter(Boolean)); window.scrollTo(0, 0); }
 
-/* ------------------------------------------------------------------ landing */
-async function landing() {
+
+/* ------------------------------------------------------------------ single page: demo customers + live call */
+const groupPan = (n) => String(n ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/g, '$1 ');
+const STANDING = { good: 'In good standing', watch: 'On watch', restricted: 'Restricted' };
+
+async function home() {
   S.call?.destroy?.(); S.call = null;
-  render(top(), h('main.hero', h('p'), h('span.label', 'Live voice support demo')), h('div.wrap', h('p.muted', 'Loading scenarios…')));
+  render(top(), h('main.single', h('p.pad.muted', 'Loading Northstar Bank demo customers…')));
   try {
-    const [j, st] = await Promise.all([api('/api/journey/scenarios'), api('/api/live/status')]);
-    S.cards = j.items; S.demoData = j.demoData; S.status = st;
-  } catch (e) { S.cards = []; S.status = { available: false, reason: e.message }; }
-  if (!S.selected && S.cards[0]) S.selected = S.cards[0].id;
-  drawLanding();
-}
-function drawLanding() {
-  const sel = S.cards.find((c) => c.id === S.selected);
-  const st = S.status ?? {};
-  const voiceOk = !!st.available;
-  const cards = h('div.cards', { role: 'radiogroup', 'aria-label': 'Choose a demo scenario' }, S.cards.map((c) =>
-    h('button.card', { type: 'button', role: 'radio', 'aria-checked': String(c.id === S.selected), onclick: () => { S.selected = c.id; drawLanding(); } },
-      h('span.tick', c.id === S.selected ? '✓' : ''), h('span.label', c.tag), h('h3', c.title), h('p.q', `“${c.quote}”`))));
-  render(top(),
-    h('main.hero',
-      h('div.status-row', h('span.chip.demo', 'Demo data — fictional customers'), h('span.chip', [h('span.dot' + (voiceOk ? '.ok' : '.warn')), voiceOk ? ' Live voice ready' : ' Live voice unavailable — text works'])),
-      h('h1', 'Say it once. Lily handles the rest.'),
-      h('p.lead', 'Talk to Lily, an AI assistant for card services. Watch what happens behind the conversation, and ask for a person at any point.')),
-    h('div.wrap',
-      h('h2', 'Pick something to talk about'), cards,
-      sel ? h('section.detail', { 'aria-label': 'Scenario details' },
-        h('div', h('span.label', 'Selected scenario'), h('h3', sel.title)),
-        h('dl', sel.details.map((d) => h('div', h('dt', d.label), h('dd', d.value)))),
-        sel.verificationHints ? h('p.hint', [h('b', 'Demo helper: '), `Lily will ask for a date of birth — say ${sel.verificationHints.dob}. A passcode appears on the simulated phone on this screen.`]) : null,
-        h('div.cta', h('button.btn.primary.lg', { type: 'button', onclick: () => startJourney(sel) }, 'Connect with Lily'),
-          h('p.small.muted', { style: 'max-width:34rem' }, 'You are speaking with an AI assistant. Your browser will ask for microphone access. Nothing here touches a real account; every customer, card and balance is invented.')),
-        !voiceOk ? h('p.banner', st.reason ?? 'Live voice is not configured on this server. You can still type to Lily.') : null) : h('p.muted', 'No scenarios available.')));
+    const [j, st] = await Promise.all([api('/api/demo/customers'), api('/api/live/status')]);
+    S.cards = j.items; S.demoData = true; S.disclaimer = j.disclaimer; S.bank = j.bank; S.status = st;
+  } catch (e) { S.cards = []; S.status = { available: false, reason: e.message }; S.loadError = e.message; }
+  if (!S.selected || !S.cards.find((c) => c.id === S.selected)) S.selected = S.cards[0]?.id ?? null;
+  drawHome();
 }
 
-/* ------------------------------------------------------------------ connecting */
-async function startJourney(card) {
+function profilePanel(locked) {
+  const sel = S.cards.find((c) => c.id === S.selected);
+  const tabs = h('div.ptabs', { role: 'radiogroup', 'aria-label': 'Choose the demo customer you are calling as' }, S.cards.map((c) =>
+    h('button.ptab', { type: 'button', role: 'radio', 'aria-checked': String(c.id === S.selected), disabled: locked, onclick: () => { S.selected = c.id; drawHome(); } }, c.name.split(' ')[0])));
+  const body = !sel ? h('p.muted', S.loadError ?? 'No demo customers are available.') : h('div.pbody',
+    h('div.pname', h('h3', sel.name), h('span.chip' + (sel.cardStatus === 'active' ? '.ok' : '.warn'), `Card ${sel.cardStatus}`)),
+    h('p.small.muted', sel.blurb),
+    h('dl.facts',
+      h('div', h('dt', 'Phone (fictional)'), h('dd.mono', sel.phone)),
+      h('div', h('dt', 'Account reference'), h('dd.mono', sel.accountRef)),
+      h('div', h('dt', 'Standing'), h('dd', STANDING[sel.accountStanding] ?? sel.accountStanding))),
+    h('div.pan', h('span.label', `${sel.cardNetwork ?? 'Card'} ${sel.cardProduct ?? ''} · full demo card number`.trim()), h('b.mono.pannum', groupPan(sel.cardNumber)), h('span.small', 'Dummy number for testing. Read it to Lily when she asks. Try a wrong one first to see the retry.')),
+    sel.restrictions.length ? h('div', h('span.label', 'Restrictions and alerts'), h('ul.plain', sel.restrictions.map((r) => h('li', r)))) : null,
+    h('div', h('span.label', 'Recent transactions'), sel.recentTransactions.length ? h('ul.tx', sel.recentTransactions.map((t) => h('li', h('span', t.merchant), h('span.mono', t.amount), h('span.small.muted', `${t.at}${t.kind === 'fee' ? ' · fee' : ''}${t.status && t.status !== 'posted' ? ' · ' + t.status : ''}`)))) : h('p.small.muted', 'None.')),
+    sel.declines.length ? h('div', h('span.label', 'Declined payments'), h('ul.tx', sel.declines.map((d) => h('li', h('span', d.merchant), h('span.mono', d.amount), h('span.small.muted', `${d.at} · ${d.reason}`))))) : null);
+  return h('aside.panel.demo', { 'aria-label': 'Demo customers and test data' },
+    h('header', h('h3', 'Demo customers and test data'), h('span.grow'), h('span.chip.demo', S.bank ?? 'Northstar Bank')),
+    h('p.disc', S.disclaimer ?? 'Synthetic data only. Every customer, phone number and card number here is invented for this demonstration.'),
+    tabs, body,
+    locked ? h('p.small.muted', 'The customer is fixed while the call is live. End the call to switch.') : h('p.small.muted', 'Pick who you are calling as. Then just talk. Ask about a charge, a decline, a fee, or anything else.'));
+}
+
+function drawHome() {
+  const st = S.status ?? {};
+  const voiceOk = !!st.available;
+  const host = h('section.callhost', { 'aria-label': 'Call with Lily' });
+  S.host = host;
+  const sel = S.cards.find((c) => c.id === S.selected);
+  host.append(
+    h('div.panel.idle',
+      h('div.status-row', h('span.chip', [h('span.dot' + (voiceOk ? '.ok' : '.warn')), voiceOk ? ' Live voice ready' : ' Live voice unavailable — typing works']), h('span.chip.demo', 'AI assistant · synthetic demo')),
+      h('h1', 'Say it once. Lily handles the rest.'),
+      h('p.lead', `Talk to Lily at ${S.bank ?? 'Northstar Bank'} Card Services. There is nothing to pick. Say what you need, in your own words, and change your mind any time.`),
+      sel ? h('div.cta', h('button.btn.primary.lg', { type: 'button', onclick: () => startCall(sel) }, `Call as ${sel.name.split(' ')[0]}`),
+        h('p.small.muted', 'You are speaking with an AI assistant. Your browser will ask for the microphone. Nothing here touches a real account.')) : null,
+      !voiceOk ? h('p.banner', st.reason ?? 'Live voice is not configured on this server. You can still type to Lily.') : null));
+  render(top(), h('main.single', profilePanel(false), host));
+}
+
+async function startCall(card) {
+  const orb = orbEl('connecting');
   const labels = ['Securing the connection', 'Starting your call session', 'Connecting you with Lily'];
   const list = h('ol.steps', labels.map((l) => h('li', h('span.ic'), l)));
-  const orb = orbEl('connecting');
-  render(top(), h('main.center', h('div.connect', orb.el, h('h2', 'Connecting you with Lily'), list, h('p.small.muted', 'This is a live AI voice call. Fictional customer data only.'))));
-  const mark = (i, err) => [...list.children].forEach((li, k) => { li.className = k < i ? 'done' : k === i ? 'now' : ''; li.firstChild.textContent = k < i ? '✓' : ''; if (err && k === i) li.textContent = err; });
+  S.host.replaceChildren(h('div.panel.connect', orb.el, h('h2', 'Connecting you with Lily'), list));
+  const mark = (i) => [...list.children].forEach((li, k) => { li.className = k < i ? 'done' : k === i ? 'now' : ''; li.firstChild.textContent = k < i ? '✓' : ''; });
   mark(0);
-  // Mic permission must be requested from the click that started the journey.
+  // The microphone prompt must come from the click that started the call.
   const call = new CallController(card);
   S.call = call;
   orb.stop = orb.attach(() => 0.15 + Math.random() * 0.08);
   try {
-    await new Promise((r) => setTimeout(r, 450)); mark(1);
+    await new Promise((r) => setTimeout(r, 350)); mark(1);
     await call.create(); mark(2);
     await call.openVoice();
     orb.stop?.();
     callScreen(call);
   } catch (e) {
     orb.stop?.();
-    render(top(), h('main.center', h('div.connect', h('h2', 'We could not connect'), h('p.banner.bad', e.message || 'Connection failed.'), h('div.cta', h('button.btn.primary', { onclick: landing }, 'Back to scenarios')))));
+    S.host.replaceChildren(h('div.panel.connect', h('h2', 'We could not connect'), h('p.banner.bad', e.message || 'Connection failed.'), h('div.cta', h('button.btn.primary', { onclick: home }, 'Try again'))));
   }
 }
 
@@ -132,7 +152,7 @@ class CallController {
     this.ui = {};
   }
   async create() {
-    const r = await api('/api/calls', { method: 'POST', body: { channel: 'voice_browser', scenarioId: this.card.scenarioId, resetScenario: true } });
+    const r = await api('/api/calls', { method: 'POST', body: { channel: 'voice_browser', profileId: this.card.id } });
     this.id = r.sessionId; this.view = r.view;
   }
   async openVoice() {
@@ -251,15 +271,16 @@ function callScreen(c) {
   orb.attach(() => { const ds = c.displayState; return ds === 'speaking' ? c.player?.level ?? 0 : ds === 'muted' || ds === 'reconnecting' ? 0.03 : ds === 'processing' ? 0.12 + 0.06 * Math.sin(performance.now() / 180) : (c.mic?.level ?? 0.05); });
   const tick = setInterval(() => { if (c.ended) clearInterval(tick); else refresh(); }, 250);
 
-  render(top(h('span.chip.demo', 'Demo data'), h('span.chip.ok', [h('span.dot.ok'), ` ${c.card.persona}`])),
-    h('main.call',
-      h('section.panel', { 'aria-label': 'Live call' },
-        h('header', h('span.dot.run'), h('h3', 'Live call with Lily'), h('span.grow'), h('span.chip', 'AI assistant')),
-        h('div.stage', orb.el, stateEl, subEl),
-        h('div.controls', wrapC(muteBtn, 'Mute'), wrapC(ccBtn, 'Captions'), wrapC(humanBtn, 'Human'), wrapC(endBtn, 'End')),
-        bannerEl, sideEl, transcriptEl, compose),
-      h('aside.panel', { 'aria-label': 'Behind the conversation' },
-        h('header', h('h3', 'Behind the conversation'), h('span.grow'), h('span.small.muted', 'Real events from the backend')), stageEl, actEl)));
+  const wasPanel = document.querySelector('aside.panel.demo');
+  wasPanel?.replaceWith(profilePanel(true));
+  S.host.replaceChildren(
+    h('section.panel', { 'aria-label': 'Live call' },
+      h('header', h('span.dot.run'), h('h3', `Live call with Lily — ${c.card.name}`), h('span.grow'), h('span.chip', 'AI assistant')),
+      h('div.stage', orb.el, stateEl, subEl),
+      h('div.controls', wrapC(muteBtn, 'Mute'), wrapC(ccBtn, 'Captions'), wrapC(humanBtn, 'Human'), wrapC(endBtn, 'End')),
+      bannerEl, sideEl, transcriptEl, compose),
+    h('section.panel', { 'aria-label': 'Behind the conversation' },
+      h('header', h('h3', 'Behind the conversation'), h('span.grow'), h('span.small.muted', 'Real events from the backend, including each verification attempt')), stageEl, actEl));
   drawTranscript(); drawActivity(); refresh();
   if (c.view?.transcript?.length && !c.turns.length) { c.turns = c.view.transcript.map((t, i) => ({ seq: i, speaker: t.speaker, kind: t.kind ?? '', text: t.text })); drawTranscript(); }
   textIn.focus({ preventScroll: true });
@@ -286,8 +307,8 @@ async function summary(c) {
       h('div.box', h('h3', 'What Lily did'),
         h('details.fold', { open: '' }, h('summary', `${tl.length} recorded steps`),
           h('ol.tl', { style: 'margin-top:.8rem' }, tl.map((e) => h('li' + (e.status ? '.' + e.status : ''), h('div.t', { style: 'font-weight:600' }, e.title), e.detail ? h('div.small.muted', e.detail) : null, h('div.small.muted.mono', fmtTime(e.at))))))),
-      h('div.cta', h('button.btn.primary.lg', { onclick: () => { S.selected = null; landing(); } }, 'Start another demo'), h('p.small.muted', 'History stays in the dashboard and audit log.'))));
+      h('div.cta', h('button.btn.primary.lg', { onclick: () => home() }, 'Start another demo'), h('p.small.muted', 'History stays in the dashboard and audit log.'))));
   say('Call ended. Summary ready.');
 }
 
-landing();
+home();
