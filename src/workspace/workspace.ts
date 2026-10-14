@@ -43,10 +43,10 @@ export function buildWorkspace(handoffId: string) {
   const s = get<SessionRow>('SELECT * FROM call_sessions WHERE id = ?', [sessionId])!;
   const ctx = getContext(sessionId);
   const res = buildResolution(sessionId)!;
-  const tags = ctx.tags;
+  const tags = ctx?.tags;
 
   // Active customer: identified from caller ID at the start of the call (identification only).
-  const customerId = ctx.verification.identifiedCustomerId;
+  const customerId = ctx?.verification?.identifiedCustomerId ?? null;
   const cu = customerId ? get<{ id: string; customer_number: string; full_name: string; account_standing: string }>('SELECT id, customer_number, full_name, account_standing FROM bank_customers WHERE id = ?', [customerId]) : undefined;
   const card = customerId ? get<{ last4: string; demo_pan: string | null; status: string; network: string }>('SELECT last4, demo_pan, status, network FROM bank_cards WHERE customer_id = ? ORDER BY id LIMIT 1', [customerId]) : undefined;
   const sc = SCENARIOS.find((x) => x.customer.id === customerId);

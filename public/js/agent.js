@@ -1,33 +1,24 @@
-// Agent console: queue, structured handoff brief, live transcript, approvals, outcome.
-import { api, h, mount, chip, humanise, fmtTime, fmtDateTime, topbar, staffSignin } from './lib.js';
+// Agent workspace (Northstar Bank demo): queue, customer and call, conversation, AI suggestion,
+// knowledge base, prefilled CRM search and case management. Everything shown comes from
+// GET /api/handoffs/:id/workspace; every edit goes back through PATCH and is audited server-side.
+import { api, h, mount, fmtTime, fmtDateTime, topbar, staffSignin } from './lib.js';
 
 mount(document.getElementById('chrome'), topbar('agent'));
 const app = document.getElementById('app');
-const state = { me: null, items: [], selected: null, detail: null, timer: null, filter: 'active' };
 
-const signin = h('div');
-const liveEl = h('span.small.muted', { role: 'status' });
-const queueEl = h('div');
-const briefEl = h('div');
-const sideEl = h('div');
-mount(
-  app,
-  h('div.dash', h('div.panel.filters', h('h1', 'Agent console'), liveEl, h('span.grow'), signin)),
-  h(
-    'main.console',
-    h('aside.panel', h('header', h('h2', 'Calls waiting'), h('span.grow'), h('div.segmented', { role: 'group', 'aria-label': 'Queue filter' }, ['active', 'all'].map((f) => h('button', { 'aria-pressed': String(state.filter === f), onclick: (e) => setFilter(f, e) }, f === 'active' ? 'Active' : 'All')))), queueEl),
-    h('section.panel', briefEl),
-    h('aside.panel', sideEl),
-  ),
-);
+const state = { me: null, items: [], selected: null, ws: null, form: null, crm: null, es: null, live: false, timer: null, flash: null };
+const liveEl = h('span.wx-small.wx-muted', { role: 'status' });
+const signinEl = h('div');
+const queueEl = h('aside.wx-card.wx-q', { 'aria-label': 'Call queue' });
+const centerEl = h('main.wsx-main', { 'aria-label': 'Case' });
+const sideEl = h('aside.wsx-side', { 'aria-label': 'Case management' });
+mount(app, h('div.wsx-bar', h('h1', 'Agent workspace'), h('span.wx-chip', 'Northstar Bank · demo'), liveEl, h('span.spacer'), signinEl), h('div.wsx', queueEl, centerEl, sideEl));
 
-function setFilter(f, e) {
-  state.filter = f;
-  e.target.parentElement.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.textContent.toLowerCase() === f)));
-  loadQueue();
-}
+const PHASE = { waiting: ['warn', 'Waiting'], accepted: ['ok', 'Accepted'], completed: ['neutral', 'Completed'], no_agent: ['bad', 'No agent'], cancelled: ['neutral', 'Cancelled'] };
+const TONE = { ok: 'ok', passed: 'ok', failed: 'bad', locked: 'bad', warn: 'warn', pending: 'warn', blocked: 'bad', issued: 'ok', running: 'warn' };
+const fmtDur = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-staffSignin(signin, {
+staffSignin(signinEl, {
   roles: ['agent'],
   onChange: (me) => {
     state.me = me;
@@ -36,12 +27,11 @@ staffSignin(signin, {
     if (me.authenticated && me.role === 'agent') {
       loadQueue();
       connectLive();
-      // Safety net only: updates normally arrive instantly over the live stream below.
-      state.timer = setInterval(() => { if (!state.live) { loadQueue(); if (state.selected) loadDetail(state.selected, true); } }, 15000);
+      // Safety net only: the live stream normally delivers changes instantly.
+      state.timer = setInterval(() => { tickDuration(); if (!state.live) { loadQueue(); if (state.selected) loadWorkspace(true); } }, 1000);
     } else {
-      mount(queueEl, h('div.section.empty', me.authenticated ? 'This console needs the agent role.' : 'Sign in with a demo agent to see the queue.'));
-      mount(briefEl, h('div.section.empty', 'No call selected.'));
-      mount(sideEl);
+      mount(queueEl, h('div.wx-empty', me.authenticated ? 'This workspace needs the agent role.' : 'Sign in with a demo agent to see the queue.'));
+      mount(centerEl); mount(sideEl);
     }
   },
 });
@@ -54,162 +44,268 @@ function connectLive() {
     state.live = true; setLive();
     let d = {}; try { d = JSON.parse(ev.data); } catch { /* ignore */ }
     clearTimeout(pending);
-    pending = setTimeout(() => { loadQueue(); if (state.selected && state.detail?.handoff?.session_id === d.sessionId) loadDetail(state.selected, true); else if (state.selected && !d.sessionId) loadDetail(state.selected, true); }, 150);
+    pending = setTimeout(() => {
+      loadQueue();
+      if (state.selected && state.ws && (!d.sessionId || d.sessionId === state.ws.call.sessionId)) loadWorkspace(true);
+    }, 200);
   });
   es.onopen = () => { state.live = true; setLive(); loadQueue(); };
   es.onerror = () => { state.live = false; setLive(); };
 }
-function setLive() { signin.dataset.live = state.live ? 'on' : 'off'; liveEl.textContent = state.live ? '● Live — updates instantly' : '○ Reconnecting…'; liveEl.className = 'small ' + (state.live ? 'live-on' : 'live-off'); }
+function setLive() { liveEl.textContent = state.live ? '● Live — new cases and updates arrive instantly' : '○ Reconnecting…'; liveEl.className = 'wx-small ' + (state.live ? 'live-on' : 'live-off'); }
 
+/* ------------------------------------------------------------------ queue */
 async function loadQueue() {
-  try {
-    const { items } = await api('/api/handoffs');
-    state.items = state.filter === 'active' ? items.filter((i) => ['queued', 'connected', 'requested'].includes(i.status)) : items;
-    renderQueue();
-  } catch (e) {
-    mount(queueEl, h('div.section.notice.bad', e.message));
-  }
+  try { state.items = (await api('/api/handoffs')).items; renderQueue(); }
+  catch (e) { mount(queueEl, h('div.wx-empty', e.message)); }
 }
-
 function renderQueue() {
-  if (!state.items.length) return mount(queueEl, h('div.section.empty', state.filter === 'active' ? 'No one is waiting. Place a call in the simulator and ask for a person.' : 'No handoffs yet.'));
-  mount(
-    queueEl,
-    h(
-      'ul.queue',
-      state.items.map((i) =>
-        h(
-          'li',
-          h(
-            'button',
-            { 'aria-pressed': String(state.selected === i.id), onclick: () => { state.selected = i.id; renderQueue(); loadDetail(i.id); } },
-            h('div.line1', h('strong', i.issueLabel ?? 'Issue not identified'), chip(i.status)),
-            h('div.small', i.reasonLabel),
-            h('div.small.muted', `${fmtDateTime(i.requestedAt)} · ${i.priority === 'urgent' ? 'Urgent · ' : ''}${humanise(i.verification)}${i.dataOrigin === 'seeded_illustrative' ? ' · seeded' : ''}`),
-          ),
-        ),
-      ),
-    ),
-  );
+  const groups = [
+    ['Waiting', state.items.filter((i) => ['requested', 'queued'].includes(i.status))],
+    ['Accepted', state.items.filter((i) => i.status === 'connected')],
+    ['Completed', state.items.filter((i) => ['completed', 'no_agent', 'failed', 'cancelled'].includes(i.status)).slice(0, 12)],
+  ];
+  mount(queueEl, h('header', h('h2', 'Call queue'), h('span.spacer'), h('span.wx-chip', `${groups[0][1].length} waiting`)),
+    groups.map(([label, list]) => [
+      h('h3', `${label} (${list.length})`),
+      list.length ? h('ul', list.map((i) => h('li', h('button', { type: 'button', 'aria-pressed': String(state.selected === i.id), onclick: () => select(i.id) },
+        h('span.nm', i.customerName ?? 'Unidentified caller'),
+        h('span.wx-small', i.issueLabel ?? 'Issue not identified'),
+        h('span.wx-small.wx-muted', `${i.reasonLabel} · ${fmtTime(i.requestedAt)}${i.priority === 'urgent' ? ' · urgent' : ''}`))))) : h('div.wx-empty', label === 'Waiting' ? 'No one is waiting. Ask Lily for a person on the customer page.' : 'None.'),
+    ]));
 }
 
-async function loadDetail(id, quiet = false) {
+function select(id) { state.selected = id; state.form = null; state.crm = null; state.flash = null; renderQueue(); loadWorkspace(false); }
+
+/* ------------------------------------------------------------------ workspace */
+async function loadWorkspace(quiet) {
+  const id = state.selected;
+  if (!id) return;
   try {
-    state.detail = await api(`/api/handoffs/${id}`);
-    renderDetail(quiet);
+    const ws = await api(`/api/handoffs/${id}/workspace`);
+    if (id !== state.selected) return;
+    state.ws = ws;
+    ensureForm(ws);
+    syncForm(ws);
+    render();
   } catch (e) {
-    mount(briefEl, h('div.section.notice.bad', e.message));
+    if (!quiet) mount(centerEl, h('div.wx-note.bad', e.message));
   }
 }
 
-const list = (items, empty = 'None') => (items?.length ? h('ul.facts', items.map((t) => h('li.confirmed', t))) : h('p.small.muted', empty));
+const mineOf = (ws) => ws.handoff.agentId && ws.handoff.agentId === state.me?.userId;
+const editable = (ws) => ws.handoff.phase === 'accepted' && mineOf(ws);
 
-function renderDetail(quiet) {
-  const { handoff: hd, call, case: cs } = state.detail;
-  const b = hd.brief;
-  const mine = hd.agent_id === state.me?.userId;
-  const actions = h(
-    'div.row',
-    hd.status === 'queued' ? h('button.primary', { onclick: () => act(`/api/handoffs/${hd.id}/accept`) }, 'Accept call') : null,
-    hd.status === 'connected' && !mine ? h('span.small.muted', 'Connected to another agent.') : null,
-  );
-  const opsTable = b.actions.length
-    ? h(
-        'table',
-        h('thead', h('tr', h('th', 'Action'), h('th', 'Status'), h('th', 'Reference'), h('th', ''))),
-        h(
-          'tbody',
-          (call?.operations ?? []).map((o) =>
-            h(
-              'tr',
-              h('td', o.label),
-              h('td', chip(o.status === 'submitted' ? 'pending' : o.status, o.statusLabel)),
-              h('td.num.small', o.externalRef ?? o.errorCode ?? '—'),
-              h(
-                'td',
-                o.status === 'awaiting_approval' && mine ? [h('button.primary', { onclick: () => act(`/api/actions/${o.id}/approve`) }, 'Approve'), ' ', h('button', { onclick: () => act(`/api/actions/${o.id}/reject`, { reason: 'Rejected by agent after review' }) }, 'Reject')] : null,
-                (o.status === 'unknown' || o.status === 'submitted') && mine ? h('button', { onclick: () => act(`/api/actions/${o.id}/reconcile`) }, 'Check status') : null,
-              ),
-            ),
-          ),
-        ),
-      )
-    : h('p.small.muted', 'No actions were proposed or attempted.');
-
-  mount(
-    briefEl,
-    h(
-      'header.brief-head',
-      h('h2', b.issue.label),
-      chip(hd.status),
-      b.priority === 'urgent' ? chip('failed', 'Urgent') : null,
-      h('span.grow'),
-      h('span.small.muted.num', `Case ${b.caseId ?? '—'} · waited ${hd.waitedSeconds}s`),
-    ),
-    h('div.section', h('div', { class: `next-step${b.priority === 'urgent' ? ' urgent' : ''}` }, b.recommendedNextStep), h('p.small.muted', `Why you have this call: ${b.reasonLabel}${b.reasonDetail ? ` — ${b.reasonDetail}` : ''}`), actions),
-    h(
-      'div.section',
-      h('h3', 'Customer and verification'),
-      h('dl.kv', h('dt', 'Customer'), h('dd', b.customer.name ? `${b.customer.name} (${b.customer.reference})` : 'Not verified — do not discuss the account until you verify the caller'), h('dt', 'Verification'), h('dd', chip(b.customer.verification === 'verified' ? 'verified' : b.customer.verification === 'failed' ? 'failed' : 'pending', humanise(b.customer.verification)))),
-    ),
-    h('div.section', h('h3', 'What the customer said'), b.issue.customerStatement ? h('p.statement', `“${b.issue.customerStatement}”`) : h('p.small.muted', 'No statement captured.')),
-    b.transactions.length
-      ? h('div.section', h('h3', 'Transactions in question'), h('table', h('thead', h('tr', h('th', 'Merchant'), h('th.num', 'Amount'), h('th', 'Date'), h('th', 'Status'), h('th', 'Card'))), h('tbody', b.transactions.map((t) => h('tr', h('td', t.merchant), h('td.num', t.amount), h('td', t.date), h('td', t.status), h('td.num', t.cardLast4 ? `•••• ${t.cardLast4}` : '—'))))))
-      : null,
-    h('div.section', h('h3', 'Confirmed by bank systems'), list(b.findings.confirmed, 'Nothing confirmed yet.'), b.findings.inferred.length ? [h('h3', 'Inferred (not confirmed)'), list(b.findings.inferred)] : null, b.findings.unavailable.length || b.conflicts.length ? [h('h3', 'Unavailable or conflicting'), list([...b.findings.unavailable, ...b.conflicts])] : null),
-    h('div.section', h('h3', 'Actions'), opsTable),
-    b.missingInformation.length ? h('div.section', h('h3', 'Missing information'), list(b.missingInformation)) : null,
-    b.riskFlags.length || b.previousCases.length ? h('div.section', h('h3', 'Risk and history'), h('dl.kv', b.riskFlags.length ? [h('dt', 'Risk flags'), h('dd', b.riskFlags.map(humanise).join(', '))] : null, b.previousCases.length ? [h('dt', 'Previous cases'), h('dd.num', b.previousCases.join(', '))] : null)) : null,
-    b.systemsChecked.length
-      ? h('div.section', h('details', h('summary', `Systems checked (${b.systemsChecked.length}, simulated)`), h('table', h('thead', h('tr', h('th', 'Source'), h('th', 'Status'), h('th.num', 'Latency'), h('th', 'As of'))), h('tbody', b.systemsChecked.map((s) => h('tr', h('td', humanise(s.source)), h('td', chip(s.status === 'ok' && s.stale ? 'pending' : s.status, s.stale ? 'Stale' : humanise(s.status))), h('td.num', `${s.latencyMs} ms`), h('td.small', fmtDateTime(s.asOf))))))))
-      : null,
-  );
-  if (quiet && sideEl.contains(document.activeElement)) {
-    // Don't disturb an agent who is typing: refresh only the transcript.
-    const t = sideEl.querySelector('.transcript');
-    if (t) mount(t, (call?.transcript ?? []).map((x) => h(`div.turn.${x.speaker}`, h('div.speaker', `${humanise(x.speaker)} · ${fmtTime(x.at)}`), h('div.text', x.text))));
-    return;
-  }
-  renderSide(hd, call, cs, mine, quiet);
+/** Edit controls live for the whole time a case is open, so typing is never lost on a refresh. */
+function ensureForm(ws) {
+  if (state.form?.id === ws.handoff.id) return;
+  const dirty = {};
+  const mark = (k) => () => { dirty[k] = true; };
+  const ta = (k, ph, rows = 3) => { const el = h('textarea', { rows, placeholder: ph, maxlength: k === 'notes' ? 3000 : k === 'suggestion' || k === 'resolution' ? 1500 : 800, 'aria-label': ph }); el.addEventListener('input', mark(k)); return el; };
+  const tagInput = h('input', { type: 'text', placeholder: 'Add a tag and press Enter', maxlength: 40, 'aria-label': 'Add tag' });
+  const f = {
+    id: ws.handoff.id, dirty, tags: [], tagsBox: h('div.wx-tags'), tagInput,
+    reason: ta('reason', 'Call-reason summary'), suggestion: ta('suggestion', 'Revised suggested solution (leave empty to keep the AI suggestion)', 4),
+    notes: ta('notes', 'Agent notes (never include card numbers)', 3), resolution: ta('resolution', 'Resolution', 3), nextSteps: ta('nextSteps', 'Next steps', 2),
+    outcome: h('select', { 'aria-label': 'Outcome' }, h('option', { value: 'resolved' }, 'Resolved'), h('option', { value: 'follow_up_required' }, 'Follow-up required'), h('option', { value: 'unresolved' }, 'Unresolved')),
+  };
+  tagInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const v = tagInput.value.trim();
+    if (v && !f.tags.includes(v) && f.tags.length < 12) { f.tags.push(v); dirty.tags = true; tagInput.value = ''; drawTags(f); }
+  });
+  state.form = f;
+}
+function drawTags(f) {
+  const on = state.ws && editable(state.ws);
+  f.tagsBox.replaceChildren(...f.tags.map((t, i) => h('span.wx-tag', t, on ? h('button', { type: 'button', 'aria-label': `Remove tag ${t}`, onclick: () => { f.tags.splice(i, 1); f.dirty.tags = true; drawTags(f); } }, '×') : null)), f.tagInput);
+}
+function syncForm(ws) {
+  const f = state.form;
+  if (!f.dirty.tags) { f.tags = [...(ws.tags.effective ?? [])]; }
+  if (!f.dirty.reason) f.reason.value = ws.reason.agent ?? ws.reason.effective ?? '';
+  if (!f.dirty.suggestion) f.suggestion.value = ws.suggestion.override ?? '';
+  if (!f.dirty.notes) f.notes.value = ws.notes ?? '';
+  if (!f.dirty.resolution) f.resolution.value = ws.resolution.text ?? '';
+  if (!f.dirty.nextSteps) f.nextSteps.value = ws.resolution.nextSteps ?? '';
+  const on = editable(ws);
+  for (const k of ['reason', 'suggestion', 'notes', 'resolution', 'nextSteps']) f[k].disabled = !on;
+  f.tagInput.disabled = !on; f.outcome.disabled = !on;
+  drawTags(f);
 }
 
-function renderSide(hd, call, cs, mine, quiet) {
-  const prevDraft = sideEl.querySelector('#agent-msg')?.value ?? '';
-  const prevNotes = sideEl.querySelector('#notes')?.value ?? '';
-  const turns = call?.transcript ?? [];
-  const msg = h('input#agent-msg', { type: 'text', placeholder: 'Message the caller', 'aria-label': 'Message to caller', value: prevDraft });
-  const outcome = h('select#outcome', h('option', { value: 'resolved' }, 'Resolved'), h('option', { value: 'follow_up_required' }, 'Follow-up required'), h('option', { value: 'unresolved' }, 'Unresolved'));
-  const notes = h('textarea#notes', { rows: 3, placeholder: 'Notes for the case (do not include card numbers)' });
-  notes.value = prevNotes;
-  const repeated = h('input#repeated', { type: 'checkbox' });
-  mount(
-    sideEl,
-    h('header', h('h2', 'Live transcript')),
-    h('div.transcript', { role: 'log' }, turns.map((t) => h(`div.turn.${t.speaker}`, h('div.speaker', `${humanise(t.speaker)} · ${fmtTime(t.at)}`), h('div.text', t.text)))),
-    hd.status === 'connected' && mine
-      ? h(
-          'div.composer',
-          h('form', { onsubmit: async (e) => { e.preventDefault(); if (!msg.value.trim()) return; await act(`/api/handoffs/${hd.id}/message`, { text: msg.value.trim() }); msg.value = ''; } }, msg, h('button.primary', { type: 'submit' }, 'Send')),
-          h('div.section', h('h3', 'Finish the call'), h('label', { for: 'outcome' }, 'Outcome'), outcome, h('label', { for: 'notes' }, 'Notes'), notes, h('label', repeated, ' The customer had to repeat their issue'), h('div', h('button.primary', { onclick: () => act(`/api/handoffs/${hd.id}/complete`, { outcome: outcome.value, notes: notes.value, customerRepeatedIssue: repeated.checked }) }, 'Complete call'))),
-        )
-      : null,
-    cs ? h('div.section', h('h3', `Case ${cs.id}`), h('div.summary-text', cs.summary ?? '—')) : null,
-  );
-  const t = sideEl.querySelector('.transcript');
-  if (t) t.scrollTop = t.scrollHeight;
-  if (quiet && document.activeElement?.id === 'agent-msg') sideEl.querySelector('#agent-msg')?.focus();
+let durEl = null;
+function tickDuration() {
+  const ws = state.ws;
+  if (!ws || !durEl || ws.call.status === 'ended') return;
+  durEl.textContent = fmtDur(Math.max(0, Math.round((Date.now() - Date.parse(ws.call.startedAt)) / 1000)));
 }
 
-async function act(url, body = {}) {
+function render() {
+  const ws = state.ws;
+  const f = state.form;
+  const [ptone, plabel] = PHASE[ws.handoff.phase] ?? ['neutral', ws.handoff.phase];
+  const secs = ws.call.status === 'ended' ? ws.call.durationSeconds : Math.max(0, Math.round((Date.now() - Date.parse(ws.call.startedAt)) / 1000));
+  durEl = h('b.wx-mono', fmtDur(secs));
+  const vTone = ws.verification.status === 'verified' ? 'ok' : ws.verification.status === 'failed' || ws.verification.failedCardAttempts >= 3 ? 'bad' : 'warn';
+
+  // The suggestion keeps its own revision box; the AI text is never overwritten.
+  const sg = ws.suggestion;
+  const suggestion = h('section.wx-card.wx-sugg', { 'aria-label': 'Suggested solution' },
+    h('header', h('h2', 'Suggested solution'), h('span.wx-chip.ai', 'AI recommendation'), h('span.wx-chip.warn', 'Not a confirmed action'), h('span.spacer'), sg.override ? h('span.wx-chip.ok', 'Revised by agent') : null),
+    h('div.wx-pad',
+      h('p.wx-small.wx-muted', sg.notice),
+      sg.override ? h('div.wx-box', h('div.wx-sub', 'Agent’s revised solution'), h('p.wx-sugg-text', sg.override)) : null,
+      h('div', h('div.wx-sub', sg.override ? 'Original AI suggestion' : 'Lily’s suggested next step'), h('p.wx-sugg-text', sg.text)),
+      h('div.wx-two',
+        h('div.wx-box', h('div.wx-sub', 'Why this is suggested'), h('ul', sg.reasoning.map((r) => h('li', r)))),
+        h('div.wx-box', h('div.wx-sub', 'Facts it relies on'), sg.supportingFacts.length ? h('ul', sg.supportingFacts.map((r) => h('li', r))) : h('p.wx-small.wx-muted', 'No account facts confirmed yet.'))),
+      h('div.wx-two',
+        h('div.wx-box.confirmed', h('div.wx-sub', 'Confirmed by bank systems'), sg.confirmedActions.length ? h('ul', sg.confirmedActions.map((r) => h('li', r))) : h('p.wx-small.wx-muted', 'No action has been confirmed.')),
+        h('div.wx-box', h('div.wx-sub', 'Not confirmed — do not tell the customer it happened'), sg.notConfirmed.length ? h('ul', sg.notConfirmed.map((r) => h('li', r))) : h('p.wx-small.wx-muted', 'Nothing pending.'))),
+      h('div.wx-form', h('label', 'Revise the suggestion'), f.suggestion)));
+
+  const custCard = h('section.wx-card', { 'aria-label': 'Customer and call' },
+    h('header', h('h2', 'Customer and call'), h('span.spacer'), h('span.wx-chip.' + ptone, plabel), h('span.wx-chip.' + (ws.call.status === 'live' ? 'ok' : 'neutral'), ws.call.status === 'live' ? 'Call live' : 'Call ended')),
+    h('div.wx-pad.wx-cust',
+      h('div.wx-cust-top', h('h2', ws.customer.name), h('span.wx-chip.' + vTone, `Verification: ${ws.verification.status.replace(/_/g, ' ')}`), h('span.wx-chip.neutral', ['Duration ', durEl])),
+      h('dl.wx-grid',
+        h('div', h('dt', 'Phone (fictional)'), h('dd.wx-mono', ws.customer.phone ?? '—')),
+        h('div', h('dt', 'Account reference'), h('dd.wx-mono', ws.customer.accountRef ?? '—')),
+        h('div', h('dt', 'Card status'), h('dd', ws.customer.cardStatus ?? '—')),
+        h('div', h('dt', 'Demo card number'), h('dd', h('span.wx-pan', ws.customer.cardNumber ?? '—'), h('div.wx-pan-note', ws.customer.notice)))),
+      h('div', h('div.wx-sub', 'Intents'), h('div.wx-chips', h('span.wx-chip', `Primary: ${ws.intents.primary.label}`), ws.intents.secondary.map((s) => h('span.wx-chip.neutral', `Also: ${s.label ?? s}`)))),
+      h('div.wx-small.wx-muted', `Handover reason: ${ws.handoff.reasonLabel}. Requested ${fmtTime(ws.handoff.requestedAt)}.`)));
+
+  const convo = h('section.wx-card', { 'aria-label': 'Conversation' },
+    h('header', h('h2', 'Conversation'), h('span.spacer'), h('span.wx-small.wx-muted', `${ws.transcript.length} messages`)),
+    h('div.wx-pad',
+      h('div', h('div.wx-sub', 'AI summary'), h('p', ws.aiSummary)),
+      h('div.wx-two',
+        h('div.wx-box', h('div.wx-sub', 'Customer concerns'), ws.concerns.length ? h('ul', ws.concerns.map((c) => h('li', c))) : h('p.wx-small.wx-muted', 'None captured.')),
+        h('div.wx-box', h('div.wx-sub', 'Unresolved'), ws.unresolved.length ? h('ul', ws.unresolved.map((c) => h('li', typeof c === 'string' ? c : c.text))) : h('p.wx-small.wx-muted', 'Nothing flagged.')))),
+    h('div.wx-log', { role: 'log', 'aria-label': 'Transcript' }, ws.transcript.map((t) => {
+      const sp = t.speaker === 'customer' ? 'customer' : t.speaker === 'assistant' ? 'assistant' : t.speaker === 'agent' ? 'agent' : 'system';
+      return h(`div.wx-msg.${sp}${t.hidden ? '.hidden' : ''}`, h('div.who', { 'aria-label': `${sp} at ${fmtTime(t.at)}` }, { customer: 'Customer', assistant: 'Lily (AI)', agent: 'Agent', system: 'System' }[sp], h('small', fmtTime(t.at))), h('div.txt', t.hidden ? 'Sensitive answer given — not stored' : t.text));
+    })));
+
+  const verif = h('section.wx-card', { 'aria-label': 'Verification and activity' },
+    h('header', h('h2', 'Verification and backend activity'), h('span.spacer'), h('span.wx-chip.neutral', 'Synthetic demo check')),
+    h('div.wx-pad',
+      ws.verification.attempts.length ? h('table.wx-table', h('thead', h('tr', h('th', 'Time'), h('th', 'Step'), h('th', 'Method'), h('th', 'Result'))),
+        h('tbody', ws.verification.attempts.map((a) => h('tr', h('td.wx-mono', fmtTime(a.at)), h('td', a.step), h('td', a.method), h('td', h('span.wx-chip.' + (TONE[a.outcome] ?? 'neutral'), a.outcome + (a.reason ? ` · ${a.reason}` : ''))))))) : h('p.wx-small.wx-muted', 'No verification attempts recorded.'),
+      ws.verification.failedCardAttempts ? h('p.wx-small', `Failed card-number attempts: ${ws.verification.failedCardAttempts} of 3. The expected number is never shown to Lily or the customer.`) : null,
+      h('div.wx-sub', 'Lookups and actions'),
+      h('ul.wx-act', ws.activity.filter((e) => !/^voice\./.test(e.type)).map((e) => h('li', h('span.wx-dot' + ({ ok: '.ok', warn: '.warn', pending: '.warn', failed: '.bad', blocked: '.bad' }[e.status] ?? ''), ''), h('div', h('div', e.title), e.detail ? h('div.d', e.detail) : null), h('span.wx-small.wx-muted', fmtTime(e.at))))),
+      ws.actions.length ? h('div.wx-sub', 'Operations') : null,
+      ws.actions.length ? h('ul.wx-list', ws.actions.map((a) => h('li', typeof a === 'string' ? a : `${a.label ?? a.text ?? JSON.stringify(a)}${a.statusLabel ? ` — ${a.statusLabel}` : ''}`))) : null));
+
+  mount(centerEl, h('div.wsx-stack', custCard, suggestion, convo, verif));
+  mount(sideEl, h('div.wsx-stack', caseCard(ws, f), kbCard(ws), crmCard(ws)));
+}
+
+/* ------------------------------------------------------------------ case management */
+function caseCard(ws, f) {
+  const ph = ws.handoff.phase;
+  const on = editable(ws);
+  const note = state.flash ? h('div.wx-note.' + state.flash.kind, { role: 'status' }, state.flash.text) : null;
+  const accept = ph === 'waiting' ? h('button.wx-btn.primary', { type: 'button', onclick: () => accept_(ws) }, 'Accept handover') : null;
+  const state_ = ph === 'waiting' ? h('div.wx-note.warn', 'Waiting. The customer sees “Waiting for a human agent” until you accept.')
+    : ph === 'accepted' ? (mineOf(ws) ? h('div.wx-note.ok', `Accepted${ws.handoff.connectedAt ? ' at ' + fmtTime(ws.handoff.connectedAt) : ''}. You can edit the case.`) : h('div.wx-note', 'Accepted by another agent. Read-only.'))
+      : h('div.wx-note', `Completed${ws.handoff.outcome ? ': ' + ws.handoff.outcome.replace(/_/g, ' ') : ''}. Read-only.`);
+  return h('section.wx-card', { 'aria-label': 'Case management' },
+    h('header', h('h2', 'Case management'), h('span.spacer'), h('span.wx-chip.' + (PHASE[ph]?.[0] ?? 'neutral'), PHASE[ph]?.[1] ?? ph)),
+    h('div.wx-pad.wx-form',
+      state_, accept, note,
+      h('div', h('label', 'Call tags'), f.tagsBox),
+      h('div', h('label', 'Call-reason summary'), f.reason),
+      h('div', h('label', 'Agent notes'), f.notes),
+      h('div', h('label', 'Resolution'), f.resolution),
+      h('div', h('label', 'Next steps'), f.nextSteps),
+      h('div.wx-row', h('button.wx-btn.primary', { type: 'button', disabled: !on, onclick: save }, 'Save changes'), h('span.wx-small.wx-muted', ws.editedAt ? `Last saved ${fmtTime(ws.editedAt)}` : 'Not edited yet')),
+      h('div', h('label', 'Outcome when finishing'), f.outcome),
+      h('div.wx-row', h('button.wx-btn', { type: 'button', disabled: !on, onclick: complete }, 'Complete case')),
+      ws.edits.length ? h('details', h('summary.wx-small', `Edit history (${ws.edits.length}, audited)`), h('ul.wx-trail', ws.edits.map((e) => h('li', `${fmtTime(e.at)} — ${e.field.replace(/_/g, ' ')} by ${e.by}`)))) : null));
+}
+
+function flash(kind, text) { state.flash = { kind, text }; if (state.ws) render(); }
+
+async function accept_(ws) {
+  try { await api(`/api/handoffs/${ws.handoff.id}/accept`, { method: 'POST', body: {} }); state.flash = { kind: 'ok', text: 'Handover accepted. The customer has been told an agent has joined.' }; await loadQueue(); await loadWorkspace(); }
+  catch (e) { flash('bad', e.message); }
+}
+
+function patchBody(f) {
+  const b = {};
+  if (f.dirty.tags) b.tags = f.tags;
+  if (f.dirty.reason) b.reasonSummary = f.reason.value;
+  if (f.dirty.suggestion) b.suggestion = f.suggestion.value;
+  if (f.dirty.notes) b.notes = f.notes.value;
+  if (f.dirty.resolution) b.resolution = f.resolution.value;
+  if (f.dirty.nextSteps) b.nextSteps = f.nextSteps.value;
+  return b;
+}
+async function save() {
+  const f = state.form; const ws = state.ws;
+  const body = patchBody(f);
+  if (!Object.keys(body).length) return flash('warn', 'Nothing has changed.');
   try {
-    await api(url, { method: 'POST', body });
-    await loadQueue();
-    if (state.selected) await loadDetail(state.selected);
-  } catch (e) {
-    alertBox(e);
-  }
+    await api(`/api/handoffs/${ws.handoff.id}/workspace`, { method: 'PATCH', body });
+    for (const k of Object.keys(f.dirty)) delete f.dirty[k];
+    state.flash = { kind: 'ok', text: `Saved at ${fmtTime(new Date().toISOString())}. The change is recorded in the audit log.` };
+    await loadWorkspace();
+  } catch (e) { flash('bad', e.details?.issues?.[0]?.message ?? e.message); }
+}
+async function complete() {
+  const f = state.form; const ws = state.ws;
+  try {
+    if (Object.keys(patchBody(f)).length) { await api(`/api/handoffs/${ws.handoff.id}/workspace`, { method: 'PATCH', body: patchBody(f) }); for (const k of Object.keys(f.dirty)) delete f.dirty[k]; }
+    await api(`/api/handoffs/${ws.handoff.id}/complete`, { method: 'POST', body: { outcome: f.outcome.value, notes: (f.resolution.value || f.notes.value || '').slice(0, 2000), customerRepeatedIssue: false } });
+    state.flash = { kind: 'ok', text: 'Case completed.' };
+    await loadQueue(); await loadWorkspace();
+  } catch (e) { flash('bad', e.message); }
 }
 
-function alertBox(e) {
-  briefEl.prepend(h('div.section', h('div.notice.bad', `${e.message}${e.code ? ` (${e.code})` : ''}`)));
+/* ------------------------------------------------------------------ knowledge base */
+function kbCard(ws) {
+  return h('section.wx-card', { 'aria-label': 'Knowledge base' },
+    h('header', h('h2', 'Relevant knowledge'), h('span.spacer'), h('span.wx-chip.warn', 'Illustrative demo policy')),
+    h('div.wx-pad',
+      ws.knowledge.length ? ws.knowledge.map((k) => h('article.wx-kb',
+        h('h4', `${k.id} · ${k.title}`),
+        h('p.wx-small', k.excerpt),
+        h('p.wx-small', h('b', 'Why it is relevant: '), k.reason || 'matches the call'),
+        k.ruleRefs?.length ? h('div.wx-chips', k.ruleRefs.map((r) => h('span.wx-chip.neutral', r))) : null,
+        k.steps?.length ? h('details', h('summary', 'Steps'), h('ol.wx-list', k.steps.map((s) => h('li', s)))) : null,
+        h('p.wx-small.wx-muted', k.notice))) : h('p.wx-small.wx-muted', 'No article matched this call.')));
+}
+
+/* ------------------------------------------------------------------ CRM */
+function crmCard(ws) {
+  if (!state.crm) state.crm = { q: ws.crm.query, input: h('input', { type: 'text', 'aria-label': 'CRM search', maxlength: 200 }), result: null, err: null, busy: false, id: ws.handoff.id };
+  const c = state.crm;
+  if (!c.touched) { c.q = ws.crm.query; c.input.value = c.q; }
+  c.input.oninput = () => { c.touched = true; c.q = c.input.value; };
+  c.input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } };
+  async function search() {
+    c.q = c.input.value; c.busy = true; c.err = null;
+    try { c.result = await api(`/api/crm/search?q=${encodeURIComponent(c.q)}&sessionId=${encodeURIComponent(ws.call.sessionId)}`); }
+    catch (e) { c.err = e.message; c.result = null; }
+    c.busy = false;
+    render();
+  }
+  const r = c.result;
+  return h('section.wx-card', { 'aria-label': 'CRM search' },
+    h('header', h('h2', 'CRM search'), h('span.spacer'), h('span.wx-chip.neutral', 'Synthetic records')),
+    h('div.wx-pad.wx-form',
+      h('p.wx-small.wx-muted', 'Prefilled from the call: name, phone, account reference and intent. Edit it freely. Card numbers are refused.'),
+      h('div.wx-row', c.input, h('button.wx-btn.primary', { type: 'button', onclick: search, disabled: c.busy }, c.busy ? 'Searching…' : 'Search')),
+      c.err ? h('div.wx-note.bad', c.err) : null,
+      r ? [
+        h('div.wx-sub', `Customers (${r.customers.length})`),
+        r.customers.length ? r.customers.map((x) => h('div.wx-rec', h('b', x.name), h('span.wx-small', `Account ${x.accountRef} · ${x.phone}`), h('span.wx-small.wx-muted', `Card ••••${x.cardLast4 ?? '—'} (${x.cardStatus ?? '—'}) · matched on ${x.matchedOn.join(', ')}`))) : h('p.wx-small.wx-muted', 'No matching customers.'),
+        h('div.wx-sub', `Cases (${r.cases.length})`),
+        r.cases.length ? r.cases.map((x) => h('div.wx-rec', h('b', `${x.id} · ${x.issue}`), h('span.wx-small', `${x.customer ?? 'Unidentified'} · ${x.status} · ${fmtDateTime(x.createdAt)}`), x.summary ? h('span.wx-small.wx-muted', x.summary) : null)) : h('p.wx-small.wx-muted', 'No matching cases.'),
+      ] : null));
 }

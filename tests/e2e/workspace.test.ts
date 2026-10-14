@@ -210,3 +210,17 @@ describe('real-time delivery to the agent console', () => {
     expect(seen).toMatch(/handoff\.(requested|queued|created)/);
   });
 });
+
+describe('seeded history', () => {
+  it('opens the workspace for a seeded historical handover without crashing', async () => {
+    await app.close();
+    app = await setup({ history: true });
+    const cookie = await staffLogin(app, 'STF-AGENT-1');
+    const list = (await app.inject({ method: 'GET', url: '/api/handoffs', headers: { cookie } })).json().items;
+    expect(list.length).toBeGreaterThan(0);
+    for (const i of list.slice(0, 40)) {
+      const r = await app.inject({ method: 'GET', url: `/api/handoffs/${i.id}/workspace`, headers: { cookie } });
+      expect(r.statusCode, i.id).toBe(200);
+    }
+  });
+});
