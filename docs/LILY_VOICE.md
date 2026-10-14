@@ -66,3 +66,9 @@ Tested automatically (`tests/e2e/live.test.ts`, `tests/e2e/frontend.test.ts`): t
 ## Languages and scope
 The customer screen is English only. A picker chooses the call language (English, Burmese or Tagalog), sent as `?lang=en|my|fil` on the live WebSocket. Lily speaks and understands that language. Backend replies and the agent workspace stay in English. Burmese voice quality on the native-audio model is not verified from the build sandbox.
 Lily answers any banking or personal-finance question from general knowledge. Facts about the test account come only from tools (`get_account_details`, `handle_banking_request`) after card-number verification. Balances and limits are not in the demo data.
+
+## Card collection, ending a call and post-call analysis
+Card collection reads back only the last four digits, waits for a yes, and uses the corrected number if the caller changes it. The full number is held in memory until confirmed and is never stored. The check has a time limit (`cardCheckTimeoutMs`, 4 s), retries once, drops duplicate checks for the same call, and reports `verified`, `not_verified`, `temporarily_unavailable` or `invalid_input`. A timeout uses no attempt. Timing and outcome counts come from `cardCheckMetrics()`.
+End Call and Transfer are separate. Ending is idempotent, saves the transcript, then runs analysis, which has its own status (`pending`, `ready`, `failed`) and can be retried with `POST /api/calls/:id/analysis/retry`. A transfer marks the call `transferring` until an agent accepts. Lifecycle comes from `lifecycle()`: active, transferring, connected_to_agent, completed, failed.
+`GET /api/calls/:id/transcript` returns every segment in order with a count. `GET /api/calls/:id/analysis` returns summary, reason, resolution, suggested solutions and knowledge. Agents see ended calls under "Ended calls" in `/agent.html`.
+Resolution values: resolved, partially_resolved, unresolved, escalated, informational.

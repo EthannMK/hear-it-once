@@ -20,6 +20,8 @@ async function startProfile(id = 'alex-morgan') {
 }
 const wrongNumber = (n: string) => n.slice(0, -1) + String((Number(n.slice(-1)) + 1) % 10);
 const digits = (s: string) => s.replace(/\D/g, '');
+/** Reads the card number, then confirms the read-back, as a caller would. */
+async function sayCard(c: Caller, n: string) { await c.say(n); await c.say('yes, that is correct'); }
 
 async function handoffFor(c: Caller) {
   const h = get<{ id: string }>('SELECT id FROM handoffs WHERE session_id = ?', [c.sessionId]);
@@ -40,14 +42,14 @@ describe('demo data and free conversation', () => {
     expect(c.session().verification_mode).toBe('card_number');
     await c.say('I do not recognise a charge on my card');
     expect(c.view.transcript.some((t: any) => t.speaker !== 'customer')).toBe(true);
-    await c.say(profile.cardNumber);
+    await sayCard(c, profile.cardNumber);
     expect(c.session().verification_status).toBe('verified');
   });
 
   it('never reveals the expected card number in what the caller sees', async () => {
     const { c, profile } = await startProfile();
     await c.say('I do not recognise a charge on my card');
-    await c.say(wrongNumber(profile.cardNumber));
+    await sayCard(c, wrongNumber(profile.cardNumber));
     expect(c.transcriptText()).not.toContain(digits(profile.cardNumber));
     expect(JSON.stringify(c.view)).not.toContain(digits(profile.cardNumber));
   });
@@ -57,10 +59,10 @@ describe('card-number verification', () => {
   it('wrong number fails with attempts remaining, then a correct retry verifies and context is kept', async () => {
     const { c, profile } = await startProfile();
     await c.say('I do not recognise a charge on my card');
-    await c.say(wrongNumber(profile.cardNumber));
+    await sayCard(c, wrongNumber(profile.cardNumber));
     expect(c.session().verification_status).not.toBe('verified');
     expect(c.lastAssistant()).toMatch(/2/);
-    await c.say(profile.cardNumber);
+    await sayCard(c, profile.cardNumber);
     expect(c.session().verification_status).toBe('verified');
     const attempts = all<any>('SELECT outcome AS result FROM verification_attempts WHERE session_id = ? AND step = ? ORDER BY id', [c.sessionId, 'card']);
     expect(attempts.map((a) => a.result)).toEqual(['failed', 'passed']);
@@ -71,7 +73,7 @@ describe('card-number verification', () => {
     const { c, profile } = await startProfile();
     await c.say('I do not recognise a charge on my card');
     const bad = wrongNumber(profile.cardNumber);
-    await c.say(bad); await c.say(bad); await c.say(bad);
+    await sayCard(c, bad); await sayCard(c, bad); await sayCard(c, bad);
     expect(c.session().verification_status).not.toBe('verified');
     const h = get<any>('SELECT * FROM handoffs WHERE session_id = ?', [c.sessionId]);
     expect(h).toBeTruthy();
@@ -83,8 +85,8 @@ describe('card-number verification', () => {
   it('records each attempt in the activity timeline without any card number', async () => {
     const { c, profile } = await startProfile();
     await c.say('I do not recognise a charge on my card');
-    await c.say(wrongNumber(profile.cardNumber));
-    await c.say(profile.cardNumber);
+    await sayCard(c, wrongNumber(profile.cardNumber));
+    await sayCard(c, profile.cardNumber);
     const tl = (await app.inject({ method: 'GET', url: `/api/calls/${c.sessionId}/timeline`, headers: { 'x-call-token': c.token } })).json();
     const types = JSON.stringify(tl);
     expect(types).toMatch(/verification\.retry/);
@@ -99,7 +101,7 @@ describe('intent, lookups, KB and tags', () => {
   it('looks up the real transaction for the active customer and changes topic mid-call', async () => {
     const { c, profile } = await startProfile('alex-morgan');
     await c.say('I do not recognise a charge on my card');
-    await c.say(profile.cardNumber);
+    await sayCard(c, profile.cardNumber);
     expect(c.session().verification_status).toBe('verified');
     const first = c.session().issue_type;
     expect(first).toBeTruthy();
@@ -117,7 +119,7 @@ describe('intent, lookups, KB and tags', () => {
   it('retrieves a relevant knowledge-base article for the issue', async () => {
     const { c, profile } = await startProfile('jamie-tan');
     await c.say('my card payment was declined');
-    await c.say(profile.cardNumber);
+    await sayCard(c, profile.cardNumber);
     expect(c.view.knowledge.length).toBeGreaterThan(0);
   });
 });
@@ -126,7 +128,7 @@ describe('handover and agent workspace', () => {
   async function waitingCase() {
     const { c, profile } = await startProfile('alex-morgan');
     await c.say('I do not recognise a charge on my card');
-    await c.say(wrongNumber(profile.cardNumber));
+    await sayCard(c, wrongNumber(profile.cardNumber));
     await c.say('I want to speak to a human agent');
     const hid = await handoffFor(c);
     const cookie = await staffLogin(app, 'STF-AGENT-1');

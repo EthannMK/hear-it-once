@@ -18,6 +18,23 @@ import { nowIso } from '../lib/clock.ts';
 import { audit, type Actor } from '../audit/audit.ts';
 import { parseCardNumber, parseCustomerNumber, parseDob, parseOtp } from '../ai/parsers.ts';
 
+/** Application-level result of one card-number check. The model never decides these. */
+export type CardOutcome = 'verified' | 'not_verified' | 'ambiguous' | 'temporarily_unavailable' | 'invalid_input';
+
+const cardChecksInFlight = new Set<string>();
+const metrics = { total: 0, totalMs: 0, maxMs: 0, byOutcome: { verified: 0, not_verified: 0, ambiguous: 0, temporarily_unavailable: 0, invalid_input: 0 } as Record<CardOutcome, number> };
+function noteCardOutcome(o: CardOutcome, ms: number): void {
+  metrics.total++; metrics.totalMs += ms; metrics.maxMs = Math.max(metrics.maxMs, ms); metrics.byOutcome[o]++;
+}
+/** Timing and outcome counters for card checks. Contains no card data. */
+export const cardCheckMetrics = () => ({ checks: metrics.total, avgMs: metrics.total ? Math.round(metrics.totalMs / metrics.total) : 0, maxMs: metrics.maxMs, outcomes: { ...metrics.byOutcome } });
+
+/** One bounded attempt, retried once on error or timeout. A "no match" answer is a result, not an error. */
+async function checkCardWithRetry(fn: () => Promise<boolean>, timeoutMs: number): Promise<boolean> {
+  const once = () => Promise.race([fn(), new Promise<boolean>((_, rej) => setTimeout(() => rej(new Error('card check timed out')), timeoutMs).unref?.())]);
+  try { return await once(); } catch { return await once(); }
+}
+
 export type VerificationStatus = 'not_started' | 'identifying' | 'awaiting_dob' | 'awaiting_otp' | 'awaiting_card' | 'verified' | 'failed';
 
 export interface VerificationState {
@@ -55,6 +72,10 @@ export type VerificationEvent =
   | { type: 'otp_sent'; deliveredTo: string }
   | { type: 'retry'; step: 'identify' | 'dob' | 'otp' | 'card'; remaining: number; unparsed: boolean }
   | { type: 'verified' }
+  /** The check could not run (timeout or error). No attempt was used and nothing was decided. */
+  | { type: 'unavailable'; step: 'card'; latencyMs: number }
+  /** Another check for this call is already running; the duplicate was dropped. */
+  | { type: 'in_progress' }
   | { type: 'locked'; step: 'identify' | 'dob' | 'otp' | 'card' };
 
 interface Ctx {
@@ -119,10 +140,26 @@ export async function submitVerificationAnswer(ctx: Ctx, s: VerificationState, a
     const maxTries = cfg.maxCardAttempts;
     const number = parseCardNumber(answer);
     // Too little was captured to be an answer: ask again without using up an attempt.
-    if (!number) return { type: 'retry', step: 'card', remaining: maxTries - (s.cardAttempts ?? 0), unparsed: true };
+    if (!number) { noteCardOutcome('invalid_input', 0); return { type: 'retry', step: 'card', remaining: maxTries - (s.cardAttempts ?? 0), unparsed: true }; }
+    // A repeated tool call or speech event must not start a second check for the same call.
+    if (cardChecksInFlight.has(ctx.sessionId)) return { type: 'in_progress' };
+    cardChecksInFlight.add(ctx.sessionId);
+    const t0 = Date.now();
+    let ok: boolean;
+    try {
+      ok = await checkCardWithRetry(() => a.checkCardNumber(actx, s.identifiedCustomerId!, number), cfg.cardCheckTimeoutMs);
+    } catch {
+      const latencyMs = Date.now() - t0;
+      noteCardOutcome('temporarily_unavailable', latencyMs);
+      audit({ actor: ctx.actor, event: 'verification.card_unavailable', status: 'failed', resourceType: 'session', resourceId: ctx.sessionId, sessionId: ctx.sessionId, correlationId: ctx.correlationId, metadata: { latencyMs } });
+      return { type: 'unavailable', step: 'card', latencyMs };
+    } finally {
+      cardChecksInFlight.delete(ctx.sessionId);
+    }
+    const latencyMs = Date.now() - t0;
     s.cardAttempts = (s.cardAttempts ?? 0) + 1;
-    const ok = await a.checkCardNumber(actx, s.identifiedCustomerId, number);
     if (ok) {
+      noteCardOutcome('verified', latencyMs);
       s.status = 'verified';
       s.level = 'standard';
       s.verifiedAt = nowIso();
@@ -130,6 +167,7 @@ export async function submitVerificationAnswer(ctx: Ctx, s: VerificationState, a
       syncSession(ctx, s);
       return { type: 'verified' };
     }
+    noteCardOutcome('not_verified', latencyMs);
     if (s.cardAttempts >= maxTries) return lock(ctx, s, 'card', 'card_number');
     // The supplied number is never stored or logged — only that it did not match.
     record(ctx, s.identifiedCustomerId, 'card', 'card_number', 'failed', 'mismatch');

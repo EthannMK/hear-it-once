@@ -310,9 +310,21 @@ function callScreen(c) {
 }
 
 /* ------------------------------------------------------------------ summary */
+/** Post-call analysis has its own status. A failed one says so and offers a retry; the call itself is already saved. */
+function analysisBox(an, c) {
+  if (!an || an.status === 'not_started') return null;
+  if (an.status === 'failed') return h('div.box', h('h3', 'Call analysis'), h('p.banner.bad', 'The analysis did not finish. Your call and transcript are saved.'), h('button.btn', { type: 'button', onclick: async () => { try { await api(`/api/calls/${c.id}/analysis/retry`, { method: 'POST', body: {} }); } catch { /* shown again below */ } summary(c); } }, 'Retry analysis'));
+  if (an.status !== 'ready') return h('div.box', h('h3', 'Call analysis'), h('p.small.muted', 'Still being prepared.'));
+  return h('div.box', h('h3', 'Call analysis'), h('p', an.summary),
+    h('p.small', h('b', 'Reason: '), `${an.reason?.label ?? 'Unknown'}${an.reason?.secondary?.length ? ' (also ' + an.reason.secondary.join(', ') + ')' : ''}`, ' · ', h('b', 'Resolution: '), String(an.resolution ?? '').replace('_', ' ')),
+    an.tags?.length ? h('p', an.tags.map((x) => h('span.chip', x))) : null);
+}
+
 async function summary(c) {
   let r = null;
+  let an = null;
   try { r = await api(`/api/calls/${c.id}/brief`); } catch { /* fall back to what we have */ }
+  try { an = await api(`/api/calls/${c.id}/analysis`); } catch { /* analysis is shown only when available */ }
   const actions = r?.actions ?? []; const tl = (r?.timeline ?? c.events).filter((e) => !/^voice\./.test(e.type) || /lost|session_limit/.test(e.type));
   const esc = r?.escalation;
   const bucketCls = { completed: 'ok', blocked: 'bad', failed: 'bad', pending: 'warn', awaiting_confirmation: 'warn' };
@@ -321,6 +333,7 @@ async function summary(c) {
     h('main.summary',
       h('div', h('span.chip.demo', t('demoCall')), h('h1', t('summary'))),
       h('div.box', h('span.label', t('outcome')), h('h2', r?.headline ?? t('ended')), h('p.muted', r?.nextStep ?? ''), esc ? h('p', h('span.chip' + (esc.status === 'connected' || esc.status === 'completed' ? '.ok' : '.warn'), `Handover: ${esc.status}`), ` ${esc.reasonLabel}`) : null),
+      analysisBox(an, c),
       h('div.grid2',
         h('div.box', h('h3', t('told')), list(r?.customerSaid, t('noDetails'))),
         h('div.box', h('h3', t('confirmed')), list(r?.verifiedFacts, t('nothingConfirmed')))),

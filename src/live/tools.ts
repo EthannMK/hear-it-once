@@ -90,7 +90,7 @@ async function dispatch(name: string, args: Record<string, unknown>, c: ToolCont
       const ctx0 = getContext(c.sessionId);
       if (ctx0.stage !== 'awaiting_card') return { ok: false, error: 'not_expecting_a_card_number', ...stateSummary(c.sessionId), message: 'The back end is not asking for a card number right now. Do not collect one. Use the banking tool for what the customer said.' };
       const text = c.customerText.trim();
-      if (text.replace(/\D/g, '').length < 1) return { ok: false, error: 'no_card_number_heard', message: 'No card number was heard. Ask the customer to read the 16-digit number from the card shown on their screen.' };
+      if (!text) return { ok: false, error: 'no_card_number_heard', message: 'Nothing new was heard. Ask the customer to read the 16-digit number from the card shown on their screen.' };
       c.consumeCustomerText();
       const before = maxSeq(c.sessionId);
       // The server uses the customer's own transcribed digits, never digits supplied by the model.
@@ -107,7 +107,7 @@ async function dispatch(name: string, args: Record<string, unknown>, c: ToolCont
         locked: ver.status === 'failed',
         backend_said: turnsAfter(c.sessionId, before).map((t) => t.text),
         ...stateSummary(c.sessionId),
-        instruction: GUIDE + ' Never say or hint at the correct card number.',
+        instruction: GUIDE + ' Never say or hint at the correct card number. The back end reads the last four digits back and waits for a yes. Say what it says, then call this tool again with the customer\'s next words (yes, no, or a corrected number).',
       };
     }
     case TOOL.account: {

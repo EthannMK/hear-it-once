@@ -23,6 +23,7 @@ import { SUPPORTED_LANGUAGES } from '../../voice/interfaces.ts';
 import { listTimeline, subscribe } from '../../events/timeline.ts';
 import { buildResolution } from '../brief.ts';
 import { resetScenario } from '../../db/seed.ts';
+import { analyseCall, getAnalysis, lifecycle, transcriptSegments } from '../../analysis/analysis.ts';
 
 const StartCall = z
   .object({
@@ -196,6 +197,28 @@ export function registerCallRoutes(app: FastifyInstance): void {
     if (!b) throw new AppError('NOT_FOUND', 'Call not found.');
     if (actor.type !== 'customer_session') audit({ actor, event: 'brief.viewed', status: 'ok', resourceType: 'session', resourceId: id, sessionId: id });
     return b;
+  });
+
+  /** Full transcript as ordered segments. Not paginated, so nothing is silently hidden. */
+  app.get<{ Params: { id: string } }>('/api/calls/:id/transcript', async (req) => {
+    const { id } = req.params;
+    actorFor(req, id, 'call.read');
+    return { ...transcriptSegments(id), lifecycle: lifecycle(id) };
+  });
+
+  /** Post-call analysis: summary, reason, resolution, suggested solutions, knowledge. Has its own status. */
+  app.get<{ Params: { id: string } }>('/api/calls/:id/analysis', async (req) => {
+    const { id } = req.params;
+    actorFor(req, id, 'call.read');
+    return getAnalysis(id);
+  });
+
+  app.post<{ Params: { id: string } }>('/api/calls/:id/analysis/retry', async (req) => {
+    const { id } = req.params;
+    const actor = actorFor(req, id, 'call.read');
+    if (lifecycle(id) !== 'completed' && lifecycle(id) !== 'failed') throw new AppError('CONFLICT', 'The call has not ended yet.');
+    analyseCall(id, actor);
+    return getAnalysis(id);
   });
 
   app.get<{ Params: { id: string; opId: string } }>('/api/calls/:id/actions/:opId', async (req) => {
