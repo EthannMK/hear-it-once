@@ -10,7 +10,7 @@ It has two screens on one backend:
 
 | Screen | Path | Who |
 |---|---|---|
-| Customer page — test identities with dummy card and phone numbers beside a live voice call with Lily, in English, Burmese or Tagalog | `/` | Anyone |
+| Customer page — test identities with dummy card and phone numbers beside a live voice call with Lily, with a picker for the call language (English, Burmese or Tagalog) | `/` | Anyone |
 | Agent workspace — handover queue, suggested solution, CRM search, editable case with audit | `/agent.html` | Demo agent role |
 
 ### What's real and what's simulated
@@ -98,7 +98,7 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 
 ## Trying it (60 seconds)
 
-1. Open `/`, choose a language, pick a test identity and press **Start talking to Lily**.
+1. Open `/`, pick a test identity and press **Start talking to Lily**.
 2. Ask anything about banking. For questions about the test account, read the full dummy card number shown on screen when Lily asks. A wrong number gets a retry, three wrong ones prepare a handover.
 3. Say "I want to speak to a person", then open `/agent.html` in another tab and accept the request.
 

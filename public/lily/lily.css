@@ -5,7 +5,7 @@
   --primary:#5846c9;--primary-c:#7161e4;--primary-soft:#e4dfff;--on-primary:#fff;
   --tert:#3e6354;--tert-soft:#c3ecd9;--err:#ba1a1a;--err-soft:#ffdad6;--warn:#8a5a00;--warn-soft:#ffe9c2;--info-soft:#e2dcfb;
   --r:.5rem;--r-xl:.75rem;
-  --f-head:'Newsreader',Georgia,serif;--f-body:'Plus Jakarta Sans',system-ui,sans-serif;--f-label:'Inter',system-ui,sans-serif;
+  --f-head:'Newsreader',Georgia,serif;--f-body:'Plus Jakarta Sans','Noto Sans Myanmar',system-ui,sans-serif;--f-label:'Inter',system-ui,sans-serif;
   color-scheme:light;
 }
 *{box-sizing:border-box}
@@ -158,8 +158,6 @@ ul.tx li .small{grid-column:1/-1}
 @media(max-width:960px){.callhost{order:-1}}
 
 /* ---- language, Burmese typography, polish ---- */
-html[lang="my"] body.lily,html[lang="my"] button,html[lang="my"] input,html[lang="my"] select{font-family:'Noto Sans Myanmar','Plus Jakarta Sans',system-ui,sans-serif;line-height:1.8}
-html[lang="my"] h1,html[lang="my"] h2{font-family:'Noto Sans Myanmar',serif;line-height:1.5;letter-spacing:0}
 .langwrap{display:inline-flex}
 .langsel{min-height:44px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--on);padding:.4rem .9rem;font:inherit;font-size:.9rem;cursor:pointer}
 .langsel:disabled{opacity:.55;cursor:not-allowed}

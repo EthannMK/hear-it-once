@@ -29,7 +29,7 @@ const ICON = {
 const brandSvg = () => svg(['M4 12h2', 'M8 7v10', 'M12 4v16', 'M16 8v8', 'M20 12h0']);
 
 function langPicker() {
-  const sel = h('select.langsel', { 'aria-label': t('lang'), disabled: !!(S.call && !S.call.ended), onchange: (e) => { setLang(e.target.value); if (S.call && !S.call.ended) return; home(); } },
+  const sel = h('select.langsel', { 'aria-label': t('lang'), disabled: !!(S.call && !S.call.ended), title: t('langHint'), onchange: (e) => setLang(e.target.value) },
     LANGS.map(([c, n]) => h('option', { value: c, ...(c === getLang() ? { selected: '' } : {}), lang: c === 'fil' ? 'fil' : c }, n)));
   return h('label.langwrap', h('span.sr-only', t('lang')), sel);
 }

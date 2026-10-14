@@ -1,10 +1,9 @@
-// Interface text for the customer page in English, Burmese and Tagalog.
-// Lily's own words come from the voice model in the chosen language; the back-end activity log stays in English.
+// Interface text (English) and the call languages Lily can speak.
 export const LANGS = [['en', 'English'], ['my', 'မြန်မာ'], ['fil', 'Tagalog']];
 
 const D = {
   en: {
-    openAgent: 'Open agent workspace ↗', lang: 'Language',
+    openAgent: 'Open agent workspace ↗', lang: 'Call language', langHint: 'Language Lily speaks and understands',
     panelTitle: 'Test identity and demo data',
     disclaimer: 'Northstar Bank is a fictional bank. Every name, phone number, account reference and card number here is dummy data for testing. Do not enter real card details.',
     pickIdentity: 'Choose a test identity', cardStatus: 'Card {s}', phone: 'Phone (dummy)', account: 'Account reference', standing: 'Standing',
@@ -15,7 +14,7 @@ const D = {
     hintNote: 'You are not role-playing. This is only a test identity so Lily has an account to look up. Ask anything about banking.',
     loading: 'Loading demo data…', noProfiles: 'No demo identities are available.',
     heroTitle: 'Say it once. Lily handles the rest.',
-    heroLead: 'Talk to Lily, the AI assistant at Northstar Bank Card Services. Ask anything about cards and banking, in English, Burmese or Tagalog.',
+    heroLead: 'Talk to Lily, the AI assistant at Northstar Bank Card Services. Ask anything about cards and banking. Choose the call language at the top: English, Burmese or Tagalog.',
     start: 'Start talking to Lily', startNote: 'You are speaking with an AI assistant. Your browser will ask for the microphone. Nothing here touches a real account.',
     tryTitle: 'Things you can ask',
     ex: ["I don't recognise a charge on my card", 'Why was my payment declined?', 'What is this fee?', 'What is APR and how is it calculated?', 'How do I spot a card scam?', 'I want to speak to a person'],
@@ -34,75 +33,13 @@ const D = {
     summary: 'Call summary', demoCall: 'Demo call — dummy data', outcome: 'Outcome', told: 'What you told Lily', confirmed: 'Confirmed by bank systems', actions: 'Actions', stillOpen: 'Still open', whatLily: 'What Lily did',
     steps: '{n} recorded steps', again: 'Start another conversation', noChanges: 'No account changes were made. Lily never claims an action happened unless a system confirmed it.', noDetails: 'No details were captured.', nothingConfirmed: 'Nothing was confirmed on this call.', ended: 'Call ended', summaryReady: 'Call ended. Summary ready.',
   },
-  my: {
-    openAgent: 'အေးဂျင့် အလုပ်နေရာကို ဖွင့်ရန် ↗', lang: 'ဘာသာစကား',
-    panelTitle: 'စမ်းသပ်ရန် အမည်နှင့် ဒီမိုဒေတာ',
-    disclaimer: 'Northstar Bank သည် စိတ်ကူးယဉ်ဘဏ်ဖြစ်သည်။ ဤနေရာရှိ အမည်၊ ဖုန်းနံပါတ်၊ အကောင့်ရည်ညွှန်းနံပါတ်နှင့် ကတ်နံပါတ်အားလုံးသည် စမ်းသပ်ရန်အတွက် အတုအယောင်ဒေတာများသာဖြစ်သည်။ ကတ်အစစ်အမှန် အချက်အလက်များ မထည့်ပါနှင့်။',
-    pickIdentity: 'စမ်းသပ်အမည်ကို ရွေးပါ', cardStatus: 'ကတ် {s}', phone: 'ဖုန်း (အတု)', account: 'အကောင့်ရည်ညွှန်းနံပါတ်', standing: 'အခြေအနေ',
-    good: 'ကောင်းမွန်သည်', watch: 'စောင့်ကြည့်ထားသည်', restricted: 'ကန့်သတ်ထားသည်', active: 'အသုံးပြုနိုင်သည်',
-    panLabel: 'ဒီမိုကတ်နံပါတ် အပြည့်အစုံ', panHelp: 'စမ်းသပ်ရန် အတုနံပါတ်ဖြစ်သည်။ Lily မေးသည့်အခါ ဖတ်ပြပါ။ ပြန်မေးပုံကြည့်ရန် မှားသောနံပါတ်ကို အရင်ပြောကြည့်နိုင်သည်။',
-    restrictions: 'ကန့်သတ်ချက်နှင့် သတိပေးချက်များ', recent: 'မကြာသေးမီ ငွေလွှဲပြောင်းမှုများ', declined: 'ငြင်းပယ်ခံရသော ငွေပေးချေမှုများ', none: 'မရှိပါ။',
-    lockedNote: 'ခေါ်ဆိုနေစဉ် အမည်ကို မပြောင်းနိုင်ပါ။ ပြောင်းလိုပါက ဖုန်းချပါ။',
-    hintNote: 'ဤသည် အခန်းကဏ္ဍသရုပ်ဆောင်ခြင်း မဟုတ်ပါ။ Lily ရှာဖွေရန် စမ်းသပ်အကောင့်တစ်ခုသာဖြစ်သည်။ ဘဏ်လုပ်ငန်းနှင့်ပတ်သက်သည့် မည်သည့်အရာကိုမဆို မေးနိုင်သည်။',
-    loading: 'ဒီမိုဒေတာ ဖွင့်နေသည်…', noProfiles: 'စမ်းသပ်အမည် မရှိပါ။',
-    heroTitle: 'တစ်ခါပြောပါ။ ကျန်တာ Lily လုပ်ပေးမယ်။',
-    heroLead: 'Northstar Bank Card Services ၏ AI လက်ထောက် Lily နှင့် စကားပြောပါ။ ကတ်နှင့် ဘဏ်လုပ်ငန်းဆိုင်ရာ မည်သည့်အရာကိုမဆို အင်္ဂလိပ်၊ မြန်မာ သို့မဟုတ် တဂလော့ဘာသာဖြင့် မေးနိုင်သည်။',
-    start: 'Lily နှင့် စကားပြောမည်', startNote: 'သင်သည် AI လက်ထောက်နှင့် ပြောဆိုနေခြင်းဖြစ်သည်။ ဘရောက်ဇာက မိုက်ခရိုဖုန်းခွင့်ပြုချက် တောင်းမည်။ ဤနေရာတွင် အစစ်အမှန်အကောင့်ကို မထိခိုက်ပါ။',
-    tryTitle: 'မေးကြည့်နိုင်သည့်အရာများ',
-    ex: ['ကျွန်ုပ်ကတ်ပေါ်က မသိတဲ့ ငွေထုတ်မှုတစ်ခု ရှိတယ်', 'ကျွန်ုပ်ငွေပေးချေမှု ဘာကြောင့် ငြင်းပယ်ခံရလဲ', 'ဒီအခကြေးငွေက ဘာလဲ', 'APR ဆိုတာ ဘာလဲ၊ ဘယ်လိုတွက်လဲ', 'ကတ်လိမ်လည်မှုကို ဘယ်လိုသိနိုင်လဲ', 'လူတစ်ယောက်နဲ့ ပြောချင်တယ်'],
-    voiceOk: 'တိုက်ရိုက်အသံ အဆင်သင့်', voiceOff: 'တိုက်ရိုက်အသံ မရနိုင်ပါ — စာရိုက်၍ရသည်', ai: 'AI လက်ထောက် · ဒီမို',
-    connecting: 'Lily နှင့် ချိတ်ဆက်နေသည်', c1: 'ချိတ်ဆက်မှုကို လုံခြုံအောင် ပြုလုပ်နေသည်', c2: 'ခေါ်ဆိုမှု စတင်နေသည်', failed: 'ချိတ်ဆက်၍ မရပါ', retry: 'ထပ်ကြိုးစားပါ',
-    liveCall: 'Lily နှင့် တိုက်ရိုက်ခေါ်ဆိုမှု', mute: 'ပိတ်', captions: 'စာတန်း', human: 'လူသား', end: 'ချုပ်', talkHuman: 'လူတစ်ယောက်နှင့် ပြောမည်', endCall: 'ဖုန်းချမည်', muteMic: 'မိုက်ခရိုဖုန်း ပိတ်မည်',
-    s_speaking: 'Lily ပြောနေသည်', s_processing: 'Lily စစ်ဆေးနေသည်…', s_listening: 'နားထောင်နေသည်', 's_listening-you': 'သင့်အသံကို ကြားနေသည်', s_muted: 'မိုက်ခရိုဖုန်း ပိတ်ထားသည်', s_reconnecting: 'ပြန်ချိတ်နေသည်…', s_ending: 'ခေါ်ဆိုမှုကို အဆုံးသတ်နေသည်…',
-    typeHere: 'သို့မဟုတ် စာရိုက်ပါ', typeOnly: 'Lily ကို စာရိုက်ပါ…', send: 'ပို့ရန်', you: 'သင်', lily: 'Lily', agent: 'အေးဂျင့်', askedPerson: 'သင်သည် လူတစ်ယောက်ကို တောင်းဆိုခဲ့သည်။',
-    behind: 'စကားဝိုင်းနောက်ကွယ်', behindSub: 'နောက်ကွယ်စနစ်မှ အစစ်အမှန် ဖြစ်ရပ်များ၊ စစ်ဆေးမှုကြိုးစားမှုတိုင်းပါ', nothingYet: 'မရှိသေးပါ။ Lily ရှာဖွေခြင်း သို့မဟုတ် ကတ်နံပါတ်စစ်ဆေးခြင်းတိုင်းကို ဤနေရာတွင် မြင်ရမည်။',
-    stages: ['နားလည်', 'စစ်ဆေး', 'စုံစမ်း', 'ရှင်းပြ', 'အတည်ပြု', 'ဆောင်ရွက်', 'မှတ်တမ်း', 'ဖြေရှင်း', 'လွှဲပြောင်း'],
-    hWaiting: 'လူသားအေးဂျင့်ကို စောင့်နေသည်', hSent: 'တောင်းဆိုမှု ပို့ပြီးပြီ။ အေးဂျင့်က အလုပ်နေရာတွင် လက်ခံရမည်။', hJoined: '{n} ဝင်ရောက်လာပြီ။ သင်ပြောခဲ့သည်များကို Lily က လွှဲပေးပြီးပြီ။', hConnected: 'အေးဂျင့် ချိတ်ဆက်ပြီး',
-    hNone: 'အေးဂျင့် မအားသေးပါ။ သင့်တောင်းဆိုမှုကို ပြန်ခေါ်ရန် သိမ်းထားသည်။', hFailed: 'လွှဲပြောင်းမှု မအောင်မြင်ပါ။', hDemo: 'အက်ပ်အတွင်း လွှဲပြောင်းမှု ဒီမိုသာဖြစ်သည်၊ ဖုန်းလွှဲခြင်း မဟုတ်ပါ။', hRequested: 'လွှဲပြောင်းရန် တောင်းဆိုပြီး', anAgent: 'ဝန်ဆောင်မှုအေးဂျင့်',
-    bTextOnly: 'အသံ မရနိုင်ပါ။ အောက်တွင် စာရိုက်ပါ — စကားပြောဆိုမှု အတူတူပင်ဖြစ်သည်။', bMic: 'မိုက်ခရိုဖုန်းကို ပိတ်ထားသည်။ အောက်တွင် စာရိုက်ပါ၊ သို့မဟုတ် ခွင့်ပြုပြီး ပြန်စပါ။',
-    bLost: 'ချိတ်ဆက်မှု ပြတ်သွားသည်။ စကားပြောဆိုမှုကို သိမ်းထားသည် — ဆက်စာရိုက်နိုင်သည်၊ သို့မဟုတ် ဖုန်းချနိုင်သည်။', micOn: 'မိုက်ခရိုဖုန်း ဖွင့်ထားသည်', micMuted: 'မိုက်ခရိုဖုန်း ပိတ်ထားသည်', micDenied: 'မိုက်ခရိုဖုန်း ပိတ်ထားသည် — စာရိုက်ပါ', typingMode: 'အသံ မရနိုင်ပါ — စာရိုက်ပုံစံ',
-    passcode: 'Lily က ကုဒ်တောင်းထားသည်။ ကျယ်ကျယ်ဖတ်ပါ။',
-    summary: 'ခေါ်ဆိုမှု အနှစ်ချုပ်', demoCall: 'ဒီမိုခေါ်ဆိုမှု — အတုဒေတာ', outcome: 'ရလဒ်', told: 'Lily ကို သင်ပြောခဲ့သည်များ', confirmed: 'ဘဏ်စနစ်က အတည်ပြုထားသည်များ', actions: 'လုပ်ဆောင်ချက်များ', stillOpen: 'မပြီးသေးသည်များ', whatLily: 'Lily လုပ်ခဲ့သည်များ',
-    steps: 'မှတ်တမ်းတင်ထားသည့် အဆင့် {n} ခု', again: 'နောက်တစ်ကြိမ် စကားပြောမည်', noChanges: 'အကောင့်ပြောင်းလဲမှု မရှိပါ။ စနစ်က အတည်မပြုပါက လုပ်ဆောင်ပြီးဟု Lily မပြောပါ။', noDetails: 'အသေးစိတ် မှတ်မထားပါ။', nothingConfirmed: 'ဤခေါ်ဆိုမှုတွင် အတည်ပြုချက် မရှိပါ။', ended: 'ခေါ်ဆိုမှု ပြီးဆုံးသည်', summaryReady: 'ခေါ်ဆိုမှု ပြီးဆုံးပြီ။ အနှစ်ချုပ် အဆင်သင့်။',
-  },
-  fil: {
-    openAgent: 'Buksan ang agent workspace ↗', lang: 'Wika',
-    panelTitle: 'Test identity at demo data',
-    disclaimer: 'Kathang-isip na bangko ang Northstar Bank. Ang bawat pangalan, numero ng telepono, account reference at numero ng card dito ay dummy data para sa pagsubok. Huwag maglagay ng totoong detalye ng card.',
-    pickIdentity: 'Pumili ng test identity', cardStatus: 'Card: {s}', phone: 'Telepono (dummy)', account: 'Account reference', standing: 'Kalagayan',
-    good: 'Maayos ang standing', watch: 'Binabantayan', restricted: 'May restriksyon', active: 'aktibo',
-    panLabel: 'Buong demo card number', panHelp: 'Dummy na numero para sa pagsubok. Hihingin ito ni Lily. Subukan muna ang maling numero para makita ang retry.',
-    restrictions: 'Mga restriksyon at alerto', recent: 'Mga kamakailang transaksyon', declined: 'Mga tinanggihang bayad', none: 'Wala.',
-    lockedNote: 'Naka-lock ang identity habang may tawag. Tapusin ang tawag para magpalit.',
-    hintNote: 'Hindi ito role-play. Test identity lang ito para may account na matitingnan si Lily. Magtanong ng kahit ano tungkol sa banking.',
-    loading: 'Nilo-load ang demo data…', noProfiles: 'Walang available na demo identity.',
-    heroTitle: 'Sabihin nang minsan. Si Lily na ang bahala.',
-    heroLead: 'Kausapin si Lily, ang AI assistant ng Northstar Bank Card Services. Magtanong ng kahit ano tungkol sa card at banking, sa English, Burmese o Tagalog.',
-    start: 'Simulan ang usapan kay Lily', startNote: 'AI assistant ang kausap mo. Hihingi ang browser ng pahintulot sa mikropono. Walang totoong account na naaapektuhan dito.',
-    tryTitle: 'Mga puwedeng itanong',
-    ex: ['May singil sa card ko na hindi ko kilala', 'Bakit na-decline ang bayad ko?', 'Ano ang fee na ito?', 'Ano ang APR at paano ito kinukuwenta?', 'Paano malalaman ang card scam?', 'Gusto kong makausap ang isang tao'],
-    voiceOk: 'Handa ang live voice', voiceOff: 'Hindi available ang live voice — gumagana ang pag-type', ai: 'AI assistant · demo',
-    connecting: 'Kinokonekta ka kay Lily', c1: 'Sini-secure ang koneksyon', c2: 'Sinisimulan ang tawag', failed: 'Hindi kami nakakonekta', retry: 'Subukan muli',
-    liveCall: 'Live na tawag kay Lily', mute: 'I-mute', captions: 'Captions', human: 'Tao', end: 'Tapusin', talkHuman: 'Makausap ang isang tao', endCall: 'Tapusin ang tawag', muteMic: 'I-mute ang mikropono',
-    s_speaking: 'Nagsasalita si Lily', s_processing: 'Nagche-check si Lily…', s_listening: 'Nakikinig', 's_listening-you': 'Naririnig ka', s_muted: 'Naka-mute ang mikropono', s_reconnecting: 'Muling kumokonekta…', s_ending: 'Tinatapos ang tawag…',
-    typeHere: 'O mag-type ng mensahe', typeOnly: 'Mag-type kay Lily…', send: 'Ipadala', you: 'Ikaw', lily: 'Lily', agent: 'Agent', askedPerson: 'Humiling ka ng kausap na tao.',
-    behind: 'Sa likod ng usapan', behindSub: 'Mga totoong event mula sa back end, kasama ang bawat verification attempt', nothingYet: 'Wala pa. Lalabas dito ang bawat hakbang kapag naghanap si Lily o nag-check ng card number.',
-    stages: ['Unawa', 'I-verify', 'Siyasatin', 'Ipaliwanag', 'Kumpirmahin', 'Isagawa', 'Itala', 'Lutasin', 'Handover'],
-    hWaiting: 'Naghihintay ng human agent', hSent: 'Naipadala na ang request. Kailangan itong tanggapin ng agent sa agent workspace.', hJoined: 'Sumali na si {n}. Naipasa na ni Lily ang napag-usapan ninyo.', hConnected: 'Nakakonekta ang agent',
-    hNone: 'Walang libreng agent ngayon. Naka-save ang request mo para sa callback.', hFailed: 'Hindi nakumpleto ang handover.', hDemo: 'In-app handover demo ito, hindi phone transfer.', hRequested: 'Hiniling ang handover', anAgent: 'Isang support agent',
-    bTextOnly: 'Hindi available ang boses. Mag-type sa ibaba — pareho ang takbo ng usapan.', bMic: 'Na-block ang mikropono. Mag-type sa ibaba, o payagan ang mikropono at magsimulang muli.',
-    bLost: 'Naputol ang koneksyon. Naka-save ang usapan — puwede kang mag-type o tapusin ang tawag.', micOn: 'Bukas ang mikropono', micMuted: 'Naka-mute ang mikropono', micDenied: 'Na-block ang mikropono — mag-type na lang', typingMode: 'Walang boses — typing mode',
-    passcode: 'Humingi si Lily ng passcode. Basahin ito nang malakas:',
-    summary: 'Buod ng tawag', demoCall: 'Demo na tawag — dummy data', outcome: 'Resulta', told: 'Ang sinabi mo kay Lily', confirmed: 'Kinumpirma ng bank systems', actions: 'Mga aksyon', stillOpen: 'Bukas pa', whatLily: 'Ang ginawa ni Lily',
-    steps: '{n} naitalang hakbang', again: 'Magsimula ng bagong usapan', noChanges: 'Walang binago sa account. Hindi sasabihin ni Lily na may nangyari maliban kung kinumpirma ng system.', noDetails: 'Walang nakuhang detalye.', nothingConfirmed: 'Walang nakumpirma sa tawag na ito.', ended: 'Tapos na ang tawag', summaryReady: 'Tapos na ang tawag. Handa na ang buod.',
-  },
 };
 
-let current = 'en';
-try { const v = localStorage.getItem('hio_lang'); if (v && D[v]) current = v; } catch { /* storage may be blocked */ }
-export const getLang = () => current;
-export function setLang(l) { if (!D[l]) return; current = l; try { localStorage.setItem('hio_lang', l); } catch { /* ignore */ } document.documentElement.lang = l === 'fil' ? 'fil' : l; }
-/** t('key', { n: 3 }) → text in the chosen language, falling back to English. */
-export const t = (k, v = {}) => String(D[current][k] ?? D.en[k] ?? k).replace(/\{(\w+)\}/g, (_, x) => (v[x] ?? ''));
-export const tList = (k) => D[current][k] ?? D.en[k];
-document.documentElement.lang = current === 'fil' ? 'fil' : current;
+// The screen is English only. The chosen language applies to the call (what Lily speaks and understands).
+let callLang = 'en';
+try { const v = localStorage.getItem('hio_lang'); if (v && LANGS.some(([c]) => c === v)) callLang = v; } catch { /* storage may be blocked */ }
+export const getLang = () => callLang;
+export function setLang(l) { if (!LANGS.some(([c]) => c === l)) return; callLang = l; try { localStorage.setItem('hio_lang', l); } catch { /* ignore */ } }
+/** t('key', { n: 3 }) → English interface text. */
+export const t = (k, v = {}) => String(D.en[k] ?? k).replace(/\{(\w+)\}/g, (_, x) => (v[x] ?? ''));
+export const tList = (k) => D.en[k];

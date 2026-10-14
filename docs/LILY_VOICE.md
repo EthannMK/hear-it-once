@@ -64,5 +64,5 @@ Tested automatically (`tests/e2e/live.test.ts`, `tests/e2e/frontend.test.ts`): t
 **Not tested here:** the real Gemini Live connection and real human speech (no Google credentials or microphone in the build environment). Please do a real microphone test on the deployed service and confirm the model ID, voice, and echo behaviour on your device (use headphones if Lily hears herself).
 
 ## Languages and scope
-The customer page offers English, Burmese and Tagalog (`?lang=en|my|fil` on the live WebSocket). Screen text lives in `public/lily/i18n.js`. Lily speaks the chosen language. Backend replies and the agent workspace stay in English. Burmese voice quality on the native-audio model is not verified from the build sandbox.
+The customer screen is English only. A picker chooses the call language (English, Burmese or Tagalog), sent as `?lang=en|my|fil` on the live WebSocket. Lily speaks and understands that language. Backend replies and the agent workspace stay in English. Burmese voice quality on the native-audio model is not verified from the build sandbox.
 Lily answers any banking or personal-finance question from general knowledge. Facts about the test account come only from tools (`get_account_details`, `handle_banking_request`) after card-number verification. Balances and limits are not in the demo data.
