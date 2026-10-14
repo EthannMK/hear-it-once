@@ -29,7 +29,7 @@ const brandSvg = () => svg(['M4 12h2', 'M8 7v10', 'M12 4v16', 'M16 8v8', 'M20 12
 
 function top(extra) {
   return h('header.top', h('a.brand', { href: '/' }, brandSvg(), 'Hear It Once'), h('span.grow'), extra ?? null,
-    h('a.link', { href: '/agent.html' }, 'Agent console'), h('a.link', { href: '/dashboard.html' }, 'Dashboard'), h('a.link', { href: '/classic.html' }, 'Classic demo'));
+    h('a.link', { href: '/agent.html', target: '_blank', rel: 'noopener' }, 'Open agent workspace ↗'));
 }
 function render(...n) { root.replaceChildren(...n.flat().filter(Boolean)); window.scrollTo(0, 0); }
 

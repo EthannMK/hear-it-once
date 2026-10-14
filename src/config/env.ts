@@ -21,7 +21,9 @@ const EnvSchema = z.object({
     .transform((v) => v === 'true'),
   ADAPTER_MODE: z.string().default('mock'),
   POLICY_PROFILE: z.enum(['prototype-mock', 'pilot-conservative']).default('prototype-mock'),
-  INTENT_MODEL: z.enum(['rules', 'anthropic']).default('rules'),
+  INTENT_MODEL: z.enum(['rules', 'anthropic', 'gemini']).default('rules'),
+  /** Used when INTENT_MODEL=gemini: reads the full sentence when the keyword rules are unsure. */
+  INTENT_GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().optional(),
   ADAPTER_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),

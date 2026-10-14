@@ -104,6 +104,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
 
   const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
   await app.register(fastifyStatic, { root: publicDir, index: ['index.html'], cacheControl: false });
+  // Only two screens exist: the judge page (/) and the agent workspace (/agent.html). Old links land on the judge page.
+  for (const old of ['/classic.html', '/dashboard.html', '/lab.html']) app.get(old, (_req, reply) => reply.redirect('/', 302));
   app.setNotFoundHandler((req, reply) => {
     if (req.url.startsWith('/api/')) return reply.status(404).send({ error: { code: 'NOT_FOUND', message: 'Not found.' } });
     return reply.status(404).type('text/plain').send('Not found');
