@@ -77,7 +77,7 @@ Data lives in `data/hear-it-once.db` and **persists across restarts**. Tests use
 
 ## Talk to Lily (live voice)
 
-The home page is a live two-way voice agent (Gemini Live on Vertex AI) with a four-scenario journey, a real-time “Behind the conversation” panel, in-app human handover and a post-call summary. See [docs/LILY_VOICE.md](docs/LILY_VOICE.md) for architecture, configuration and what is/isn't verified. The earlier demo remains at `/classic.html`.
+The home page is a live two-way voice agent (Gemini Live on Vertex AI) for the fictional **Northstar Bank**: demo customers and test data beside the call, card-number verification with retries, a real-time “Behind the conversation” panel, in-app human handover and a post-call summary. The agent console is a call-centre workspace (suggested solution, knowledge, CRM, case edits with audit). See [docs/NORTHSTAR.md](docs/NORTHSTAR.md) and [docs/LILY_VOICE.md](docs/LILY_VOICE.md) for architecture, configuration and what is/isn't verified. The earlier demo remains at `/classic.html`.
 
 ## Deploy to Google Cloud Run
 

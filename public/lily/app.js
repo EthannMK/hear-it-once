@@ -193,8 +193,19 @@ class CallController {
   sendText(text) {
     if (!text.trim()) return;
     if (this.ws?.readyState === 1 && this.voiceReady) this.ws.send(JSON.stringify({ type: 'text', text }));
-    else api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'utterance', text } }).then((v) => { this.view = v; this.turns = (v.transcript ?? []).map((t, i) => ({ seq: i, speaker: t.speaker, kind: t.kind ?? '', text: t.text })); this.ui.transcript?.(); this.ui.refresh?.(); }).catch((e) => { this.banner = { kind: 'bad', text: e.message }; this.ui.refresh?.(); });
+    else api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'utterance', text } }).then((v) => { this.view = v; this.turns = (v.transcript ?? []).map((t, i) => ({ seq: i, speaker: t.speaker, kind: t.kind ?? '', text: t.text })); this.ui.transcript?.(); this.ui.refresh?.(); this.loadTimeline(); }).catch((e) => { this.banner = { kind: 'bad', text: e.message }; this.ui.refresh?.(); });
   }
+  /** Confirmed state from the server. Used while a handover is open and whenever the live socket is not healthy, so "agent joined" can never be missed. */
+  async poll() {
+    try {
+      const v = await api(`/api/calls/${this.id}`);
+      this.view = v; this.handoff = v.handoff;
+      if (!this.voiceReady || this.reconnecting) { this.turns = (v.transcript ?? []).map((t, i) => ({ seq: i, speaker: t.speaker, kind: t.kind ?? '', text: t.text })); this.ui.transcript?.(); await this.loadTimeline(); }
+      this.ui.refresh?.();
+    } catch { /* try again on the next tick */ }
+  }
+  /** Typing-only mode has no live socket, so read the recorded backend events instead. */
+  async loadTimeline() { try { const r = await api(`/api/calls/${this.id}/timeline`); this.events = r.items ?? []; this.ui.activity?.(); } catch { /* the transcript still works */ } }
   async requestHuman() {
     try { this.view = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'request_human' } }); this.handoff = this.view.handoff; this.ui.refresh?.(); say('Handover requested'); }
     catch (e) { this.banner = { kind: 'bad', text: e.message }; this.ui.refresh?.(); }
@@ -269,7 +280,13 @@ function callScreen(c) {
   }
   c.ui = { refresh, transcript: drawTranscript, activity: drawActivity, stopOrb: () => orb.destroy() };
   orb.attach(() => { const ds = c.displayState; return ds === 'speaking' ? c.player?.level ?? 0 : ds === 'muted' || ds === 'reconnecting' ? 0.03 : ds === 'processing' ? 0.12 + 0.06 * Math.sin(performance.now() / 180) : (c.mic?.level ?? 0.05); });
-  const tick = setInterval(() => { if (c.ended) clearInterval(tick); else refresh(); }, 250);
+  let n = 0;
+  const tick = setInterval(() => {
+    if (c.ended) return clearInterval(tick);
+    refresh();
+    const hs = c.view?.handoff?.status;
+    if (++n % 8 === 0 && (['requested', 'queued', 'connected'].includes(hs) || !c.voiceReady || c.reconnecting)) c.poll();
+  }, 250);
 
   const wasPanel = document.querySelector('aside.panel.demo');
   wasPanel?.replaceWith(profilePanel(true));

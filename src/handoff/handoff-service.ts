@@ -5,6 +5,8 @@
  * that confirmation exists. If no agents are available the configured safe fallback
  * (callback request on the case) is used.
  */
+import { SCENARIOS } from '../db/scenarios.ts';
+import { profileById } from '../live/profiles.ts';
 import { all, get, parseJson, run, tx } from '../db/db.ts';
 import { nowIso, nowMs } from '../lib/clock.ts';
 import { newId } from '../lib/ids.ts';
@@ -265,11 +267,13 @@ export function getHandoff(id: string) {
 
 export function listHandoffs(status?: string) {
   const rows = all<Record<string, unknown>>(
-    `SELECT h.*, s.verification_status, s.issue_type FROM handoffs h JOIN call_sessions s ON s.id = h.session_id ${status ? 'WHERE h.status = ?' : ''} ORDER BY h.requested_at DESC LIMIT 100`,
+    `SELECT h.*, s.verification_status, s.issue_type, s.profile_id, s.scenario_id AS sc_id FROM handoffs h JOIN call_sessions s ON s.id = h.session_id ${status ? 'WHERE h.status = ?' : ''} ORDER BY h.requested_at DESC LIMIT 100`,
     status ? [status] : [],
   );
   return rows.map((h) => {
     const b = parseJson<HandoffBrief>(h.brief_json, {} as HandoffBrief);
-    return { id: h.id, sessionId: h.session_id, caseId: h.case_id, status: h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[String(h.reason)] ?? h.reason, priority: b.priority, issueLabel: b.issue?.label, verification: h.verification_status, requestedAt: h.requested_at, agentId: h.agent_id, dataOrigin: h.data_origin };
+    const scId = (h.profile_id ? profileById(String(h.profile_id))?.scenarioId : null) ?? (h.sc_id as string | null);
+    const customerName = SCENARIOS.find((x) => x.id === scId)?.customer.name ?? null;
+    return { id: h.id, sessionId: h.session_id, customerName, caseId: h.case_id, status: h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[String(h.reason)] ?? h.reason, priority: b.priority, issueLabel: b.issue?.label, verification: h.verification_status, requestedAt: h.requested_at, agentId: h.agent_id, dataOrigin: h.data_origin };
   });
 }
