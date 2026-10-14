@@ -19,6 +19,9 @@ import { requirePermission, staffActor } from '../../auth/rbac.ts';
 import { buildCallView } from '../views.ts';
 import { CALL_COOKIE, callerOwns, requireCaller } from '../app.ts';
 import { SUPPORTED_LANGUAGES } from '../../voice/interfaces.ts';
+import { listTimeline, subscribe } from '../../events/timeline.ts';
+import { buildResolution } from '../brief.ts';
+import { resetScenario } from '../../db/seed.ts';
 
 const StartCall = z
   .object({
@@ -26,6 +29,10 @@ const StartCall = z
     callerAni: z.string().max(32).optional(),
     channel: z.enum(['text_simulator', 'voice_browser']).default('text_simulator'),
     moodStart: z.enum(['calm', 'worried', 'frustrated', 'upset']).optional(),
+    /** Free-talk demo: the synthetic persona is chosen from the caller's intent. */
+    mode: z.enum(['scenario', 'free']).optional(),
+    /** Demo only: reset this scenario's synthetic fixtures before the call so it replays cleanly. */
+    resetScenario: z.boolean().optional(),
   })
   .strict();
 
@@ -77,8 +84,16 @@ export function registerCallRoutes(app: FastifyInstance): void {
     const body = StartCall.parse(req.body ?? {});
     const scenario = body.scenarioId ? SCENARIOS.find((s) => s.id === body.scenarioId) : undefined;
     if (body.scenarioId && !scenario) throw new AppError('NOT_FOUND', 'Unknown scenario.');
+    if (scenario && body.resetScenario && env().DEMO_MODE) resetScenario(scenario.id);
     const token = randomBytes(24).toString('base64url');
-    const sessionId = await startCall({ channel: body.channel, scenarioId: body.scenarioId ?? null, callerAni: body.callerAni ?? scenario?.customer.phone ?? null, callerToken: token, moodStart: body.moodStart ?? null });
+    const sessionId = await startCall({
+      channel: body.channel,
+      scenarioId: body.scenarioId ?? null,
+      callerAni: body.callerAni ?? scenario?.customer.phone ?? null,
+      callerToken: token,
+      moodStart: body.moodStart ?? null,
+      freeMode: body.mode === 'free' && !scenario,
+    });
     reply.setCookie(CALL_COOKIE, token, { httpOnly: true, sameSite: 'strict', path: '/api/calls', secure: env().NODE_ENV === 'production' });
     return reply.status(201).send({ sessionId, callToken: token, view: buildCallView(sessionId, { audience: 'caller' }) });
   });
@@ -132,6 +147,47 @@ export function registerCallRoutes(app: FastifyInstance): void {
       return reply.status(status).send({ error: { code, message: op.error_message ?? 'Rejected by policy.', details: view } });
     }
     return reply.status(created ? 201 : 200).send(view);
+  });
+
+  /** Structured timeline of everything that has happened in the call (operations stream). */
+  app.get<{ Params: { id: string }; Querystring: { after?: string } }>('/api/calls/:id/timeline', async (req) => {
+    const { id } = req.params;
+    actorFor(req, id, 'call.read');
+    return { items: listTimeline(id, Number(req.query.after ?? 0) || 0) };
+  });
+
+  /** Live operations stream (server-sent events). Replays history after `after`, then pushes new events. */
+  app.get<{ Params: { id: string }; Querystring: { after?: string } }>('/api/calls/:id/stream', async (req, reply) => {
+    const { id } = req.params;
+    actorFor(req, id, 'call.read');
+    reply.hijack();
+    const res = reply.raw;
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-store',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+      'x-content-type-options': 'nosniff',
+    });
+    const send = (e: { id: number }) => res.write(`id: ${e.id}\nevent: timeline\ndata: ${JSON.stringify(e)}\n\n`);
+    const after = Number(req.headers['last-event-id'] ?? req.query.after ?? 0) || 0;
+    for (const e of listTimeline(id, after)) send(e);
+    const unsub = subscribe(id, send);
+    const ping = setInterval(() => res.write(': keep-alive\n\n'), 15_000);
+    req.raw.on('close', () => {
+      clearInterval(ping);
+      unsub();
+    });
+  });
+
+  /** Resolution / agent brief built from recorded state. */
+  app.get<{ Params: { id: string } }>('/api/calls/:id/brief', async (req) => {
+    const { id } = req.params;
+    const actor = actorFor(req, id, 'call.read');
+    const b = buildResolution(id);
+    if (!b) throw new AppError('NOT_FOUND', 'Call not found.');
+    if (actor.type !== 'customer_session') audit({ actor, event: 'brief.viewed', status: 'ok', resourceType: 'session', resourceId: id, sessionId: id });
+    return b;
   });
 
   app.get<{ Params: { id: string; opId: string } }>('/api/calls/:id/actions/:opId', async (req) => {

@@ -17,6 +17,7 @@ import { verifyStaffToken, type StaffPrincipal } from '../auth/rbac.ts';
 import { registerCallRoutes } from './routes/calls.ts';
 import { registerStaffRoutes } from './routes/staff.ts';
 import { registerAdminRoutes } from './routes/admin.ts';
+import { registerDemoRoutes } from './routes/demo.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -90,6 +91,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   registerCallRoutes(app);
   registerStaffRoutes(app);
   registerAdminRoutes(app);
+  registerDemoRoutes(app);
 
   const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
   await app.register(fastifyStatic, { root: publicDir, index: ['index.html'], cacheControl: false });
