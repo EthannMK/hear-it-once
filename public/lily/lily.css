@@ -168,3 +168,36 @@ ul.tx li .small{grid-column:1/-1}
 .btn,.ctl,.ptab{min-height:44px}
 .pan b.pannum{display:block;font-size:1.25rem;letter-spacing:.06em;word-break:break-all}
 @media(max-width:560px){.top{flex-wrap:wrap;gap:.5rem}h1{font-size:1.9rem}}
+
+/* ---- landing animation: aurora, hero orb, staggered entrance, skeleton ---- */
+.panel.idle{position:relative;overflow:hidden;justify-items:center;text-align:center}
+.panel.idle>*{position:relative;z-index:1}
+.panel.idle .lead{margin-inline:auto}
+.panel.idle .aurora{position:absolute;inset:0;z-index:0;pointer-events:none}
+.blob{position:absolute;border-radius:50%;filter:blur(60px);opacity:.5;will-change:transform}
+.blob.b1{width:340px;height:340px;background:#cfc7ff;top:-90px;left:-70px;animation:drift1 16s ease-in-out infinite}
+.blob.b2{width:300px;height:300px;background:#c3ecd9;bottom:-110px;right:-60px;animation:drift2 19s ease-in-out infinite}
+.blob.b3{width:220px;height:220px;background:#ffe9c2;top:38%;left:58%;animation:drift3 22s ease-in-out infinite}
+@keyframes drift1{50%{transform:translate(70px,50px) scale(1.15)}}
+@keyframes drift2{50%{transform:translate(-60px,-40px) scale(1.1)}}
+@keyframes drift3{50%{transform:translate(-50px,60px) scale(.9)}}
+.hero-orb{display:grid;place-items:center;margin:-.4rem 0 -.2rem}
+.hero-orb .orb{width:min(230px,56vw)}
+.hero-orb .avatar{animation:breathe 4s ease-in-out infinite;box-shadow:0 10px 40px rgba(88,70,201,.4)}
+.panel.idle .status-row,.panel.idle h1,.panel.idle .lead,.panel.idle .cta,.panel.idle .tries{animation:rise .7s cubic-bezier(.2,.7,.2,1) both}
+.panel.idle h1{animation-delay:.08s}.panel.idle .lead{animation-delay:.16s}.panel.idle .cta{animation-delay:.24s}.panel.idle .tries{animation-delay:.32s}
+.tryl li{animation:rise .6s cubic-bezier(.2,.7,.2,1) both}
+.tryl li:nth-child(1){animation-delay:.4s}.tryl li:nth-child(2){animation-delay:.46s}.tryl li:nth-child(3){animation-delay:.52s}.tryl li:nth-child(4){animation-delay:.58s}.tryl li:nth-child(5){animation-delay:.64s}.tryl li:nth-child(6){animation-delay:.7s}
+.tryl li{transition:transform .2s,border-color .2s,box-shadow .2s}
+.tryl li:hover{transform:translateY(-2px);border-color:var(--primary-c);box-shadow:0 6px 16px rgba(88,70,201,.15)}
+.panel.idle .btn.primary.lg{position:relative;animation:glow 2.8s ease-in-out infinite}
+.panel.idle .btn.primary.lg:hover{transform:translateY(-1px)}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+@keyframes glow{0%,100%{box-shadow:0 0 0 0 rgba(113,97,228,.45)}50%{box-shadow:0 0 0 12px rgba(113,97,228,0)}}
+.panel.idle .cta{display:grid;justify-items:center;gap:.6rem}
+.tries{text-align:center}.tryl{justify-content:center}
+.skeleton{display:grid;gap:.9rem;padding:2rem}
+.sk{display:block;height:1rem;border-radius:.5rem;background:linear-gradient(90deg,var(--s) 25%,var(--s-low) 50%,var(--s) 75%);background-size:200% 100%;animation:shimmer 1.4s linear infinite}
+.sk.w60{width:60%}.sk.w75{width:75%}.sk.w90{width:90%}
+@keyframes shimmer{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.blob,.hero-orb .avatar,.panel.idle .btn.primary.lg{animation:none!important}}

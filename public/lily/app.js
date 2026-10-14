@@ -46,7 +46,7 @@ const standing = (k) => ({ good: t('good'), watch: t('watch'), restricted: t('re
 
 async function home() {
   S.call?.destroy?.(); S.call = null;
-  render(top(), h('main.single', h('p.pad.muted', t('loading'))));
+  render(top(), h('main.single', h('div.skeleton', { role: 'status', 'aria-label': t('loading') }, h('span.sk.w60'), h('span.sk.w90'), h('span.sk.w75'), h('span.sk.w90'))));
   try {
     const [j, st] = await Promise.all([api('/api/demo/customers'), api('/api/live/status')]);
     S.cards = j.items; S.demoData = true; S.disclaimer = j.disclaimer; S.bank = j.bank; S.status = st;
@@ -85,6 +85,8 @@ function drawHome() {
   const sel = S.cards.find((c) => c.id === S.selected);
   host.append(
     h('div.panel.idle',
+      h('div.aurora', { 'aria-hidden': 'true' }, h('span.blob.b1'), h('span.blob.b2'), h('span.blob.b3')),
+      h('div.hero-orb', heroOrb().el),
       h('div.status-row', h('span.chip', [h('span.dot' + (voiceOk ? '.ok' : '.warn')), ' ' + (voiceOk ? t('voiceOk') : t('voiceOff'))]), h('span.chip.demo', t('ai'))),
       h('h1', t('heroTitle')),
       h('p.lead', t('heroLead')),
@@ -95,7 +97,17 @@ function drawHome() {
   render(top(), h('main.single', profilePanel(false), host));
 }
 
+/** Idle hero orb: a slow breathing ring so the page feels alive before the call starts. */
+function heroOrb() {
+  S.heroOrb?.destroy?.();
+  const orb = orbEl('listening');
+  orb.attach(() => 0.16 + 0.1 * Math.sin(performance.now() / 900) + 0.04 * Math.sin(performance.now() / 310));
+  S.heroOrb = orb;
+  return orb;
+}
+
 async function startCall(card) {
+  S.heroOrb?.destroy?.(); S.heroOrb = null;
   const orb = orbEl('connecting');
   const labels = [t('c1'), t('c2'), t('connecting')];
   const list = h('ol.steps', labels.map((l) => h('li', h('span.ic'), l)));
