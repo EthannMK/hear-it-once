@@ -1,9 +1,7 @@
 // Agent workspace (Northstar Bank demo): queue, customer and call, conversation, AI suggestion,
 // knowledge base, prefilled CRM search and case management. Everything shown comes from
 // GET /api/handoffs/:id/workspace; every edit goes back through PATCH and is audited server-side.
-import { api, h, mount, fmtTime, fmtDateTime, topbar, staffSignin } from './lib.js';
-
-mount(document.getElementById('chrome'), topbar('agent'));
+import { api, h, mount, fmtTime, fmtDateTime, staffSignin } from './lib.js';
 const app = document.getElementById('app');
 
 const state = { me: null, items: [], selected: null, ws: null, form: null, crm: null, es: null, live: false, timer: null, flash: null };
@@ -12,7 +10,7 @@ const signinEl = h('div');
 const queueEl = h('aside.wx-card.wx-q', { 'aria-label': 'Call queue' });
 const centerEl = h('main.wsx-main', { 'aria-label': 'Case' });
 const sideEl = h('aside.wsx-side', { 'aria-label': 'Case management' });
-mount(app, h('div.wsx-bar', h('h1', 'Agent workspace'), h('span.wx-chip', 'Northstar Bank · demo'), liveEl, h('span.spacer'), signinEl), h('div.wsx', queueEl, centerEl, sideEl));
+mount(app, h('div.wsx-bar', h('a.wx-brand', { href: '/' }, 'Hear It Once'), h('h1', 'Agent workspace'), h('span.wx-chip', 'Northstar Bank · demo'), liveEl, h('span.spacer'), h('a.wx-link', { href: '/', target: '_blank', rel: 'noopener' }, 'Open customer page ↗'), signinEl), h('div.wsx', queueEl, centerEl, sideEl));
 
 const PHASE = { waiting: ['warn', 'Waiting'], accepted: ['ok', 'Accepted'], completed: ['neutral', 'Completed'], no_agent: ['bad', 'No agent'], cancelled: ['neutral', 'Cancelled'] };
 const TONE = { ok: 'ok', passed: 'ok', failed: 'bad', locked: 'bad', warn: 'warn', pending: 'warn', blocked: 'bad', issued: 'ok', running: 'warn' };

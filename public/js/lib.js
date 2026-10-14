@@ -1,4 +1,3 @@
-import { brandMark } from './icons.js';
 
 // Shared browser helpers. All rendering uses textContent / DOM nodes — never innerHTML with
 // data — so server-provided text is always output-encoded.
@@ -75,26 +74,6 @@ export const humanise = (s) => (s == null ? '—' : String(s).replace(/_/g, ' ')
 export const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—');
 export const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
 export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
-
-export function topbar(active) {
-  const links = [
-    ['/', 'Talk to the AI', 'home'],
-    ['/dashboard.html', 'Operations', 'dash'],
-    ['/agent.html', 'Agent console', 'agent'],
-    ['/lab.html', 'Scenario lab', 'lab'],
-  ];
-  const mark = brandMark();
-  return [
-    h(
-      'header.topbar',
-      h('a.wordmark', { href: '/' }, mark, h('b', 'Hear It Once'), h('span', 'Card services')),
-      h('nav.nav', { 'aria-label': 'Main' }, links.map(([href, label, key]) => h('a', { href, 'aria-current': key === active ? 'page' : null }, label))),
-      h('div.spacer'),
-      h('span.env-pill', { title: 'Synthetic customers and mock bank systems only — no real card, payment or dispute is affected.' }, 'Demo environment · synthetic data'),
-      h('div#who.small.muted'),
-    ),
-  ];
-}
 
 /** Demo staff sign-in strip: one click per synthetic role (not real authentication). */
 export async function staffSignin(container, { roles, onChange }) {

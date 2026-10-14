@@ -10,8 +10,8 @@ One page, two interfaces. The judge page (`/`) shows **Demo customers and test d
 |---|---|---|
 | Judge: demo customers + call + summary | `/` (`public/lily/*`) | Stitch light design system, no build step |
 | Agent workspace | `/agent.html` | Live over SSE (`/api/handoffs/stream`), no refresh |
-| Operations dashboard, lab | `/dashboard.html`, `/lab.html` | Same theme |
-| Previous hackathon demo | `/classic.html` | Kept intact |
+
+There are only these two screens. `/classic.html`, `/dashboard.html` and `/lab.html` were removed and redirect to `/`. Their APIs remain.
 
 ## Architecture
 

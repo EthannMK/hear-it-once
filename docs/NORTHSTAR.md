@@ -33,6 +33,8 @@ Sign in as a demo agent. The queue has Waiting, Accepted and Completed groups an
 | `LIVE_VOICE` | `Aoede` | Voice name |
 | `GOOGLE_CLOUD_PROJECT` | from Cloud Run | Vertex AI project |
 | `GOOGLE_CLOUD_LOCATION` | `us-central1` | Vertex AI region |
+| `INTENT_MODEL` | `gemini` in Docker | `gemini` reads the whole sentence when keyword rules are unsure, with rules as fallback. `rules` is offline only |
+| `INTENT_GEMINI_MODEL` | `gemini-2.5-flash` | Model used for intent classification |
 | `DEMO_MODE` | on locally and in the Dockerfile | Required for `/api/demo/customers` and demo sign-in |
 
 ## Check which Live model works (Cloud Shell)

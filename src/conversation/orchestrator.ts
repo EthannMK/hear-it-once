@@ -9,9 +9,10 @@
  * Every input is serialised per session (in-process lock) and persisted, so a page reload or
  * server restart resumes from the stored context.
  */
+import { GeminiIntentModel, HybridIntentModel } from '../ai/intent-gemini.ts';
 import { env } from '../config/env.ts';
 import { policy, type IssueType } from '../config/policy.ts';
-import { get, parseJson, run, tx } from '../db/db.ts';
+import { all, get, parseJson, run, tx } from '../db/db.ts';
 import { nowIso, nowMs } from '../lib/clock.ts';
 import { newId, sha256 } from '../lib/ids.ts';
 import { AppError } from '../lib/errors.ts';
@@ -202,10 +203,17 @@ function intentModel(): IntentModel {
   if (modelOverride) return modelOverride;
   const e = env();
   if (e.INTENT_MODEL === 'anthropic' && e.ANTHROPIC_API_KEY && e.ANTHROPIC_MODEL) return new AnthropicIntentModel(e.ANTHROPIC_API_KEY, e.ANTHROPIC_MODEL);
+  if (e.INTENT_MODEL === 'gemini' && e.GOOGLE_CLOUD_PROJECT) { geminiHybrid ??= new HybridIntentModel(rules, new GeminiIntentModel(e.GOOGLE_CLOUD_PROJECT)); return geminiHybrid; }
   return rules;
 }
+let geminiHybrid: IntentModel | null = null;
 
 class AssistantUnavailableError extends Error {}
+
+/** The caller's last few spoken statements (sensitive answers are never stored, so never included). */
+function recentCustomerStatements(sessionId: string): string[] {
+  return all<{ text: string }>("SELECT text FROM conversation_turns WHERE session_id = ? AND speaker = 'customer' AND sensitive_redacted = 0 AND kind IN ('utterance','voice') ORDER BY seq DESC LIMIT 3", [sessionId]).map((r) => r.text).reverse();
+}
 
 async function classify(s: Session, text: string): Promise<Classification> {
   if (activeFaults('assistant', { scenarioId: s.scenarioId, customerId: s.ctx.verification.identifiedCustomerId }).has('unavailable')) {
@@ -213,7 +221,7 @@ async function classify(s: Session, text: string): Promise<Classification> {
   }
   const m = intentModel();
   try {
-    return await m.classify(text);
+    return await m.classify(text, { previousStatements: recentCustomerStatements(s.id) });
   } catch (e) {
     // Model failure is not fatal: fall back to the deterministic rules model.
     event(s, 'ai_model_error', { model: m.name, error: (e as Error).message.slice(0, 200) });

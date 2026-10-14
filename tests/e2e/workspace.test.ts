@@ -224,3 +224,23 @@ describe('seeded history', () => {
     }
   });
 });
+
+describe('understanding natural phrasing', () => {
+  it('maps "a recent online charge that may look unfamiliar" to an unrecognised transaction without asking to repeat', async () => {
+    const { c } = await startProfile();
+    await c.say('So, I had a recent online charge that may look unfamiliar.');
+    expect(c.session().issue_type).toBe('unrecognised_transaction');
+    expect(c.lastAssistant()).toMatch(/card number/i);
+  });
+
+  it('asks Gemini only when the rules are unsure, and falls back to the rules if it fails', async () => {
+    const { HybridIntentModel } = await import('../../src/ai/intent-gemini.ts');
+    const { RulesIntentModel } = await import('../../src/ai/intent.ts');
+    const llm = { name: 'fake', classify: async () => ({ issueType: 'fee_query' as const, confidence: 0.9, alternatives: [], unsupportedTopic: null, slots: {} as any, model: 'fake' }) };
+    const hybrid = new HybridIntentModel(new RulesIntentModel(), llm);
+    expect((await hybrid.classify('what is this thing on my statement')).issueType).toBe('fee_query');
+    expect((await hybrid.classify('I lost my card')).model).toBe('rules-v1');
+    const broken = new HybridIntentModel(new RulesIntentModel(), { name: 'x', classify: async () => { throw new Error('down'); } });
+    expect((await broken.classify('what is this thing on my statement')).issueType).toBeNull();
+  });
+});

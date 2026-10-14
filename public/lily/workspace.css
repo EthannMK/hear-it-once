@@ -79,3 +79,6 @@
 .wx-rec{border:1px solid var(--hair);border-radius:.5rem;padding:.5rem .65rem;display:grid;gap:.15rem;font-size:.9rem}
 .wx-trail{font-size:.8rem;color:var(--text-2);margin:0;padding-left:1.1rem}
 .wsx-stack{display:grid;gap:1rem}.wsx-main,.wsx-side{min-width:0}
+.wx-brand{font:500 1.15rem 'Newsreader',Georgia,serif;color:var(--text);text-decoration:none}
+.wx-link{color:var(--text-2);font-size:.88rem;text-decoration:none}.wx-link:hover{color:#5846c9}
+.wsx-bar h1{font:600 .95rem 'Plus Jakarta Sans',system-ui,sans-serif;color:var(--text-2);margin:0}

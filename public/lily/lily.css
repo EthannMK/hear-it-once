@@ -155,3 +155,4 @@ ul.tx{list-style:none;margin:.3rem 0 0;padding:0;display:grid;gap:.1rem}
 ul.tx li{display:grid;grid-template-columns:1fr auto;column-gap:.6rem;padding:.4rem 0;border-bottom:1px solid var(--s);font-size:.9rem}
 ul.tx li .small{grid-column:1/-1}
 .panel.demo>.small{padding:0 1.1rem 1rem}
+@media(max-width:960px){.callhost{order:-1}}
