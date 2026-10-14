@@ -35,10 +35,34 @@ export function insertCustomer(c: { id: string; number: string; name: string; do
   );
 }
 
-export function insertCard(id: string, customerId: string, last4: string, holder: string, opts: { network?: string; role?: 'primary' | 'additional'; status?: string } = {}): void {
+/** True when the digits pass the Luhn checksum (real card numbers do). */
+export const luhnValid = (digits: string): boolean => {
+  let sum = 0;
+  for (let i = 0; i < digits.length; i++) {
+    let d = Number(digits[digits.length - 1 - i]);
+    if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+  }
+  return sum % 10 === 0;
+};
+
+/**
+ * A FICTIONAL 16-digit demo card number ending in `last4`. It deliberately FAILS the Luhn
+ * checksum, so it can never be a real card number. Shown unmasked on the demo screens only.
+ */
+export function demoPan(n: number, last4: string): string {
+  const head = `4999 ${String(n).padStart(2, '0')}`;
+  for (let mid = 0; mid < 100; mid++) {
+    const digits = `4999${String(n).padStart(2, '0')}${String(mid).padStart(2, '0')}${String(n * 37 % 10000).padStart(4, '0')}${last4}`;
+    if (!luhnValid(digits)) return digits.replace(/(\d{4})(?=\d)/g, '$1 ');
+  }
+  return `${head}00 0000 ${last4}`;
+}
+
+export function insertCard(id: string, customerId: string, last4: string, holder: string, opts: { network?: string; role?: 'primary' | 'additional'; status?: string; pan?: string } = {}): void {
   run(
-    `INSERT INTO bank_cards (id, customer_id, last4, network, product, holder_role, holder_name, status, status_as_of, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-    [id, customerId, last4, opts.network ?? 'Visa', 'Everyday Rewards Credit Card', opts.role ?? 'primary', holder, opts.status ?? 'active', nowIso(), nowIso()],
+    `INSERT INTO bank_cards (id, customer_id, last4, network, product, holder_role, holder_name, status, status_as_of, created_at, demo_pan) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, customerId, last4, opts.network ?? 'Visa', 'Everyday Rewards Credit Card', opts.role ?? 'primary', holder, opts.status ?? 'active', nowIso(), nowIso(), opts.pan ?? null],
   );
 }
 
@@ -140,7 +164,7 @@ export function seedScenario(s: ScenarioDef): void {
     insertCustomer(cu);
     const card = `CRD-${cu.id.slice(4)}A`;
     const last4 = String(4000 + Number(cu.id.slice(4)) * 7).slice(-4);
-    insertCard(card, cu.id, last4, cu.name, { network: Number(cu.id.slice(4)) % 2 ? 'Visa' : 'Mastercard' });
+    insertCard(card, cu.id, last4, cu.name, { network: Number(cu.id.slice(4)) % 2 ? 'Visa' : 'Mastercard', pan: demoPan(Number(cu.id.slice(4)) - 1000, last4) });
     baseline(cu.id, card);
     addFault(s);
 
@@ -194,6 +218,29 @@ export function seedScenario(s: ScenarioDef): void {
       default:
         break;
     }
+    seedCrossTopic(s, card);
+  }
+}
+
+/**
+ * The Northstar demo profiles are not locked to one story: every profile also has an ordinary
+ * late fee and a recent decline, so a caller can change topic and still get a real lookup.
+ */
+const CROSS_TOPIC: Record<string, { fee: boolean; decline?: { merchant: string; amount: number; reason: string; action: string } }> = {
+  S01: { fee: true, decline: { merchant: 'Skyline Cinemas', amount: 3200, reason: 'insufficient_available_credit', action: 'Make a payment to restore available credit, then try again.' } },
+  S02: { fee: true, decline: { merchant: 'Fresh Basket Market', amount: 5480, reason: 'merchant_category_restricted', action: 'Ask an agent whether the merchant category restriction can be reviewed.' } },
+  S05: { fee: false, decline: { merchant: 'Metro Fuel', amount: 7600, reason: 'insufficient_available_credit', action: 'Make a payment to restore available credit, then try again.' } },
+  S08: { fee: true, decline: { merchant: 'Pacific Air', amount: 42100, reason: 'travel_security_rule', action: 'Confirm the trip with an agent so a travel note can be added.' } },
+  S19: { fee: true },
+};
+
+function seedCrossTopic(s: ScenarioDef, card: string): void {
+  const x = CROSS_TOPIC[s.id];
+  if (!x) return;
+  if (x.fee) insertFee(s.customer.id, 'late_payment', 2900, 40);
+  if (x.decline) {
+    run(`INSERT INTO bank_declines (id, customer_id, card_id, merchant_name, amount_minor, declined_at, reason_code, customer_action, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+      [newId('DEC'), s.customer.id, card, x.decline.merchant, x.decline.amount, iso(1, 10), x.decline.reason, x.decline.action, nowIso()]);
   }
 }
 

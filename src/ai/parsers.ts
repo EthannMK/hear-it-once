@@ -107,6 +107,16 @@ export function parseOtp(text: string, length = 6): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Card number as spoken or typed: digits possibly grouped by spaces or dashes. Returns the digits
+ * when there are at least 10 of them (so a wrong or short number counts as an attempt), or null
+ * when too little was captured to treat as an answer at all.
+ */
+export function parseCardNumber(text: string): string | null {
+  const digits = text.replace(/\D/g, '');
+  return digits.length >= 10 && digits.length <= 19 ? digits : null;
+}
+
 export function parseCustomerNumber(text: string): string | null {
   const m = text.replace(/(?<=\d)[\s-](?=\d)/g, '').match(/(?<!\d)(\d{8})(?!\d)/);
   return m ? m[1] : null;

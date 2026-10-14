@@ -1,16 +1,18 @@
 /**
- * Live voice WebSocket, journey data for the landing page, and the staff live handover stream.
+ * Live voice WebSocket, Northstar demo customer data for the judge screen, and the staff live handover stream.
  */
 import type { FastifyInstance } from 'fastify';
 import { get } from '../../db/db.ts';
 import { log } from '../../lib/logger.ts';
+import { AppError } from '../../lib/errors.ts';
 import { requirePermission } from '../../auth/rbac.ts';
 import { SCENARIOS } from '../../db/scenarios.ts';
-import { subscribeAll } from '../../events/timeline.ts';
+import { subscribeAll, subscribeTurns } from '../../events/timeline.ts';
 import { callerOwns } from '../app.ts';
 import { LiveBridge, auditLiveStart, type ServerMessage } from '../../live/bridge.ts';
 import { createLiveProvider, liveAvailability } from '../../live/registry.ts';
-import { JOURNEY_SCENARIOS, journeyCard } from '../../live/journey.ts';
+import { allProfileCards, BANK_NAME } from '../../live/profiles.ts';
+import { env } from '../../config/env.ts';
 
 const bridges = new Map<string, LiveBridge>();
 const MAX_AUDIO_B64 = 32 * 1024;
@@ -18,10 +20,19 @@ const MAX_AUDIO_B64 = 32 * 1024;
 export function registerLiveRoutes(app: FastifyInstance): void {
   app.get('/api/live/status', async () => ({ ...(await liveAvailability()), simulated: true }));
 
-  app.get('/api/journey/scenarios', async () => ({
-    demoData: true,
-    items: JOURNEY_SCENARIOS.map((j) => journeyCard(j, SCENARIOS.find((s) => s.id === j.scenarioId)!)),
-  }));
+  /**
+   * Northstar Bank demo customers and test data for the judge screen. Synthetic only; the full demo
+   * card numbers are fictional and fail the real card checksum. Disabled outside demo mode.
+   */
+  app.get('/api/demo/customers', async () => {
+    if (!env().DEMO_MODE) throw new AppError('NOT_FOUND', 'Demo customers are only available in demo mode.');
+    return {
+      bank: BANK_NAME,
+      demoData: true,
+      disclaimer: 'Northstar Bank is a fictional bank. Every customer, phone number, account reference and card number below is invented dummy data for testing this demo. Do not enter real card details.',
+      items: allProfileCards(),
+    };
+  });
 
   /** Bidirectional voice. The caller token cookie (path /api/calls) authenticates the browser. */
   app.get<{ Params: { id: string } }>('/api/calls/:id/live', { websocket: true }, async (socket, req) => {
@@ -98,14 +109,20 @@ export function registerLiveRoutes(app: FastifyInstance): void {
     const res = reply.raw;
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no', 'x-content-type-options': 'nosniff' });
     res.write('retry: 2000\n\n');
+    const activeHandoff = (sessionId: string) => !!get("SELECT 1 FROM handoffs WHERE session_id = ? AND status IN ('requested','queued','connected')", [sessionId]);
     const off = subscribeAll((e) => {
-      if (!e.type.startsWith('handoff.') && e.type !== 'call.closed') return;
+      // Handover lifecycle events always; anything else only for calls that are waiting on or with an agent.
+      if (!e.type.startsWith('handoff.') && e.type !== 'call.closed' && !activeHandoff(e.sessionId)) return;
       res.write(`event: handoff\ndata: ${JSON.stringify({ type: e.type, sessionId: e.sessionId, title: e.title, status: e.status, at: e.at, ref: e.ref })}\n\n`);
+    });
+    const offTurns = subscribeTurns((sessionId) => {
+      if (activeHandoff(sessionId)) res.write(`event: handoff\ndata: ${JSON.stringify({ type: 'handoff.transcript', sessionId, title: 'Transcript updated', status: 'info', at: new Date().toISOString(), ref: null })}\n\n`);
     });
     const ping = setInterval(() => res.write(': keep-alive\n\n'), 15_000);
     req.raw.on('close', () => {
       clearInterval(ping);
       off();
+      offTurns();
     });
   });
 }

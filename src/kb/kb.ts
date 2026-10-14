@@ -76,9 +76,15 @@ export const KB_ARTICLES: KbArticle[] = [
     ruleRefs: ['FP-ANNUAL-01', 'FP-FX-01', 'FP-CASH-01'], version: V, synthetic: true,
   },
   {
-    id: 'KB-107', title: 'Identity verification and failed verification', categories: ['verification'], keywords: ['verify', 'identity', 'passcode', 'date of birth', 'locked'],
-    excerpt: 'Two factors are required: knowledge (date of birth) and possession (one-time passcode). Caller ID, a claimed name or voice are never proof. After three failures, stop and hand off without disclosing anything.',
-    steps: ['Identify, then verify DOB, then passcode.', 'Use generic failure messages.', 'On lockout: no account data, no actions; warm handoff.'],
+    id: 'KB-111', title: 'Identity verification and failed verification', categories: ['verification'], keywords: ['verify', 'identity', 'passcode', 'date of birth', 'card number', 'locked'],
+    excerpt: 'Demo verification compares a knowledge factor on the server: the card number (Northstar demo) or date of birth plus a one-time passcode. Caller ID, a claimed name or voice are never proof. A wrong answer keeps the call going with the attempt count; after three failures, stop and hand off without disclosing anything.',
+    steps: ['Identify, then verify the factor on the server.', 'Never reveal the expected value.', 'Allow retries until three failures, then a warm handoff with no account data and no actions.'],
+    ruleRefs: [], version: V, synthetic: true,
+  },
+  {
+    id: 'KB-110', title: 'Account and card information requests', categories: ['account_inquiry'], keywords: ['status', 'recent transactions', 'active', 'activity', 'balance'],
+    excerpt: 'After verification the assistant may read back card status and recent purchases exactly as the card and transaction systems return them. It does not estimate balances or limits, and makes no change.',
+    steps: ['Verify identity first.', 'Read card status and recent purchases from the systems.', 'Report only what is recorded; say plainly what is not available.', 'Offer an agent for anything that needs a change.'],
     ruleRefs: [], version: V, synthetic: true,
   },
   {

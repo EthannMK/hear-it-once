@@ -12,6 +12,7 @@ import { get } from '../../db/db.ts';
 import { AppError } from '../../lib/errors.ts';
 import { newId } from '../../lib/ids.ts';
 import { SCENARIOS } from '../../db/scenarios.ts';
+import { profileById } from '../../live/profiles.ts';
 import { startCall, handleInput, type CallInput } from '../../conversation/orchestrator.ts';
 import { getOp, opHistory, reconcile, requestAction, retryAction, currentSnapshotId } from '../../actions/action-service.ts';
 import { audit, type Actor } from '../../audit/audit.ts';
@@ -28,6 +29,8 @@ const StartCall = z
     scenarioId: z.string().regex(/^S\d{2}$/).optional(),
     callerAni: z.string().max(32).optional(),
     channel: z.enum(['text_simulator', 'voice_browser']).default('text_simulator'),
+    /** Northstar demo customer profile (sets the active customer; not a scripted scenario). */
+    profileId: z.string().regex(/^[a-z-]{3,32}$/).optional(),
     moodStart: z.enum(['calm', 'worried', 'frustrated', 'upset']).optional(),
     /** Free-talk demo: the synthetic persona is chosen from the caller's intent. */
     mode: z.enum(['scenario', 'free']).optional(),
@@ -82,13 +85,18 @@ export function registerCallRoutes(app: FastifyInstance): void {
 
   app.post('/api/calls', { config: { rateLimit: { max: env().NODE_ENV === 'test' ? 10_000 : 30, timeWindow: '1 minute' } } }, async (req, reply) => {
     const body = StartCall.parse(req.body ?? {});
-    const scenario = body.scenarioId ? SCENARIOS.find((s) => s.id === body.scenarioId) : undefined;
+    const profile = body.profileId ? profileById(body.profileId) : undefined;
+    if (body.profileId && !profile) throw new AppError('NOT_FOUND', 'Unknown demo customer.');
+    if (profile && body.scenarioId) throw new AppError('VALIDATION_FAILED', 'Choose either a demo customer or a scenario, not both.');
+    const scenario = profile ? SCENARIOS.find((s) => s.id === profile.scenarioId) : body.scenarioId ? SCENARIOS.find((s) => s.id === body.scenarioId) : undefined;
     if (body.scenarioId && !scenario) throw new AppError('NOT_FOUND', 'Unknown scenario.');
-    if (scenario && body.resetScenario && env().DEMO_MODE) resetScenario(scenario.id);
+    // Scripted-scenario replay only. Demo-customer calls never reset data, so earlier calls and cases stay on record.
+    if (scenario && !profile && body.resetScenario && env().DEMO_MODE) resetScenario(scenario.id);
     const token = randomBytes(24).toString('base64url');
     const sessionId = await startCall({
       channel: body.channel,
-      scenarioId: body.scenarioId ?? null,
+      scenarioId: profile ? null : body.scenarioId ?? null,
+      profileId: profile?.id ?? null,
       callerAni: body.callerAni ?? scenario?.customer.phone ?? null,
       callerToken: token,
       moodStart: body.moodStart ?? null,

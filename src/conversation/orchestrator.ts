@@ -34,6 +34,7 @@ import * as M from './messages.ts';
 import { emitTimeline, type TimelineInput, type Stage as TStage } from '../events/timeline.ts';
 import { computeTags, diffTags, sentimentFrom, type CallTags } from './tags.ts';
 import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
+import { profileById } from '../live/profiles.ts';
 import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
 import { maskPhone } from '../lib/redact.ts';
 import { ISSUE_LABELS, formatDate } from './format.ts';
@@ -44,6 +45,7 @@ export type Stage =
   | 'identifying'
   | 'awaiting_dob'
   | 'awaiting_otp'
+  | 'awaiting_card'
   | 'workflow'
   | 'wrap_up'
   | 'awaiting_survey'
@@ -80,6 +82,10 @@ export interface CallContext {
   tags?: CallTags | null;
   /** Further banking topics raised after the first was handled, in the same verified call. */
   secondary?: { issueType: IssueType; at: string }[];
+  /** Northstar demo: which identity check this call uses. Defaults to date of birth + passcode. */
+  verificationMode?: 'dob_otp' | 'card_number';
+  /** Active demo customer profile for this call (server-side context). */
+  profileId?: string | null;
 }
 
 /** Default synthetic persona per issue type for free-talk demos (no injected faults). */
@@ -90,6 +96,7 @@ export const FREE_TALK_PERSONA: Record<IssueType, string> = {
   payment_not_showing: 'S04',
   fee_query: 'S05',
   card_declined: 'S19',
+  account_inquiry: 'S01',
 };
 
 export type CallInput =
@@ -225,6 +232,8 @@ export interface StartCallInput {
   callerToken: string;
   moodStart?: string | null;
   freeMode?: boolean;
+  /** Northstar demo customer profile; sets the active customer and the card-number identity check. */
+  profileId?: string | null;
 }
 
 export async function startCall(input: StartCallInput): Promise<string> {
@@ -252,12 +261,20 @@ export async function startCall(input: StartCallInput): Promise<string> {
     sentiment: null,
     tags: null,
   };
+  const profile = input.profileId ? profileById(input.profileId) : undefined;
+  if (input.profileId && !profile) throw new Error('Unknown demo profile.');
+  if (profile) {
+    input = { ...input, scenarioId: profile.scenarioId };
+    ctx.verificationMode = 'card_number';
+    ctx.profileId = profile.id;
+    ctx.freeMode = false;
+  }
   const sc = input.scenarioId ? scenarioById(input.scenarioId) : undefined;
   if (sc) ctx.persona = { scenarioId: sc.id, name: sc.customer.name, customerNumber: sc.customer.number, phoneMasked: maskPhone(sc.customer.phone) };
   run(
-    `INSERT INTO call_sessions (id, correlation_id, channel, data_origin, scenario_id, caller_ani_hash, caller_token_hash, state, context_json, outcome, mood_start, answered_at, created_at, updated_at)
-     VALUES (?,?,?, 'demo_session', ?,?,?, 'awaiting_issue', ?, 'in_progress', ?, ?, ?, ?)`,
-    [id, correlationId, input.channel ?? 'text_simulator', input.scenarioId ?? null, input.callerAni ? sha256(`ani:${input.callerAni}`) : null, sha256(`call:${input.callerToken}`), JSON.stringify(ctx), input.moodStart ?? null, ts, ts, ts],
+    `INSERT INTO call_sessions (id, correlation_id, channel, data_origin, scenario_id, caller_ani_hash, caller_token_hash, state, context_json, outcome, mood_start, answered_at, created_at, updated_at, profile_id, verification_mode)
+     VALUES (?,?,?, 'demo_session', ?,?,?, 'awaiting_issue', ?, 'in_progress', ?, ?, ?, ?, ?, ?)`,
+    [id, correlationId, input.channel ?? 'text_simulator', input.scenarioId ?? null, input.callerAni ? sha256(`ani:${input.callerAni}`) : null, sha256(`call:${input.callerToken}`), JSON.stringify(ctx), input.moodStart ?? null, ts, ts, ts, profile?.id ?? null, ctx.verificationMode ?? 'dob_otp'],
   );
   const s: Session = { id, correlationId, scenarioId: input.scenarioId ?? null, dataOrigin: 'demo_session', ctx, actor: { type: 'customer_session', id } };
   // Identification by caller ID happens now (not verification). The raw ANI is not stored.
@@ -268,7 +285,7 @@ export async function startCall(input: StartCallInput): Promise<string> {
       ctx.verification.identifiedBy = 'ani';
     }
   }
-  tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: `Channel: ${input.channel === 'voice_browser' ? 'browser voice' : 'text simulator'}${sc ? `; demo scenario ${sc.id}` : ctx.freeMode ? '; free-talk demo' : ''}.`, status: 'ok', source: 'telephony (simulated)', ref: correlationId });
+  tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: `Channel: ${input.channel === 'voice_browser' ? 'browser voice' : 'text simulator'}${profile ? `; active demo customer ${sc!.customer.name} (caller ID matched — identification only)` : sc ? `; demo scenario ${sc.id}` : ctx.freeMode ? '; free-talk demo' : ''}.`, status: 'ok', source: 'telephony (simulated)', ref: correlationId });
   say(s, M.GREETING_NOTICE, 'system');
   // On a live voice call Lily speaks her own greeting; the AI disclosure is recorded when she has
   // actually said it (see the voice bridge), not assumed here.
@@ -304,7 +321,7 @@ export async function handleInput(sessionId: string, input: CallInput): Promise<
 
 /* ------------------------------------------------------------------------- dispatch */
 
-const SENSITIVE_STAGES: Stage[] = ['identifying', 'awaiting_dob', 'awaiting_otp'];
+const SENSITIVE_STAGES: Stage[] = ['identifying', 'awaiting_dob', 'awaiting_otp', 'awaiting_card'];
 
 async function dispatch(s: Session, input: CallInput): Promise<void> {
   const c = s.ctx;
@@ -369,7 +386,8 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
   // (Checked after the ASR gate so a misheard utterance can be repeated.)
   // Duplicate utterance (e.g. double send / echo) inside a short window → ignore.
   const h = sha256(text.toLowerCase().replace(/\s+/g, ' '));
-  if (c.lastUtterance && c.lastUtterance.hash === h && nowMs() - Date.parse(c.lastUtterance.at) < policy().conversation.duplicateUtteranceWindowMs) {
+  // A card-number answer is never treated as an echo: repeating a wrong number is a real, counted attempt (capped at three).
+  if (c.stage !== 'awaiting_card' && c.lastUtterance && c.lastUtterance.hash === h && nowMs() - Date.parse(c.lastUtterance.at) < policy().conversation.duplicateUtteranceWindowMs) {
     event(s, 'duplicate_utterance_ignored');
     return;
   }
@@ -422,6 +440,7 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     case 'identifying':
     case 'awaiting_dob':
     case 'awaiting_otp':
+    case 'awaiting_card':
       return onVerificationAnswer(s, text);
     case 'workflow':
       return onWorkflowText(s, text);
@@ -503,15 +522,21 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
   event(s, 'issue_captured', { issueType, confidence });
   if (c.freeMode && !c.verification.identifiedCustomerId) await bindFreeTalkPersona(s, issueType);
   say(s, (distressed ? 'I understand — and if at any point you’d prefer a person, just say so. ' : '') + M.ackIssue(issueType));
-  tl(s, { type: 'verification.started', stage: 'verify', title: issueType === 'lost_stolen_card' ? 'Identity verification started — card block will follow immediately' : 'Identity verification started', detail: 'Two factors required: date of birth, then a one-time passcode to the registered phone. Nothing about the account is read until both pass.', status: 'running', source: 'identity verification (simulated)' });
+  tl(s, { type: 'verification.started', stage: 'verify', title: issueType === 'lost_stolen_card' ? 'Identity verification started — card block will follow immediately' : 'Identity verification started', detail: c.verificationMode === 'card_number' ? 'Demo check: the full card number is compared on the server with the active demo customer’s record. Nothing about the account is read until it matches. (Synthetic demo verification, not production identity checking.)' : 'Two factors required: date of birth, then a one-time passcode to the registered phone. Nothing about the account is read until both pass.', status: 'running', source: 'identity verification (simulated)' });
   // Verification begins immediately (lost/stolen fast path uses the same flow, nothing else first).
-  const ev = await startVerification(vctx(s), c.verification, null);
+  const ev = await startVerification(vctx(s), c.verification, null, c.verificationMode ?? 'dob_otp');
   if (c.verification.identifiedCustomerId && c.verification.identifiedBy === 'ani' && ev.type === 'need_identifier') {
     c.verification.status = 'awaiting_dob';
     run("UPDATE call_sessions SET verification_status = 'identified' WHERE id = ?", [s.id]);
     run("INSERT INTO verification_attempts (session_id, customer_id, step, method, outcome, created_at) VALUES (?,?, 'identify', 'ani', 'passed', ?)", [s.id, c.verification.identifiedCustomerId, nowIso()]);
   }
-  if (c.verification.status === 'awaiting_dob') {
+  if (c.verificationMode === 'card_number' && c.verification.identifiedCustomerId) {
+    // Active demo customer is known from caller ID (identification only). Ask for the card number.
+    c.verification.status = 'awaiting_card';
+    run("UPDATE call_sessions SET verification_status = 'identified' WHERE id = ?", [s.id]);
+    c.stage = 'awaiting_card';
+    say(s, M.ASK_CARD);
+  } else if (c.verification.status === 'awaiting_dob') {
     c.stage = 'awaiting_dob';
     say(s, M.ASK_DOB);
   } else {
@@ -542,6 +567,9 @@ async function onVerificationAnswer(s: Session, text: string): Promise<void> {
   const c = s.ctx;
   const ev = await submitVerificationAnswer(vctx(s), c.verification, text);
   switch (ev.type) {
+    case 'need_card':
+      c.stage = 'awaiting_card';
+      return say(s, M.ASK_CARD);
     case 'need_dob':
       c.stage = 'awaiting_dob';
       return say(s, `Thank you. ${M.ASK_DOB}`);
@@ -554,20 +582,21 @@ async function onVerificationAnswer(s: Session, text: string): Promise<void> {
         c.unclearCount++;
         if (c.unclearCount >= 3) return handoff(s, 'communication_breakdown', `could not capture ${ev.step} answer`, "I'm having trouble capturing that. Let me connect you with an agent who can help verify you.");
       }
-      if (!ev.unparsed) tl(s, { type: 'verification.retry', stage: 'verify', title: `Verification answer did not match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)`, detail: 'Generic message given — the caller is not told which detail was wrong.', status: 'warn', source: 'identity verification (simulated)' });
+      if (!ev.unparsed) tl(s, { type: 'verification.retry', stage: 'verify', title: ev.step === 'card' ? `Card number check failed — no match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)` : `Verification answer did not match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)`, detail: ev.step === 'card' ? 'The number given did not match the active customer’s record. The expected number is never revealed and the call carries on.' : 'Generic message given — the caller is not told which detail was wrong.', status: 'warn', source: 'identity verification (simulated)', data: { attemptResult: 'failed', attemptsRemaining: ev.remaining } });
+      else if (ev.step === 'card') tl(s, { type: 'verification.unclear', stage: 'verify', title: 'Card number not captured clearly — asked again (no attempt used)', status: 'info', source: 'identity verification (simulated)' });
       return say(s, M.retryVerification(ev.step, ev.remaining, ev.unparsed));
     case 'locked':
       event(s, 'verification_failed', { step: ev.step });
       run("UPDATE call_sessions SET outcome = 'verification_failed' WHERE id = ?", [s.id]);
       c.caseId = ensureCase({ sessionId: s.id, customerId: null, issueType: c.issue?.issueType ?? null, verificationOutcome: 'failed', customerReported: c.issue?.statement ?? null, actor: s.actor, correlationId: s.correlationId });
       addRiskFlag(c.caseId, 'verification_failed');
-      tl(s, { type: 'verification.failed', stage: 'verify', title: 'Identity verification failed — locked after 3 attempts', detail: 'No account data was read or disclosed and no action is possible. Routing to an agent to verify another way.', status: 'failed', source: 'identity verification (simulated)', ref: c.caseId });
+      tl(s, { type: 'verification.failed', stage: 'verify', title: ev.step === 'card' ? 'Card number check failed 3 times — preparing handover to a person' : 'Identity verification failed — locked after 3 attempts', detail: 'No account data was read or disclosed and no action is possible. Routing to an agent to verify another way.', status: 'failed', source: 'identity verification (simulated)', ref: c.caseId });
       refreshTags(s, 'verify');
       return handoff(s, 'verification_failed', `locked at ${ev.step}`, M.LOCKED);
     case 'verified':
       c.unclearCount = 0;
       event(s, 'verified');
-      tl(s, { type: 'verification.passed', stage: 'verify', title: 'Identity verified (two factors)', detail: 'Date of birth and one-time passcode both passed. Protected reads are now allowed.', status: 'ok', source: 'identity verification (simulated)' });
+      tl(s, { type: 'verification.passed', stage: 'verify', title: c.verificationMode === 'card_number' ? 'Card number matched — identity verified (demo check)' : 'Identity verified (two factors)', detail: c.verificationMode === 'card_number' ? 'The card number matched the active demo customer’s record on the server. Protected reads are now allowed. Synthetic demo verification only.' : 'Date of birth and one-time passcode both passed. Protected reads are now allowed.', status: 'ok', source: 'identity verification (simulated)', data: { attemptResult: 'passed' } });
       refreshTags(s, 'verify');
       return onVerified(s);
     default:
@@ -669,6 +698,16 @@ async function onWorkflowText(s: Session, text: string): Promise<void> {
   const p = c.pending;
   if (!isVerified(c.verification) || !c.wf) return say(s, "Sorry, I can't help with that until you're verified.");
   const wf = WORKFLOWS[c.wf.name];
+
+  // The customer may change topic at any time. A clearly different banking topic is handled as a
+  // new one (already verified, so no second check) instead of being forced into the current flow.
+  // Not while an answer is expected to a choice or a free-text question of the current workflow.
+  const choicePicked = p?.kind === 'choice' && (parseOrdinalChoice(text, p.options.length) != null || !!matchChoiceByText(p.options, text) || /\b(none|neither|not (any|one) of (these|them)|no)\b/i.test(text));
+  const answeringSomething = choicePicked || p?.kind === 'free_text' || (p?.kind === 'consent' && parseYesNo(text)) || (p?.kind === 'yes_no' && parseYesNo(text));
+  if (!answeringSomething && text.length > 12) {
+    const cls = await classify(s, redactText(text));
+    if (cls.issueType && cls.issueType !== c.issue?.issueType && cls.confidence >= Math.max(0.7, policy().conversation.minIntentConfidence)) return startSecondaryTopic(s, cls, text);
+  }
 
   if (p?.kind === 'consent') {
     if (isCorrection(text) || hasNewDetails(c, text)) return onCorrection(s, text);

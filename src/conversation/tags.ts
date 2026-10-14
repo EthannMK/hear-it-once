@@ -29,6 +29,7 @@ const CATEGORY: Record<string, string> = {
   payment_not_showing: 'Payments',
   fee_query: 'Fees and charges',
   card_declined: 'Card troubleshooting',
+  account_inquiry: 'Account information',
 };
 
 const FRUSTRATED = /\b(again|still|ridiculous|annoyed|annoying|frustrat\w*|angry|upset|useless|unacceptable|third time|second time|fed up|panick?\w*|scared|worried)\b/i;

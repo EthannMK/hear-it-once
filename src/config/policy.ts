@@ -35,7 +35,8 @@ export type IssueType =
   | 'wrong_or_duplicate_charge'
   | 'payment_not_showing'
   | 'fee_query'
-  | 'card_declined';
+  | 'card_declined'
+  | 'account_inquiry';
 
 export interface ActionPolicy {
   /** Verification level the session must have reached. */
@@ -57,6 +58,8 @@ export interface PolicyConfig {
   verification: {
     maxDobAttempts: number;
     maxOtpAttempts: number;
+    /** Card-number verification (Northstar demo): failed tries allowed before handover. */
+    maxCardAttempts: number;
     otpTtlSeconds: number;
     otpLength: number;
   };
@@ -144,7 +147,7 @@ export function buildPolicy(profile: PolicyConfig['profile']): PolicyConfig {
   }
   return {
     profile,
-    verification: { maxDobAttempts: 3, maxOtpAttempts: 3, otpTtlSeconds: 300, otpLength: 6 },
+    verification: { maxDobAttempts: 3, maxOtpAttempts: 3, maxCardAttempts: 3, otpTtlSeconds: 300, otpLength: 6 },
     retrieval: {
       maxStalenessSeconds: {
         card_status: 120,
@@ -167,6 +170,7 @@ export function buildPolicy(profile: PolicyConfig['profile']): PolicyConfig {
       payment_not_showing: ['customer_profile', 'payment_status', 'transactions'],
       fee_query: ['customer_profile', 'fee_policy'],
       card_declined: ['customer_profile', 'card_status', 'card_declines'],
+      account_inquiry: ['customer_profile', 'card_status', 'transactions'],
     },
     actions,
     disputes: { transactionLookbackDays: 120 },

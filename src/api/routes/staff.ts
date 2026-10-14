@@ -14,6 +14,7 @@ import { getCaseDetail } from '../../cases/case-service.ts';
 import { acceptHandoff, agentMessage, completeHandoff, getHandoff, listHandoffs } from '../../handoff/handoff-service.ts';
 import { approveAction, getOp, opHistory, reconcile, rejectApproval } from '../../actions/action-service.ts';
 import { computeKpis, KpiFilterSchema } from '../../reporting/kpi.ts';
+import { buildWorkspace, crmSearch, editWorkspace } from '../../workspace/workspace.ts';
 import { buildCallView, listCalls, listCases, opsOverview } from '../views.ts';
 import { STAFF_COOKIE } from '../app.ts';
 
@@ -55,6 +56,27 @@ export function registerStaffRoutes(app: FastifyInstance): void {
     if (!h) throw new AppError('NOT_FOUND', 'Handoff not found.');
     audit({ actor: staffActor(p), event: 'handoff.brief_viewed', status: 'ok', resourceType: 'handoff', resourceId: req.params.id, sessionId: String(h.session_id) });
     return { handoff: h, call: buildCallView(String(h.session_id), { audience: 'staff' }), case: h.case_id ? getCaseDetail(String(h.case_id)) : null };
+  });
+
+  /** Full agent workspace: customer, call, tags, transcript, verification, suggestion, KB, CRM query. */
+  app.get<{ Params: { id: string } }>('/api/handoffs/:id/workspace', async (req) => {
+    const p = requirePermission(req.staff, 'handoff.read');
+    const w = buildWorkspace(req.params.id);
+    if (!w) throw new AppError('NOT_FOUND', 'Handoff not found.');
+    audit({ actor: staffActor(p), event: 'handoff.workspace_viewed', status: 'ok', resourceType: 'handoff', resourceId: req.params.id, sessionId: w.call.sessionId });
+    return w;
+  });
+
+  /** Agent edits: tags, call-reason summary, suggestion, notes, resolution. Validated and audited. */
+  app.patch<{ Params: { id: string } }>('/api/handoffs/:id/workspace', async (req) => {
+    const p = requirePermission(req.staff, 'case.update');
+    return editWorkspace(req.params.id, { ...staffActor(p), id: p.userId }, req.body ?? {});
+  });
+
+  app.get('/api/crm/search', async (req) => {
+    const p = requirePermission(req.staff, 'case.read');
+    const { q, sessionId } = z.object({ q: z.string().min(2).max(200), sessionId: z.string().max(40).optional() }).parse(req.query);
+    return crmSearch(q, staffActor(p), sessionId ?? null);
   });
 
   app.post<{ Params: { id: string } }>('/api/handoffs/:id/accept', async (req) => {
