@@ -31,6 +31,8 @@ import { loadSnapshot, sourceData } from '../retrieval/retrieval.ts';
 import { applyDisputeOutcome } from '../disputes/dispute-service.ts';
 import { caseEvent } from '../cases/case-service.ts';
 import { log } from '../lib/logger.ts';
+import { emitTimeline, type TimelineStatus } from '../events/timeline.ts';
+import { ACTION_LABELS } from '../conversation/format.ts';
 
 export type OpStatus = 'requested' | 'validated' | 'rejected' | 'awaiting_confirmation' | 'awaiting_approval' | 'submitted' | 'succeeded' | 'failed' | 'unknown';
 
@@ -94,6 +96,35 @@ function transition(op: Operation, to: OpStatus, fields: Record<string, unknown>
 
 function auditOp(op: Operation, actor: Actor, event: string, status: 'ok' | 'denied' | 'failed' | 'unknown' | 'info', metadata: Record<string, unknown> = {}, correlationId?: string) {
   audit({ actor, event: `action.${event}`, status, resourceType: 'action_operation', resourceId: op.id, sessionId: op.session_id, correlationId, metadata: { type: op.action_type, target: op.target_ref, ...metadata } });
+  timelineForOp(op, event, metadata);
+}
+
+const SYSTEM_NAME: Record<string, string> = { block_card: 'card control', order_replacement: 'card issuing', submit_dispute: 'dispute intake', reverse_fee: 'fee ledger' };
+
+/** Human-readable live-stream entry for an action lifecycle step. */
+function timelineForOp(op: Operation, event: string, meta: Record<string, unknown>): void {
+  if (!op.session_id) return;
+  const label = ACTION_LABELS[op.action_type] ?? op.action_type;
+  const sys = `${SYSTEM_NAME[op.action_type] ?? 'bank system'} (simulated)`;
+  const fresh = getOp(op.id) ?? op;
+  const map: Record<string, [string, TimelineStatus, string | null] | undefined> = {
+    rejected: [`${label}: blocked by policy`, 'blocked', `${String(meta.reason ?? fresh.error_code ?? '')} — ${fresh.error_message ?? ''}`],
+    duplicate_request: [`${label}: duplicate request ignored`, 'info', `Same idempotency key — returned the existing operation (status ${String(meta.currentStatus)}). Nothing was executed twice.`],
+    duplicate_confirmation: [`${label}: duplicate confirmation ignored`, 'info', `Operation already ${String(meta.currentStatus)} — not executed again.`],
+    awaiting_approval: [`${label}: held for human approval`, 'pending', 'Policy requires an agent to approve before submission.'],
+    submitted: [`${label}: submitted to ${sys}`, 'running', `Attempt ${String(meta.attempt ?? fresh.attempts)} · idempotency key = operation ${op.id}`],
+    succeeded: [`${label}: confirmed`, 'ok', `Confirmed by ${sys}${fresh.external_ref ? ` · reference ${fresh.external_ref}` : ''}.`],
+    pending: [`${label}: received but not yet confirmed`, 'pending', `${sys} has not acknowledged it — shown as pending, not completed.`],
+    failed: [`${label}: failed`, 'failed', `${fresh.error_code ?? ''} — ${fresh.error_message ?? ''} Recovery: escalate to an agent.`],
+    outcome_unknown: [`${label}: outcome unknown`, 'warn', 'No confirmation in time. It will not be re-sent until its status is checked (reconciliation).'],
+    reconciled: [`${label}: status checked — ${fresh.status}`, fresh.status === 'succeeded' ? 'ok' : fresh.status === 'failed' ? 'failed' : 'warn', meta.found === false ? 'The system has no record of the request — safe to resend.' : `Looked up by idempotency key; outcome ${String(meta.outcome ?? fresh.status)}.`],
+    declined: [`${label}: not done (customer declined)`, 'info', null],
+    approved: [`${label}: approved by an agent`, 'ok', null],
+    approval_rejected: [`${label}: rejected by an agent`, 'blocked', String(meta.reason ?? '')],
+  };
+  const m = map[event];
+  if (!m) return;
+  emitTimeline(op.session_id, { type: `action.${event}`, stage: event === 'declined' ? 'confirm' : 'act', title: m[0], detail: m[2], status: m[1], source: sys, ref: op.id, data: { operationId: op.id, actionType: op.action_type, status: fresh.status } });
 }
 
 /**

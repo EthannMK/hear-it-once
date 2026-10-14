@@ -31,6 +31,11 @@ import { createDisputeDraft } from '../disputes/dispute-service.ts';
 import { confirmAndExecute, declineAction, getOp, opsForSession, prepareAction, reconcile, retryAction, type Operation } from '../actions/action-service.ts';
 import { addTurn, requestHandoff } from '../handoff/handoff-service.ts';
 import * as M from './messages.ts';
+import { emitTimeline, type TimelineInput, type Stage as TStage } from '../events/timeline.ts';
+import { computeTags, diffTags, sentimentFrom, type CallTags } from './tags.ts';
+import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
+import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
+import { maskPhone } from '../lib/redact.ts';
 import { ISSUE_LABELS, formatDate } from './format.ts';
 
 export type Stage =
@@ -68,7 +73,21 @@ export interface CallContext {
   flags: string[];
   lastUtterance: { hash: string; at: string } | null;
   firstName: string | null;
+  /** Free-talk demo mode: the synthetic persona is chosen from the caller's intent. */
+  freeMode?: boolean;
+  persona?: { scenarioId: string; name: string; customerNumber: string; phoneMasked: string } | null;
+  sentiment?: { sentiment: CallTags['sentiment']; basis: string } | null;
+  tags?: CallTags | null;
 }
+
+/** Default synthetic persona per issue type for free-talk demos (no injected faults). */
+export const FREE_TALK_PERSONA: Record<IssueType, string> = {
+  unrecognised_transaction: 'S01',
+  lost_stolen_card: 'S02',
+  wrong_or_duplicate_charge: 'S03',
+  payment_not_showing: 'S04',
+  fee_query: 'S05',
+};
 
 export type CallInput =
   | { kind: 'utterance'; text: string; clientMessageId?: string; asrConfidence?: number }
@@ -131,6 +150,37 @@ function say(s: Session, text: string, speaker: 'assistant' | 'system' = 'assist
   if (speaker === 'assistant') s.ctx.lastPrompt = text;
 }
 
+function tl(s: Session, e: TimelineInput): void {
+  emitTimeline(s.id, { ref: s.ctx.caseId ?? s.correlationId, ...e });
+}
+
+/** Recompute live call tags and record how the classification changed. */
+function refreshTags(s: Session, stage: TStage): void {
+  const t = computeTags(s.id, { issue: s.ctx.issue, sentiment: s.ctx.sentiment, flags: s.ctx.flags });
+  const changes = diffTags(s.ctx.tags, t);
+  if (!s.ctx.tags && t.intent) {
+    tl(s, { type: 'call.tagged', stage, title: `Call tagged: ${t.intentLabel} · ${t.category}`, detail: `Urgency ${t.urgency} (${t.urgencyReason}). Sentiment ${t.sentiment} — indicative only.`, source: 'classification', data: { tags: t } });
+  } else if (changes.length) {
+    tl(s, { type: 'tags.updated', stage, title: 'Call tags updated', detail: changes.join('; '), source: 'classification', data: { tags: t, changes } });
+  }
+  s.ctx.tags = t;
+}
+
+/** Retrieve synthetic knowledge-base guidance relevant to the call. */
+async function retrieveGuidance(s: Session, stage: TStage, context: string[], opts: { supportsNextStep?: boolean; agentReview?: boolean } = {}): Promise<void> {
+  const issueType = s.ctx.issue?.issueType ?? null;
+  const query = [issueType, ...context].filter(Boolean).join(' + ') || 'general';
+  const results = await knowledgeBase().search({ issueType, text: s.ctx.issue?.statement ?? '', context });
+  if (!results.length) {
+    tl(s, { type: 'kb.none', stage, title: 'No relevant knowledge article found', detail: `Query: ${query}. Continuing with configured rules only.`, status: 'warn', source: 'knowledge base (synthetic)' });
+    return;
+  }
+  for (const r of results) {
+    recordKbReference(s.id, r, query, { supportsNextStep: !!opts.supportsNextStep, agentReview: !!opts.agentReview });
+    tl(s, { type: 'kb.retrieved', stage, title: `Guidance retrieved: ${r.article.id} ${r.article.title}`, detail: `Why: ${r.reason}. ${r.article.excerpt}`, status: 'ok', source: 'knowledge base (synthetic)', data: { articleId: r.article.id } });
+  }
+}
+
 /* ------------------------------------------------------------------------- intent model */
 
 let modelOverride: IntentModel | null = null;
@@ -171,6 +221,7 @@ export interface StartCallInput {
   callerAni?: string | null;
   callerToken: string;
   moodStart?: string | null;
+  freeMode?: boolean;
 }
 
 export async function startCall(input: StartCallInput): Promise<string> {
@@ -193,7 +244,13 @@ export async function startCall(input: StartCallInput): Promise<string> {
     flags: [],
     lastUtterance: null,
     firstName: null,
+    freeMode: !!input.freeMode && !input.scenarioId,
+    persona: null,
+    sentiment: null,
+    tags: null,
   };
+  const sc = input.scenarioId ? scenarioById(input.scenarioId) : undefined;
+  if (sc) ctx.persona = { scenarioId: sc.id, name: sc.customer.name, customerNumber: sc.customer.number, phoneMasked: maskPhone(sc.customer.phone) };
   run(
     `INSERT INTO call_sessions (id, correlation_id, channel, data_origin, scenario_id, caller_ani_hash, caller_token_hash, state, context_json, outcome, mood_start, answered_at, created_at, updated_at)
      VALUES (?,?,?, 'demo_session', ?,?,?, 'awaiting_issue', ?, 'in_progress', ?, ?, ?, ?)`,
@@ -208,8 +265,10 @@ export async function startCall(input: StartCallInput): Promise<string> {
       ctx.verification.identifiedBy = 'ani';
     }
   }
+  tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: `Channel: ${input.channel === 'voice_browser' ? 'browser voice' : 'text simulator'}${sc ? `; demo scenario ${sc.id}` : ctx.freeMode ? '; free-talk demo' : ''}.`, status: 'ok', source: 'telephony (simulated)', ref: correlationId });
   say(s, M.GREETING_NOTICE, 'system');
   say(s, M.GREETING);
+  tl(s, { type: 'disclosure.given', stage: 'understand', title: 'AI and recording disclosure given', detail: 'The caller was told they are speaking with an AI assistant and given the recording/privacy notice before any assistance.', status: 'ok', source: 'conversation', ref: correlationId });
   event(s, 'call_answered', { channel: input.channel ?? 'text_simulator' });
   audit({ actor: s.actor, event: 'call.started', status: 'ok', resourceType: 'session', resourceId: id, sessionId: id, correlationId, metadata: { scenarioId: input.scenarioId ?? null, channel: input.channel } });
   save(s);
@@ -291,6 +350,7 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
   // Low-confidence speech recognition: ask again rather than guess.
   if (input.asrConfidence != null && input.asrConfidence < policy().conversation.asrMinConfidence) {
     event(s, 'asr_low_confidence', { confidence: input.asrConfidence, stage: c.stage });
+    tl(s, { type: 'input.low_confidence', stage: 'understand', title: 'Speech not recognised clearly — asked the caller to repeat', detail: `Recogniser confidence ${input.asrConfidence}. The assistant never guesses from unclear speech.`, status: 'warn', source: 'speech recognition' });
     if (c.stage === 'awaiting_issue') {
       run('UPDATE call_sessions SET issue_restatements = issue_restatements + 1 WHERE id = ?', [s.id]);
       event(s, 'issue_restatement_requested', { cause: 'asr_low_confidence' });
@@ -314,11 +374,20 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     return onSurvey(s, Number.isFinite(n) ? n : null);
   }
 
+  if (!sensitive) {
+    const sent = sentimentFrom(text, c.sentiment?.sentiment);
+    if (sent && sent.sentiment !== c.sentiment?.sentiment) {
+      c.sentiment = sent;
+      if (c.tags) refreshTags(s, c.tags.identity === 'verified' ? 'explain' : 'understand');
+    }
+  }
+
   // Deterministic safety signals take precedence over everything else.
   const sig = detectSignals(text);
   if (sig.promptInjection) {
     c.flags.push('prompt_injection_attempt');
     event(s, 'prompt_injection_flagged');
+    tl(s, { type: 'safety.flag', stage: 'understand', title: 'Instruction-like text in caller speech flagged and ignored', detail: 'Caller words are treated as data. They cannot change policy, permissions or actions.', status: 'warn', source: 'safety guard' });
     audit({ actor: ASSISTANT, event: 'safety.prompt_injection_flagged', status: 'info', sessionId: s.id, correlationId: s.correlationId });
     if (c.caseId) addRiskFlag(c.caseId, 'prompt_injection_attempt');
   }
@@ -371,6 +440,14 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
   c.issue = { ...cls, statement: combined, slots: mergeSlots(c.issue?.slots, cls.slots), clarifications };
   run('UPDATE call_sessions SET issue_statement = ?, updated_at = ? WHERE id = ?', [combined, nowIso(), s.id]);
   event(s, 'intent_classified', { issueType: cls.issueType, confidence: cls.confidence, model: cls.model });
+  tl(s, {
+    type: 'intent.identified',
+    stage: 'understand',
+    title: cls.issueType ? `Intent identified: ${ISSUE_LABELS[cls.issueType]}` : cls.unsupportedTopic ? `Request outside supported scope (${cls.unsupportedTopic.replace(/_/g, ' ')})` : 'Intent not clear yet',
+    detail: `Confidence ${cls.confidence.toFixed(2)} (${cls.model}); threshold ${min}. ${slotSummary(c.issue.slots)}`,
+    status: cls.issueType && cls.confidence >= min ? 'ok' : 'warn',
+    source: `intent model: ${cls.model}`,
+  });
 
   if (cls.unsupportedTopic && !cls.issueType) {
     return handoff(s, 'out_of_policy', `unsupported topic: ${cls.unsupportedTopic}`, `I'm not able to help with that here — I can help with lost or stolen cards, unrecognised or duplicate charges, payments and fees. I'll transfer you to an agent who can help.`);
@@ -384,8 +461,15 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
   c.stage = 'clarifying_issue';
   c.pending = { kind: 'choice', purpose: 'issue_type', options: M.ISSUE_CHOICES, scope: 'issue' };
   event(s, 'issue_clarification_requested', { confidence: cls.confidence });
+  tl(s, { type: 'clarification.requested', stage: 'understand', title: 'Asked one clarifying question', detail: 'Below the confidence threshold — offered the five supported issue types rather than guessing.', status: 'pending', source: 'conversation' });
   say(s, M.CLARIFY_ISSUE);
 }
+
+function slotSummary(sl: IssueSlots): string {
+  const bits = [sl.merchantHint && `merchant “${sl.merchantHint}”`, sl.amountMinor != null && `amount ${formatMoneyMinor(sl.amountMinor)}`, sl.dateRange && `date ${sl.dateRange.label}`, sl.cardLast4 && `card ending ${sl.cardLast4}`, sl.lostOrStolen, sl.feeType && sl.feeType.replace(/_/g, ' ')].filter(Boolean);
+  return bits.length ? `Extracted from the caller's words: ${bits.join(', ')}.` : 'No specific details extracted yet.';
+}
+const formatMoneyMinor = (m: number) => `$${(m / 100).toFixed(2)}`;
 
 function mergeSlots(prev: IssueSlots | undefined, next: IssueSlots): IssueSlots {
   if (!prev) return next;
@@ -404,7 +488,9 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
     issueType, nowIso(), JSON.stringify(c.issue.slots), nowIso(), s.id,
   ]);
   event(s, 'issue_captured', { issueType, confidence });
+  if (c.freeMode && !c.verification.identifiedCustomerId) await bindFreeTalkPersona(s, issueType);
   say(s, (distressed ? 'I understand — and if at any point you’d prefer a person, just say so. ' : '') + M.ackIssue(issueType));
+  tl(s, { type: 'verification.started', stage: 'verify', title: issueType === 'lost_stolen_card' ? 'Identity verification started — card block will follow immediately' : 'Identity verification started', detail: 'Two factors required: date of birth, then a one-time passcode to the registered phone. Nothing about the account is read until both pass.', status: 'running', source: 'identity verification (simulated)' });
   // Verification begins immediately (lost/stolen fast path uses the same flow, nothing else first).
   const ev = await startVerification(vctx(s), c.verification, null);
   if (c.verification.identifiedCustomerId && c.verification.identifiedBy === 'ani' && ev.type === 'need_identifier') {
@@ -419,6 +505,20 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
     c.stage = 'identifying';
     say(s, M.ASK_CUSTOMER_NUMBER);
   }
+  refreshTags(s, 'understand');
+}
+
+/** Free-talk demo: bind the synthetic customer whose fixtures match the caller's intent. */
+async function bindFreeTalkPersona(s: Session, issueType: IssueType): Promise<void> {
+  const sc = scenarioById(FREE_TALK_PERSONA[issueType]) ?? SCENARIOS[0];
+  const hit = await adapters().identity.identifyByAni({ correlationId: s.correlationId, sessionId: s.id, scenarioId: sc.id }, sc.customer.phone);
+  if (!hit) return;
+  s.ctx.verification.identifiedCustomerId = hit.customerId;
+  s.ctx.verification.identifiedBy = 'ani';
+  s.ctx.persona = { scenarioId: sc.id, name: sc.customer.name, customerNumber: sc.customer.number, phoneMasked: maskPhone(sc.customer.phone) };
+  s.scenarioId = sc.id;
+  run('UPDATE call_sessions SET scenario_id = ? WHERE id = ?', [sc.id, s.id]);
+  tl(s, { type: 'demo.persona', stage: 'verify', title: `Demo: you are calling as ${sc.customer.name} (synthetic customer)`, detail: `Chosen because the request is about ${ISSUE_LABELS[issueType].toLowerCase()}. Caller ID matched a synthetic profile — identification only, not proof of identity.`, status: 'info', source: 'demo environment' });
 }
 
 const vctx = (s: Session) => ({ sessionId: s.id, correlationId: s.correlationId, scenarioId: s.scenarioId, actor: s.actor });
@@ -434,22 +534,28 @@ async function onVerificationAnswer(s: Session, text: string): Promise<void> {
       return say(s, `Thank you. ${M.ASK_DOB}`);
     case 'otp_sent':
       c.stage = 'awaiting_otp';
+      tl(s, { type: 'verification.factor_passed', stage: 'verify', title: 'Date of birth matched', detail: `One-time passcode sent to the registered phone (${ev.deliveredTo}).`, status: 'ok', source: 'identity verification (simulated)' });
       return say(s, M.otpSent(ev.deliveredTo));
     case 'retry':
       if (ev.unparsed) {
         c.unclearCount++;
         if (c.unclearCount >= 3) return handoff(s, 'communication_breakdown', `could not capture ${ev.step} answer`, "I'm having trouble capturing that. Let me connect you with an agent who can help verify you.");
       }
+      if (!ev.unparsed) tl(s, { type: 'verification.retry', stage: 'verify', title: `Verification answer did not match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)`, detail: 'Generic message given — the caller is not told which detail was wrong.', status: 'warn', source: 'identity verification (simulated)' });
       return say(s, M.retryVerification(ev.step, ev.remaining, ev.unparsed));
     case 'locked':
       event(s, 'verification_failed', { step: ev.step });
       run("UPDATE call_sessions SET outcome = 'verification_failed' WHERE id = ?", [s.id]);
       c.caseId = ensureCase({ sessionId: s.id, customerId: null, issueType: c.issue?.issueType ?? null, verificationOutcome: 'failed', customerReported: c.issue?.statement ?? null, actor: s.actor, correlationId: s.correlationId });
       addRiskFlag(c.caseId, 'verification_failed');
+      tl(s, { type: 'verification.failed', stage: 'verify', title: 'Identity verification failed — locked after 3 attempts', detail: 'No account data was read or disclosed and no action is possible. Routing to an agent to verify another way.', status: 'failed', source: 'identity verification (simulated)', ref: c.caseId });
+      refreshTags(s, 'verify');
       return handoff(s, 'verification_failed', `locked at ${ev.step}`, M.LOCKED);
     case 'verified':
       c.unclearCount = 0;
       event(s, 'verified');
+      tl(s, { type: 'verification.passed', stage: 'verify', title: 'Identity verified (two factors)', detail: 'Date of birth and one-time passcode both passed. Protected reads are now allowed.', status: 'ok', source: 'identity verification (simulated)' });
+      refreshTags(s, 'verify');
       return onVerified(s);
     default:
       return;
@@ -462,6 +568,7 @@ async function onVerified(s: Session): Promise<void> {
   const issueType = c.issue!.issueType!;
   say(s, M.VERIFIED);
   c.caseId = ensureCase({ sessionId: s.id, customerId, issueType, verificationOutcome: 'verified', customerReported: c.issue!.statement, actor: s.actor, correlationId: s.correlationId });
+  tl(s, { type: 'case.created', stage: 'record', title: `Case ${c.caseId} opened during the call`, detail: 'The case is updated live as facts and actions are recorded.', status: 'ok', source: 'case management', ref: c.caseId });
 
   const snap = await retrieveFacts({ sessionId: s.id, correlationId: s.correlationId, scenarioId: s.scenarioId, customerId, issueType });
   c.snapshotId = snap.id;
@@ -469,6 +576,10 @@ async function onVerified(s: Session): Promise<void> {
   caseEvent(c.caseId, 'sources_checked', { snapshotId: snap.id, wallMs: snap.wallMs, conflicts: snap.conflicts.length });
   const profile = sourceData(snap, 'customer_profile');
   c.firstName = profile?.firstName ?? null;
+  if ((sourceData(snap, 'fraud_alerts') ?? []).some((a) => a.status === 'open')) {
+    c.flags.push('fraud_alert');
+    addRiskFlag(c.caseId, 'fraud_alert');
+  }
   c.wf = { name: issueType, step: 'start', clarifications: 0 };
 
   // Account-takeover / social-engineering risk signals block automated actions.
@@ -476,6 +587,7 @@ async function onVerified(s: Session): Promise<void> {
   const atoAlert = (sourceData(snap, 'fraud_alerts') ?? []).some((a) => a.status === 'open' && a.alertType === 'account_takeover_risk');
   if (recentContactChange || atoAlert) {
     addRiskFlag(c.caseId, 'account_takeover_risk');
+    tl(s, { type: 'safety.blocked', stage: 'investigate', title: 'Account-takeover risk signal — automated actions blocked', detail: recentContactChange ? 'Contact details changed in the last 14 days.' : 'Open account-takeover alert.', status: 'blocked', source: recentContactChange ? 'customer profile' : 'fraud alerts' });
     recordFindings(c.caseId, [{ kind: 'confirmed', text: recentContactChange ? 'Contact details were changed in the last 14 days.' : 'Open account-takeover risk alert.', source: recentContactChange ? 'customer_profile' : 'fraud_alerts' }]);
     return handoff(s, 'account_takeover_suspected', recentContactChange ? 'recent contact-detail change' : 'open ATO alert', "For your security, I need to pass this call to a specialist before any changes can be made on your account. I've saved everything you've told me.");
   }
@@ -491,13 +603,16 @@ async function onVerified(s: Session): Promise<void> {
       c.wf.priorCaseIds = same.map((p) => p.caseId);
       addRiskFlag(c.caseId, 'recurring_unresolved');
       event(s, 'repeat_contact_recognised', { priorCases: same.map((p) => p.caseId) });
+      tl(s, { type: 'context.repeat_caller', stage: 'investigate', title: `Repeat caller: open case ${same[0].caseId} about the same issue`, detail: 'Context carried over so the customer does not repeat themselves; flagged as a recurring unresolved issue.', status: 'warn', source: 'previous cases', ref: same[0].caseId });
       say(s, `I can see you contacted us on ${formatDate(same[0].createdAt)} about ${ISSUE_LABELS[issueType].toLowerCase()} (case ${same[0].caseId}), and it's still open. I have the details from that call, so you don't need to explain it again.`);
     } else {
       say(s, `I can also see an open case from ${formatDate(prior[0].createdAt)} about ${(ISSUE_LABELS[String(prior[0].issueType)] ?? 'another matter').toLowerCase()} (case ${prior[0].caseId}).`);
     }
   }
   c.stage = 'workflow';
+  refreshTags(s, 'investigate');
   const r = WORKFLOWS[issueType].start(wfCtx(s, snap));
+  await retrieveGuidance(s, 'explain', [], { supportsNextStep: r.kind === 'propose', agentReview: r.kind === 'handoff' });
   await applyResult(s, r);
 }
 
@@ -624,9 +739,27 @@ async function onYesNoAnswer(s: Session, p: Extract<Pending, { kind: 'yes_no' }>
 async function applyResult(s: Session, r: WorkflowResult, prefix = ''): Promise<void> {
   const c = s.ctx;
   const caseId = c.caseId!;
-  if ('findings' in r && r.findings?.length) recordFindings(caseId, r.findings);
+  if ('findings' in r && r.findings?.length) {
+    recordFindings(caseId, r.findings);
+    const conf = r.findings.filter((f) => f.kind === 'confirmed');
+    const un = r.findings.filter((f) => f.kind === 'unavailable');
+    if (conf.length) tl(s, { type: 'facts.confirmed', stage: 'explain', title: `${conf.length} fact${conf.length === 1 ? '' : 's'} confirmed by bank systems`, detail: conf.map((f) => f.text).join(' '), status: 'ok', source: [...new Set(conf.map((f) => f.source))].join(', '), data: { facts: conf } });
+    if (un.length) tl(s, { type: 'facts.unavailable', stage: 'explain', title: `${un.length} item${un.length === 1 ? '' : 's'} could not be confirmed`, detail: un.map((f) => f.text).join(' '), status: 'warn', source: [...new Set(un.map((f) => f.source))].join(', ') });
+  }
   if ('transactionRefs' in r && r.transactionRefs?.length) updateCase(caseId, { transaction_refs: r.transactionRefs });
-  if ('eligibility' in r && r.eligibility) updateCase(caseId, { eligibility: r.eligibility });
+  if ('eligibility' in r && r.eligibility) {
+    updateCase(caseId, { eligibility: r.eligibility });
+    const e = r.eligibility;
+    tl(s, {
+      type: 'eligibility.evaluated',
+      stage: 'explain',
+      title: e.eligible ? `Eligible under rule ${e.ruleCode}` : `Not eligible${e.ruleCode ? ` under rule ${e.ruleCode}` : ''}`,
+      detail: e.eligible ? `All ${e.checks.length} deterministic checks passed (${e.checks.map((c) => c.check).join(', ')}).` : e.reasons.join(' '),
+      status: e.eligible ? 'ok' : 'blocked',
+      source: 'policy engine',
+      data: { checks: e.checks, ruleVersion: e.ruleVersion },
+    });
+  }
   const pre = prefix ? `${prefix}\n\n` : '';
 
   switch (r.kind) {
@@ -642,6 +775,7 @@ async function applyResult(s: Session, r: WorkflowResult, prefix = ''): Promise<
       if (pre) say(s, prefix);
       return handoff(s, r.reason, r.detail, r.message, { missing: r.missing, priority: r.priority });
     case 'inform': {
+      tl(s, { type: 'explained', stage: 'explain', title: r.resolution === 'resolved' || r.resolution === 'informational' ? 'Outcome explained to the customer' : 'Explained why this can’t be completed automatically', detail: r.nextSteps, status: r.resolution === 'resolved' || r.resolution === 'informational' ? 'ok' : 'warn', source: 'conversation' });
       run('UPDATE call_sessions SET resolution_status = ? WHERE id = ?', [r.resolution, s.id]);
       updateCase(caseId, { resolution_status: r.resolution, next_steps: r.nextSteps, status: r.resolution === 'resolved' || r.resolution === 'informational' ? 'resolved' : 'pending' });
       regenerateSummary(caseId);
@@ -702,6 +836,7 @@ async function propose(s: Session, r: Extract<WorkflowResult, { kind: 'propose' 
     }
   }
   c.pending = { kind: 'consent', proposalId };
+  tl(s, { type: 'actions.proposed', stage: 'confirm', title: `Proposed ${actions.length} action${actions.length === 1 ? '' : 's'} — waiting for the customer’s confirmation`, detail: actions.map((a, i) => `${i + 1}) ${a.label}`).join(' '), status: 'pending', source: 'policy engine', ref: proposalId, data: { actions: actions.map((a) => ({ type: a.type, label: a.label })), ruleRefs: r.ruleRefs } });
   say(s, pre + r.message);
 }
 
@@ -734,6 +869,7 @@ async function onConsent(s: Session, proposalId: string, decision: 'accept' | 'd
   c.pending = null;
   audit({ actor: s.actor, event: `consent.${decision === 'accept' ? 'accepted' : 'declined'}`, status: 'ok', resourceType: 'proposal', resourceId: proposalId, sessionId: s.id, correlationId: s.correlationId, metadata: { consentId, via } });
   caseEvent(c.caseId!, decision === 'accept' ? 'consent_accepted' : 'consent_declined', { proposalId, consentId });
+  tl(s, { type: decision === 'accept' ? 'consent.given' : 'consent.declined', stage: 'confirm', title: decision === 'accept' ? 'Customer confirmed the proposed actions' : 'Customer declined — nothing will be changed', detail: `Consent ${consentId} is linked to proposal ${proposalId} and covers only those actions; it expires in ${Math.round(policy().consent.ttlSeconds / 60)} minutes.`, status: decision === 'accept' ? 'ok' : 'info', source: `customer (${via})`, ref: consentId });
 
   if (decision === 'decline') {
     for (const op of opsForProposal(proposalId)) declineAction(op.id, s.actor, s.correlationId);
@@ -773,6 +909,8 @@ async function executeProposal(s: Session, proposalId: string, consentId: string
   }
   run('UPDATE call_sessions SET execution_completed_at = ? WHERE id = ?', [nowIso(), s.id]);
   regenerateSummary(c.caseId!);
+  tl(s, { type: 'summary.generated', stage: 'record', title: 'Case summary updated from recorded outcomes', detail: 'Built only from persisted facts and confirmed action results — not from generated text.', status: 'ok', source: 'case management', ref: c.caseId });
+  refreshTags(s, 'act');
   const lines = results.filter((o) => executedNow.has(o.id)).map((o) => M.describeOutcome(o));
   const skipped = results.filter((o) => o.error_code === 'DEPENDENCY_FAILED');
   if (skipped.length) lines.push(`I haven't done the remaining step${skipped.length > 1 ? 's' : ''} because the earlier one didn't go through.`);
@@ -850,8 +988,14 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
   });
   c.pending = null;
   event(s, 'handoff_requested', { reason });
+  if (reason === 'verification_failed') await retrieveGuidance(s, 'handoff', ['verification', 'handoff'], { agentReview: true });
+  else if (reason === 'social_engineering_suspected' || reason === 'account_takeover_suspected') await retrieveGuidance(s, 'handoff', ['security', 'handoff'], { agentReview: true });
+  else await retrieveGuidance(s, 'handoff', ['handoff'], { agentReview: true });
   const r = await requestHandoff({ sessionId: s.id, caseId: c.caseId, reason, reasonDetail: detail, actor: s.actor, correlationId: s.correlationId, missing: opts.missing, priority: opts.priority });
+  tl(s, { type: 'handoff.prepared', stage: 'handoff', title: 'Agent brief prepared from the recorded call', detail: `Reason: ${detail}. The brief carries the customer’s words, verification status, facts, actions and next step.`, status: 'ok', source: 'handoff', ref: r.handoffId });
+  refreshTags(s, 'handoff');
   if (r.status === 'queued') {
+    tl(s, { type: 'handoff.queued', stage: 'handoff', title: `Waiting for an agent (position ${r.queuePosition ?? 1}) — simulated desk`, detail: 'The transfer is not complete until an agent accepts it.', status: 'pending', source: 'agent desk (simulated)', ref: r.handoffId });
     c.stage = 'handoff';
     run("UPDATE call_sessions SET outcome = 'handed_off' WHERE id = ?", [s.id]);
     say(s, `Your call is in the queue for the next available agent (position ${r.queuePosition ?? 1}). Please hold — the agent will see your case ${c.caseId} and everything we've discussed. [Simulated agent desk: a demo agent must accept this in the Agent Console.]`, 'system');
@@ -862,6 +1006,7 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
       'system',
     );
     event(s, 'handoff_fallback_callback', { handoffId: r.handoffId });
+    tl(s, { type: 'handoff.no_agent', stage: 'handoff', title: 'No agent available — callback requested instead', detail: 'Nothing is described as transferred. The case holds everything for the callback.', status: 'failed', source: 'agent desk (simulated)', ref: r.handoffId });
     return endCall(s, 'ended_unresolved');
   }
 }
@@ -881,6 +1026,7 @@ async function enterFallback(s: Session, err: Error): Promise<void> {
   event(s, unavailable ? 'assistant_unavailable' : 'orchestrator_error', { error: err.message.slice(0, 200) });
   audit({ actor: ASSISTANT, event: unavailable ? 'assistant.unavailable' : 'assistant.error', status: 'error', sessionId: s.id, correlationId: s.correlationId, metadata: { stage: c.stage } });
   run("UPDATE call_sessions SET outcome = 'fallback' WHERE id = ?", [s.id]);
+  tl(s, { type: 'assistant.unavailable', stage: 'handoff', title: unavailable ? 'Assistant engine unavailable — controlled fallback' : 'Unexpected error — controlled fallback', detail: 'Session and case state were kept; the call is routed to the agent queue. No action was taken.', status: 'failed', source: 'conversation engine' });
   c.stage = 'fallback';
   c.pending = null;
   say(s, "I'm sorry — our automated assistant is temporarily unavailable. I've safely saved what you've told me, and I'm routing your call to the card services team. Nothing has been changed on your account.", 'system');
@@ -970,6 +1116,9 @@ export async function endCall(s: Session, forced?: 'abandoned' | 'ended_unresolv
     regenerateSummary(c.caseId);
   }
   event(s, 'call_ended', { outcome });
+  if (c.caseId) tl(s, { type: 'summary.generated', stage: 'record', title: 'Final case summary generated', detail: 'Separates what the customer reported, what systems confirmed, and what actions actually completed.', status: 'ok', source: 'case management', ref: c.caseId });
+  refreshTags(s, 'resolve');
+  tl(s, { type: 'call.closed', stage: outcome === 'handed_off' || outcome === 'fallback' ? 'handoff' : 'resolve', title: `Call closed — ${String(outcome).replace(/_/g, ' ')}`, status: outcome === 'resolved' ? 'ok' : outcome === 'abandoned' ? 'info' : 'warn', source: 'conversation', ref: c.caseId ?? s.correlationId });
   audit({ actor: s.actor, event: 'call.ended', status: 'ok', resourceType: 'session', resourceId: s.id, sessionId: s.id, correlationId: s.correlationId, metadata: { outcome } });
 }
 

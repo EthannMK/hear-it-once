@@ -3,7 +3,7 @@
  * Nothing here is real customer data. `resetDemoData()` wipes and re-seeds synthetic data
  * only (the database contains nothing else).
  */
-import { db, run, get } from './db.ts';
+import { db, run, get, all } from './db.ts';
 import { nowIso, nowMs } from '../lib/clock.ts';
 import { newId } from '../lib/ids.ts';
 import { maskPhone } from '../lib/redact.ts';
@@ -130,7 +130,12 @@ function seedReferenceData(): void {
 }
 
 function seedScenarioCustomers(): void {
-  for (const s of SCENARIOS) {
+  for (const s of SCENARIOS) seedScenario(s);
+}
+
+/** Seed one scenario's synthetic customer, card, transactions, faults and special fixtures. */
+export function seedScenario(s: ScenarioDef): void {
+  {
     const cu = s.customer;
     insertCustomer(cu);
     const card = `CRD-${cu.id.slice(4)}A`;
@@ -142,6 +147,7 @@ function seedScenarioCustomers(): void {
     switch (s.id) {
       case 'S01': {
         const t = insertTxn(cu.id, { card, merchant: 'NOVAPLAY DIGITAL', category: 'digital_goods', amount: 24900, daysAgo: 3, mode: 'ecommerce', auth: 'N77310' });
+        insertTxn(cu.id, { card, merchant: 'CITYLINK RIDES', category: 'transport', amount: 8450, daysAgo: 4, hour: 23, mode: 'ecommerce', auth: 'C40812' });
         run(`INSERT INTO bank_fraud_alerts (id, customer_id, card_id, transaction_id, alert_type, risk_level, status, reported_card_status, reported_amount_minor, created_at)
              VALUES (?,?,?,?, 'suspicious_ecommerce', 'medium', 'open', 'active', 24900, ?)`, [newId('FRA'), cu.id, card, t, iso(3, 15)]);
         break;
@@ -246,6 +252,43 @@ export function resetDemoData(opts: { history?: boolean } = {}): void {
     d.exec('PRAGMA foreign_keys = ON');
   }
   seedAll(opts);
+}
+
+/**
+ * Reset ONE demo scenario so it can be replayed: removes every call, case, action, dispute and
+ * handoff for that synthetic customer and re-seeds its fixtures and default faults. Audit
+ * events are kept (they are an append-only record). Synthetic data only.
+ */
+export function resetScenario(id: string): boolean {
+  const sc = SCENARIOS.find((x) => x.id === id);
+  if (!sc) return false;
+  const cid = sc.customer.id;
+  const d = db();
+  d.exec('BEGIN');
+  try {
+    const sessions = all<{ id: string }>("SELECT id FROM call_sessions WHERE customer_id = ? OR scenario_id IN (?, ?)", [cid, id, `${id}-prior`]).map((r) => r.id);
+    const inList = sessions.map(() => '?').join(',') || "''";
+    run(`DELETE FROM disputes WHERE customer_id = ? OR session_id IN (${inList})`, [cid, ...sessions]);
+    run(`DELETE FROM handoffs WHERE session_id IN (${inList})`, sessions);
+    run(`DELETE FROM action_operations WHERE customer_id = ? OR session_id IN (${inList})`, [cid, ...sessions]);
+    run(`DELETE FROM consents WHERE session_id IN (${inList})`, sessions);
+    run(`DELETE FROM proposals WHERE session_id IN (${inList})`, sessions);
+    run(`DELETE FROM cases WHERE customer_id = ? OR session_id IN (${inList})`, [cid, ...sessions]);
+    run(`DELETE FROM call_sessions WHERE id IN (${inList})`, sessions);
+    run('DELETE FROM bank_fees WHERE customer_id = ?', [cid]);
+    run('DELETE FROM bank_payments WHERE customer_id = ?', [cid]);
+    run('DELETE FROM bank_fraud_alerts WHERE customer_id = ?', [cid]);
+    run('DELETE FROM bank_transactions WHERE customer_id = ?', [cid]);
+    run('DELETE FROM bank_cards WHERE customer_id = ?', [cid]);
+    run('DELETE FROM bank_customers WHERE id = ?', [cid]);
+    run("DELETE FROM mock_faults WHERE (scope = 'customer' AND scope_ref = ?) OR (scope = 'scenario' AND scope_ref = ?)", [cid, id]);
+    seedScenario(sc);
+    d.exec('COMMIT');
+  } catch (e) {
+    d.exec('ROLLBACK');
+    throw e;
+  }
+  return true;
 }
 
 export function isSeeded(): boolean {

@@ -16,6 +16,8 @@ import { caseEvent, regenerateSummary, updateCase } from '../cases/case-service.
 import { ISSUE_LABELS, HANDOFF_REASON_LABELS, OP_STATUS_LABELS, ACTION_LABELS, formatMoney, formatDate } from '../conversation/format.ts';
 import { loadSnapshot, sourceData } from '../retrieval/retrieval.ts';
 import { currentSnapshotId } from '../actions/action-service.ts';
+import { emitTimeline } from '../events/timeline.ts';
+import { kbReferencesFor } from '../kb/kb.ts';
 
 export type HandoffReason = keyof typeof HANDOFF_REASON_LABELS;
 
@@ -51,6 +53,7 @@ export interface HandoffBrief {
   previousCases: string[];
   recommendedNextStep: string;
   transcriptExcerpt: { speaker: string; text: string }[];
+  knowledge: { id: string; title: string; excerpt: string; reason: string; agentReview: boolean }[];
 }
 
 export function buildBrief(sessionId: string, reason: string, reasonDetail: string | null, extras: { missing?: string[]; recommended?: string; priority?: 'normal' | 'urgent' } = {}): HandoffBrief {
@@ -121,6 +124,7 @@ export function buildBrief(sessionId: string, reason: string, reasonDetail: stri
     previousCases: c ? parseJson(c.previous_case_ids_json, []) : [],
     recommendedNextStep: recommended,
     transcriptExcerpt: turns.map((t) => ({ speaker: t.speaker, text: redactText(t.text) })),
+    knowledge: kbReferencesFor(sessionId).map((k) => ({ id: k.id, title: k.title, excerpt: k.excerpt, reason: k.reason, agentReview: k.agentReview })),
   };
 }
 
@@ -194,6 +198,7 @@ export function acceptHandoff(handoffId: string, agent: Actor & { id: string }):
   run('UPDATE call_sessions SET agent_joined_at = COALESCE(agent_joined_at, ?), updated_at = ? WHERE id = ?', [nowIso(), nowIso(), h.session_id]);
   const name = get<{ display_name: string }>('SELECT display_name FROM staff_users WHERE id = ?', [agent.id])?.display_name ?? 'An agent';
   addTurn(h.session_id, 'system', `${name.replace(/ \(demo agent\)$/, '')} (card services agent — simulated) has joined the call and can see your case details.`);
+  emitTimeline(h.session_id, { type: 'handoff.connected', stage: 'handoff', title: `Agent joined: ${name}`, detail: 'Warm handoff complete — the agent has the full brief; the customer does not need to repeat the issue.', status: 'ok', source: 'agent desk (simulated)', ref: handoffId });
   if (h.case_id) {
     caseEvent(h.case_id, 'agent_joined', { handoffId, agentId: agent.id });
     regenerateSummary(h.case_id);
@@ -221,6 +226,8 @@ export function completeHandoff(handoffId: string, agent: Actor, input: { outcom
   ctx.stage = 'ended';
   run('UPDATE call_sessions SET context_json = ? WHERE id = ?', [JSON.stringify(ctx), h.session_id]);
   addTurn(h.session_id, 'system', 'The agent has completed the call. Thank you for calling.');
+  emitTimeline(h.session_id, { type: 'handoff.completed', stage: 'handoff', title: `Agent completed the call — ${input.outcome.replace(/_/g, ' ')}`, detail: notes || null, status: input.outcome === 'resolved' ? 'ok' : 'warn', source: 'agent desk (simulated)', ref: handoffId });
+  emitTimeline(h.session_id, { type: 'call.closed', stage: 'handoff', title: 'Call closed — handed off', status: input.outcome === 'resolved' ? 'ok' : 'warn', source: 'conversation', ref: h.case_id ?? handoffId });
   if (h.case_id) {
     updateCase(h.case_id, { status: input.outcome === 'resolved' ? 'resolved' : 'pending', resolution_status: resolution, next_steps: input.outcome === 'resolved' ? 'Resolved by agent.' : `Agent follow-up: ${notes}` });
     caseEvent(h.case_id, 'handoff_completed', { handoffId, outcome: input.outcome });
