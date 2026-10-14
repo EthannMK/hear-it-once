@@ -1,6 +1,7 @@
 /**
  * Live voice WebSocket, Northstar demo customer data for the judge screen, and the staff live handover stream.
  */
+import { isLang } from '../../live/languages.ts';
 import type { FastifyInstance } from 'fastify';
 import { get } from '../../db/db.ts';
 import { log } from '../../lib/logger.ts';
@@ -58,7 +59,8 @@ export function registerLiveRoutes(app: FastifyInstance): void {
     let bridge: LiveBridge;
     try {
       const provider = await createLiveProvider();
-      bridge = new LiveBridge(id, send, provider);
+      const lang = (req.query as { lang?: string }).lang;
+      bridge = new LiveBridge(id, send, provider, isLang(lang) ? lang : 'en');
       bridges.set(id, bridge);
       await bridge.start();
       auditLiveStart(id, provider.name);

@@ -156,3 +156,17 @@ ul.tx li{display:grid;grid-template-columns:1fr auto;column-gap:.6rem;padding:.4
 ul.tx li .small{grid-column:1/-1}
 .panel.demo>.small{padding:0 1.1rem 1rem}
 @media(max-width:960px){.callhost{order:-1}}
+
+/* ---- language, Burmese typography, polish ---- */
+html[lang="my"] body.lily,html[lang="my"] button,html[lang="my"] input,html[lang="my"] select{font-family:'Noto Sans Myanmar','Plus Jakarta Sans',system-ui,sans-serif;line-height:1.8}
+html[lang="my"] h1,html[lang="my"] h2{font-family:'Noto Sans Myanmar',serif;line-height:1.5;letter-spacing:0}
+.langwrap{display:inline-flex}
+.langsel{min-height:44px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--on);padding:.4rem .9rem;font:inherit;font-size:.9rem;cursor:pointer}
+.langsel:disabled{opacity:.55;cursor:not-allowed}
+.top a.link{min-height:44px;display:inline-flex;align-items:center}
+.tries{margin-top:1.4rem;text-align:left}
+.tryl{display:flex;flex-wrap:wrap;gap:.5rem;list-style:none;padding:0;margin:.5rem 0 0}
+.tryl li{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:.4rem .85rem;font-size:.88rem;color:var(--on-2)}
+.btn,.ctl,.ptab{min-height:44px}
+.pan b.pannum{display:block;font-size:1.25rem;letter-spacing:.06em;word-break:break-all}
+@media(max-width:560px){.top{flex-wrap:wrap;gap:.5rem}h1{font-size:1.9rem}}

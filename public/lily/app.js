@@ -1,10 +1,11 @@
 // Hear It Once × Lily (Northstar Bank) — one page: demo customers and test data beside the live call, then a summary.
 import { api, h } from '/js/lib.js';
 import { Mic, Player } from '/lily/audio.js';
+import { t, tList, LANGS, getLang, setLang } from '/lily/i18n.js';
 
 const root = document.getElementById('root');
 const live = document.getElementById('sr-live');
-const say = (t) => { live.textContent = t; };
+const say = (m) => { live.textContent = m; };
 const S = { cards: [], demoData: true, status: null, selected: null, call: null };
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; } };
 
@@ -27,20 +28,25 @@ const ICON = {
 };
 const brandSvg = () => svg(['M4 12h2', 'M8 7v10', 'M12 4v16', 'M16 8v8', 'M20 12h0']);
 
+function langPicker() {
+  const sel = h('select.langsel', { 'aria-label': t('lang'), disabled: !!(S.call && !S.call.ended), onchange: (e) => { setLang(e.target.value); if (S.call && !S.call.ended) return; home(); } },
+    LANGS.map(([c, n]) => h('option', { value: c, ...(c === getLang() ? { selected: '' } : {}), lang: c === 'fil' ? 'fil' : c }, n)));
+  return h('label.langwrap', h('span.sr-only', t('lang')), sel);
+}
 function top(extra) {
-  return h('header.top', h('a.brand', { href: '/' }, brandSvg(), 'Hear It Once'), h('span.grow'), extra ?? null,
-    h('a.link', { href: '/agent.html', target: '_blank', rel: 'noopener' }, 'Open agent workspace ↗'));
+  return h('header.top', h('a.brand', { href: '/' }, brandSvg(), 'Hear It Once'), h('span.grow'), extra ?? null, langPicker(),
+    h('a.link', { href: '/agent.html', target: '_blank', rel: 'noopener' }, t('openAgent')));
 }
 function render(...n) { root.replaceChildren(...n.flat().filter(Boolean)); window.scrollTo(0, 0); }
 
 
 /* ------------------------------------------------------------------ single page: demo customers + live call */
 const groupPan = (n) => String(n ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/g, '$1 ');
-const STANDING = { good: 'In good standing', watch: 'On watch', restricted: 'Restricted' };
+const standing = (k) => ({ good: t('good'), watch: t('watch'), restricted: t('restricted') }[k] ?? k);
 
 async function home() {
   S.call?.destroy?.(); S.call = null;
-  render(top(), h('main.single', h('p.pad.muted', 'Loading Northstar Bank demo customers…')));
+  render(top(), h('main.single', h('p.pad.muted', t('loading'))));
   try {
     const [j, st] = await Promise.all([api('/api/demo/customers'), api('/api/live/status')]);
     S.cards = j.items; S.demoData = true; S.disclaimer = j.disclaimer; S.bank = j.bank; S.status = st;
@@ -51,24 +57,24 @@ async function home() {
 
 function profilePanel(locked) {
   const sel = S.cards.find((c) => c.id === S.selected);
-  const tabs = h('div.ptabs', { role: 'radiogroup', 'aria-label': 'Choose the demo customer you are calling as' }, S.cards.map((c) =>
+  const tabs = h('div.ptabs', { role: 'radiogroup', 'aria-label': t('pickIdentity') }, S.cards.map((c) =>
     h('button.ptab', { type: 'button', role: 'radio', 'aria-checked': String(c.id === S.selected), disabled: locked, onclick: () => { S.selected = c.id; drawHome(); } }, c.name.split(' ')[0])));
-  const body = !sel ? h('p.muted', S.loadError ?? 'No demo customers are available.') : h('div.pbody',
-    h('div.pname', h('h3', sel.name), h('span.chip' + (sel.cardStatus === 'active' ? '.ok' : '.warn'), `Card ${sel.cardStatus}`)),
+  const body = !sel ? h('p.muted', S.loadError ?? t('noProfiles')) : h('div.pbody',
+    h('div.pname', h('h3', sel.name), h('span.chip' + (sel.cardStatus === 'active' ? '.ok' : '.warn'), t('cardStatus', { s: sel.cardStatus === 'active' ? t('active') : sel.cardStatus }))),
     h('p.small.muted', sel.blurb),
     h('dl.facts',
-      h('div', h('dt', 'Phone (fictional)'), h('dd.mono', sel.phone)),
-      h('div', h('dt', 'Account reference'), h('dd.mono', sel.accountRef)),
-      h('div', h('dt', 'Standing'), h('dd', STANDING[sel.accountStanding] ?? sel.accountStanding))),
-    h('div.pan', h('span.label', `${sel.cardNetwork ?? 'Card'} ${sel.cardProduct ?? ''} · full demo card number`.trim()), h('b.mono.pannum', groupPan(sel.cardNumber)), h('span.small', 'Dummy number for testing. Read it to Lily when she asks. Try a wrong one first to see the retry.')),
-    sel.restrictions.length ? h('div', h('span.label', 'Restrictions and alerts'), h('ul.plain', sel.restrictions.map((r) => h('li', r)))) : null,
-    h('div', h('span.label', 'Recent transactions'), sel.recentTransactions.length ? h('ul.tx', sel.recentTransactions.map((t) => h('li', h('span', t.merchant), h('span.mono', t.amount), h('span.small.muted', `${t.at}${t.kind === 'fee' ? ' · fee' : ''}${t.status && t.status !== 'posted' ? ' · ' + t.status : ''}`)))) : h('p.small.muted', 'None.')),
-    sel.declines.length ? h('div', h('span.label', 'Declined payments'), h('ul.tx', sel.declines.map((d) => h('li', h('span', d.merchant), h('span.mono', d.amount), h('span.small.muted', `${d.at} · ${d.reason}`))))) : null);
-  return h('aside.panel.demo', { 'aria-label': 'Demo customers and test data' },
-    h('header', h('h3', 'Demo customers and test data'), h('span.grow'), h('span.chip.demo', S.bank ?? 'Northstar Bank')),
-    h('p.disc', S.disclaimer ?? 'Synthetic data only. Every customer, phone number and card number here is invented for this demonstration.'),
+      h('div', h('dt', t('phone')), h('dd.mono', sel.phone)),
+      h('div', h('dt', t('account')), h('dd.mono', sel.accountRef)),
+      h('div', h('dt', t('standing')), h('dd', standing(sel.accountStanding)))),
+    h('div.pan', h('span.label', `${sel.cardNetwork ?? ''} ${sel.cardProduct ?? ''} · ${t('panLabel')}`.trim()), h('b.mono.pannum', groupPan(sel.cardNumber)), h('span.small', t('panHelp'))),
+    sel.restrictions.length ? h('div', h('span.label', t('restrictions')), h('ul.plain', sel.restrictions.map((r) => h('li', r)))) : null,
+    h('div', h('span.label', t('recent')), sel.recentTransactions.length ? h('ul.tx', sel.recentTransactions.map((x) => h('li', h('span', x.merchant), h('span.mono', x.amount), h('span.small.muted', `${x.at}${x.kind === 'fee' ? ' · fee' : ''}${x.status && x.status !== 'posted' ? ' · ' + x.status : ''}`)))) : h('p.small.muted', t('none'))),
+    sel.declines.length ? h('div', h('span.label', t('declined')), h('ul.tx', sel.declines.map((d) => h('li', h('span', d.merchant), h('span.mono', d.amount), h('span.small.muted', `${d.at} · ${d.reason}`))))) : null);
+  return h('aside.panel.demo', { 'aria-label': t('panelTitle') },
+    h('header', h('h3', t('panelTitle')), h('span.grow'), h('span.chip.demo', S.bank ?? 'Northstar Bank')),
+    h('p.disc', t('disclaimer')),
     tabs, body,
-    locked ? h('p.small.muted', 'The customer is fixed while the call is live. End the call to switch.') : h('p.small.muted', 'Pick who you are calling as. Then just talk. Ask about a charge, a decline, a fee, or anything else.'));
+    h('p.small.muted', locked ? t('lockedNote') : t('hintNote')));
 }
 
 function drawHome() {
@@ -79,20 +85,21 @@ function drawHome() {
   const sel = S.cards.find((c) => c.id === S.selected);
   host.append(
     h('div.panel.idle',
-      h('div.status-row', h('span.chip', [h('span.dot' + (voiceOk ? '.ok' : '.warn')), voiceOk ? ' Live voice ready' : ' Live voice unavailable — typing works']), h('span.chip.demo', 'AI assistant · synthetic demo')),
-      h('h1', 'Say it once. Lily handles the rest.'),
-      h('p.lead', `Talk to Lily at ${S.bank ?? 'Northstar Bank'} Card Services. There is nothing to pick. Say what you need, in your own words, and change your mind any time.`),
-      sel ? h('div.cta', h('button.btn.primary.lg', { type: 'button', onclick: () => startCall(sel) }, `Call as ${sel.name.split(' ')[0]}`),
-        h('p.small.muted', 'You are speaking with an AI assistant. Your browser will ask for the microphone. Nothing here touches a real account.')) : null,
+      h('div.status-row', h('span.chip', [h('span.dot' + (voiceOk ? '.ok' : '.warn')), ' ' + (voiceOk ? t('voiceOk') : t('voiceOff'))]), h('span.chip.demo', t('ai'))),
+      h('h1', t('heroTitle')),
+      h('p.lead', t('heroLead')),
+      sel ? h('div.cta', h('button.btn.primary.lg', { type: 'button', onclick: () => startCall(sel) }, t('start')),
+        h('p.small.muted', t('startNote'))) : null,
+      h('div.tries', h('span.label', t('tryTitle')), h('ul.plain.tryl', tList('ex').map((x) => h('li', x)))),
       !voiceOk ? h('p.banner', st.reason ?? 'Live voice is not configured on this server. You can still type to Lily.') : null));
   render(top(), h('main.single', profilePanel(false), host));
 }
 
 async function startCall(card) {
   const orb = orbEl('connecting');
-  const labels = ['Securing the connection', 'Starting your call session', 'Connecting you with Lily'];
+  const labels = [t('c1'), t('c2'), t('connecting')];
   const list = h('ol.steps', labels.map((l) => h('li', h('span.ic'), l)));
-  S.host.replaceChildren(h('div.panel.connect', orb.el, h('h2', 'Connecting you with Lily'), list));
+  S.host.replaceChildren(h('div.panel.connect', orb.el, h('h2', t('connecting')), list));
   const mark = (i) => [...list.children].forEach((li, k) => { li.className = k < i ? 'done' : k === i ? 'now' : ''; li.firstChild.textContent = k < i ? '✓' : ''; });
   mark(0);
   // The microphone prompt must come from the click that started the call.
@@ -107,7 +114,7 @@ async function startCall(card) {
     callScreen(call);
   } catch (e) {
     orb.stop?.();
-    S.host.replaceChildren(h('div.panel.connect', h('h2', 'We could not connect'), h('p.banner.bad', e.message || 'Connection failed.'), h('div.cta', h('button.btn.primary', { onclick: home }, 'Try again'))));
+    S.host.replaceChildren(h('div.panel.connect', h('h2', t('failed')), h('p.banner.bad', e.message || 'Connection failed.'), h('div.cta', h('button.btn.primary', { onclick: home }, t('retry')))));
   }
 }
 
@@ -143,7 +150,7 @@ function orbEl(state) {
 const brandSvgWhite = () => { const s = svg(['M4 12h2', 'M8 7v10', 'M12 4v16', 'M16 8v8', 'M20 12h0']); s.setAttribute('stroke-width', '2.4'); s.style.color = '#fff'; return s; };
 
 /* ------------------------------------------------------------------ call controller */
-const SPEAKER_LABEL = { customer: 'You', assistant: 'Lily', agent: 'Agent', system: '' };
+const spLabel = (k) => ({ customer: t('you'), assistant: t('lily'), agent: t('agent') }[k] ?? '');
 class CallController {
   constructor(card) {
     this.card = card; this.id = null; this.ws = null; this.mic = null; this.player = null;
@@ -161,7 +168,7 @@ class CallController {
     try { await this.mic.start(); } catch { this.micDenied = true; this.mic = null; }
     await new Promise((resolve, reject) => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${proto}://${location.host}/api/calls/${this.id}/live`);
+      const ws = new WebSocket(`${proto}://${location.host}/api/calls/${this.id}/live?lang=${getLang()}`);
       this.ws = ws; let settled = false;
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -174,7 +181,7 @@ class CallController {
     });
     if (this.textOnly) { this.mic?.stop(); this.mic = null; }
   }
-  onDrop() { if (this.ended) return; this.reconnecting = true; this.banner = { kind: 'warn', text: 'Connection lost. Your conversation is saved — you can keep typing, or end the call.' }; this.ui.refresh?.(); }
+  onDrop() { if (this.ended) return; this.reconnecting = true; this.banner = { kind: 'warn', text: t('bLost') }; this.ui.refresh?.(); }
   onMessage(m) {
     switch (m.type) {
       case 'audio': this.player?.push(m.data); break;
@@ -189,7 +196,7 @@ class CallController {
       case 'error': if (this.voiceReady) { this.banner = { kind: 'bad', text: m.message }; this.ui.refresh?.(); } break;
     }
   }
-  setMuted(v) { this.muted = v; this.mic?.setMuted(v); this.ws?.readyState === 1 && this.ws.send(JSON.stringify({ type: 'mute', muted: v })); this.ui.refresh?.(); say(v ? 'Microphone muted' : 'Microphone on'); }
+  setMuted(v) { this.muted = v; this.mic?.setMuted(v); this.ws?.readyState === 1 && this.ws.send(JSON.stringify({ type: 'mute', muted: v })); this.ui.refresh?.(); say(v ? t('micMuted') : t('micOn')); }
   sendText(text) {
     if (!text.trim()) return;
     if (this.ws?.readyState === 1 && this.voiceReady) this.ws.send(JSON.stringify({ type: 'text', text }));
@@ -207,7 +214,7 @@ class CallController {
   /** Typing-only mode has no live socket, so read the recorded backend events instead. */
   async loadTimeline() { try { const r = await api(`/api/calls/${this.id}/timeline`); this.events = r.items ?? []; this.ui.activity?.(); } catch { /* the transcript still works */ } }
   async requestHuman() {
-    try { this.view = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'request_human' } }); this.handoff = this.view.handoff; this.ui.refresh?.(); say('Handover requested'); }
+    try { this.view = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'request_human' } }); this.handoff = this.view.handoff; this.ui.refresh?.(); say(t('hRequested')); }
     catch (e) { this.banner = { kind: 'bad', text: e.message }; this.ui.refresh?.(); }
   }
   async end() {
@@ -225,57 +232,56 @@ class CallController {
     if (this.mic && this.mic.level > 0.12) return 'listening-you'; return 'listening';
   }
 }
-const STATE_TEXT = { speaking: 'Lily is speaking', processing: 'Lily is checking…', listening: 'Listening', 'listening-you': 'Hearing you', muted: 'Microphone muted', reconnecting: 'Reconnecting…', ending: 'Ending call…' };
 
 /* ------------------------------------------------------------------ call screen */
-const STAGES = [['understand', 'Understand'], ['verify', 'Verify'], ['investigate', 'Investigate'], ['explain', 'Explain'], ['confirm', 'Confirm'], ['act', 'Act'], ['record', 'Record'], ['resolve', 'Resolve'], ['handoff', 'Handover']];
+const STAGE_KEYS = ['understand', 'verify', 'investigate', 'explain', 'confirm', 'act', 'record', 'resolve', 'handoff'];
 function callScreen(c) {
   let captions = true; let lastStage = null;
   const orb = orbEl('listening');
   const stateEl = h('span.state', { 'aria-live': 'off' }); const subEl = h('span.small.muted');
-  const bannerEl = h('div'); const transcriptEl = h('div.transcript', { role: 'log', 'aria-label': 'Live transcript' });
-  const actEl = h('ul.activity', { 'aria-label': 'Behind the conversation' }); const stageEl = h('div.stagebar');
-  const sideEl = h('div'); const textIn = h('input', { type: 'text', placeholder: c.textOnly ? 'Type to Lily…' : 'Or type a message', 'aria-label': 'Message to Lily', maxlength: '500', autocomplete: 'off' });
-  const compose = h('form.compose', { onsubmit: (e) => { e.preventDefault(); const t = textIn.value.trim(); if (t) { c.sendText(t); textIn.value = ''; } } }, textIn, h('button.btn.primary', { type: 'submit' }, 'Send'));
+  const bannerEl = h('div'); const transcriptEl = h('div.transcript', { role: 'log', 'aria-label': t('captions') });
+  const actEl = h('ul.activity', { 'aria-label': t('behind') }); const stageEl = h('div.stagebar');
+  const sideEl = h('div'); const textIn = h('input', { type: 'text', placeholder: c.textOnly ? t('typeOnly') : t('typeHere'), 'aria-label': t('typeOnly'), maxlength: '500', autocomplete: 'off' });
+  const compose = h('form.compose', { onsubmit: (e) => { e.preventDefault(); const m = textIn.value.trim(); if (m) { c.sendText(m); textIn.value = ''; } } }, textIn, h('button.btn.primary', { type: 'submit' }, t('send')));
   const ctl = (icn, label, onclick, extra = {}) => h('div.ctl-wrap', h('button.ctl', { type: 'button', 'aria-label': label, onclick, ...extra }, icn), label);
-  const muteBtn = h('button.ctl', { type: 'button', 'aria-label': 'Mute microphone', 'aria-pressed': 'false', onclick: () => c.setMuted(!c.muted) }, ICON.mic());
-  const ccBtn = h('button.ctl', { type: 'button', 'aria-label': 'Captions', 'aria-pressed': 'true', onclick: () => { captions = !captions; transcriptEl.classList.toggle('hidden', !captions); ccBtn.setAttribute('aria-pressed', String(captions)); } }, ICON.cc());
-  const humanBtn = h('button.ctl', { type: 'button', 'aria-label': 'Talk to a person', onclick: () => c.requestHuman() }, ICON.person());
-  const endBtn = h('button.ctl.end', { type: 'button', 'aria-label': 'End call', onclick: () => c.end() }, ICON.end());
+  const muteBtn = h('button.ctl', { type: 'button', 'aria-label': t('muteMic'), 'aria-pressed': 'false', onclick: () => c.setMuted(!c.muted) }, ICON.mic());
+  const ccBtn = h('button.ctl', { type: 'button', 'aria-label': t('captions'), 'aria-pressed': 'true', onclick: () => { captions = !captions; transcriptEl.classList.toggle('hidden', !captions); ccBtn.setAttribute('aria-pressed', String(captions)); } }, ICON.cc());
+  const humanBtn = h('button.ctl', { type: 'button', 'aria-label': t('talkHuman'), onclick: () => c.requestHuman() }, ICON.person());
+  const endBtn = h('button.ctl.end', { type: 'button', 'aria-label': t('endCall'), onclick: () => c.end() }, ICON.end());
   const wrapC = (b, t) => h('div.ctl-wrap', b, t);
 
   function drawTranscript() {
-    const nodes = c.turns.map((t) => { const btn = /^\[Pressed/.test(t.text); const sp = btn ? 'system' : t.speaker === 'customer' || t.speaker === 'assistant' || t.speaker === 'agent' ? t.speaker : 'system'; return h('div.msg.' + sp, SPEAKER_LABEL[sp] ? h('span.who-l', SPEAKER_LABEL[sp]) : null, btn ? 'You asked for a person.' : t.text); });
-    for (const sp of ['customer', 'assistant']) if (c.partial[sp]) nodes.push(h('div.msg.partial.' + sp, h('span.who-l', SPEAKER_LABEL[sp]), c.partial[sp]));
+    const nodes = c.turns.map((tr) => { const btn = /^\[Pressed/.test(tr.text); const sp = btn ? 'system' : ['customer', 'assistant', 'agent'].includes(tr.speaker) ? tr.speaker : 'system'; return h('div.msg.' + sp, spLabel(sp) ? h('span.who-l', spLabel(sp)) : null, btn ? t('askedPerson') : tr.text); });
+    for (const sp of ['customer', 'assistant']) if (c.partial[sp]) nodes.push(h('div.msg.partial.' + sp, h('span.who-l', spLabel(sp)), c.partial[sp]));
     transcriptEl.replaceChildren(...nodes);
     transcriptEl.scrollTop = transcriptEl.scrollHeight;
   }
   function drawActivity() {
-    if (!c.events.length) { actEl.replaceChildren(h('li', h('span.empty', 'Nothing yet. As Lily looks things up, checks policy or takes an action, each step appears here.'))); return; }
+    if (!c.events.length) { actEl.replaceChildren(h('li', h('span.empty', t('nothingYet')))); return; }
     actEl.replaceChildren(...c.events.filter((e) => !/^voice\.(muted|unmuted)/.test(e.type)).map((e) => {
       const cls = { ok: 'ok', running: 'run', failed: 'bad', blocked: 'bad', warn: 'warn', pending: 'warn' }[e.status] ?? '';
       return h('li', h('span.dot' + (cls ? '.' + cls : '')), h('div', h('div.t', e.title), e.detail ? h('div.d', e.detail) : null), h('span.at', fmtTime(e.at)));
     }).reverse());
     const seen = new Set(c.events.map((e) => e.stage)); const last = c.events[c.events.length - 1]?.stage;
-    stageEl.replaceChildren(...STAGES.map(([k, l]) => h('span.sg' + (k === last ? '.on' : seen.has(k) ? '.seen' : ''), l)));
+    stageEl.replaceChildren(...STAGE_KEYS.map((k, i) => h('span.sg' + (k === last ? '.on' : seen.has(k) ? '.seen' : ''), tList('stages')[i])));
   }
   function drawSide() {
     const v = c.view ?? {}; const hd = v.handoff; const bits = [];
-    if (v.demoDevice) bits.push(h('div.demo-box', h('div.label', v.demoDevice.label), h('p.small', 'Lily asked for a passcode. Read it out loud:'), h('b.mono', v.demoDevice.code)));
+    if (v.demoDevice) bits.push(h('div.demo-box', h('div.label', v.demoDevice.label), h('p.small', t('passcode')), h('b.mono', v.demoDevice.code)));
     if (hd && hd.status !== 'cancelled') {
       const acc = hd.status === 'connected' || hd.status === 'completed';
-      const txt = acc ? `${hd.agentName ?? 'A support agent'} has joined. Lily has passed on what you've discussed.` : hd.status === 'no_agent' ? 'No agent is free right now. Your request and details are saved for a callback.' : hd.status === 'failed' ? 'Handover could not be completed.' : 'Request sent. Waiting for an agent to accept in the console.';
-      bits.push(h('div.handover' + (acc ? '.accepted' : ''), { role: 'status' }, h('span.label', acc ? 'Agent connected' : hd.status === 'requested' ? 'Handover requested' : 'Waiting for an agent'), h('p', txt), h('p.small.muted', 'In-app handover demo — not a telephone transfer.')));
+      const txt = acc ? t('hJoined', { n: hd.agentName ?? t('anAgent') }) : hd.status === 'no_agent' ? t('hNone') : hd.status === 'failed' ? t('hFailed') : t('hSent');
+      bits.push(h('div.handover' + (acc ? '.accepted' : ''), { role: 'status' }, h('span.label', acc ? t('hConnected') : hd.status === 'requested' ? t('hRequested') : t('hWaiting')), h('p', txt), h('p.small.muted', t('hDemo'))));
     }
     sideEl.replaceChildren(...bits);
   }
   function refresh() {
-    const ds = c.displayState; stateEl.textContent = STATE_TEXT[ds] ?? ds;
+    const ds = c.displayState; stateEl.textContent = t('s_' + ds);
     orb.setState(ds === 'speaking' ? 'speaking' : ds === 'processing' ? 'processing' : 'listening', ds === 'speaking' ? '#7161e4' : ds === 'muted' ? '#a9a5b8' : ds === 'processing' ? '#3e6354' : '#5846c9');
-    subEl.textContent = c.textOnly ? 'Voice unavailable — typing mode' : c.micDenied ? 'Microphone blocked — type instead' : '';
+    subEl.textContent = c.textOnly ? t('typingMode') : c.micDenied ? t('micDenied') : '';
     muteBtn.setAttribute('aria-pressed', String(c.muted)); muteBtn.replaceChildren(c.muted ? ICON.micOff() : ICON.mic()); muteBtn.disabled = !c.mic;
     humanBtn.disabled = !!(c.view?.handoff && c.view.handoff.status !== 'cancelled');
-    bannerEl.replaceChildren(...(c.textOnly || c.micDenied ? [h('p.banner.info', c.textOnly ? `${c.voiceError ?? 'Voice is unavailable.'} Type below — the conversation works the same.` : 'Microphone access was blocked. Type below, or allow the microphone in your browser and start again.')] : []), ...(c.banner ? [h('p.banner' + (c.banner.kind === 'warn' ? '' : '.' + c.banner.kind), c.banner.text)] : []));
+    bannerEl.replaceChildren(...(c.textOnly || c.micDenied ? [h('p.banner.info', c.textOnly ? t('bTextOnly') : t('bMic'))] : []), ...(c.banner ? [h('p.banner' + (c.banner.kind === 'warn' ? '' : '.' + c.banner.kind), c.banner.text)] : []));
     drawSide();
   }
   c.ui = { refresh, transcript: drawTranscript, activity: drawActivity, stopOrb: () => orb.destroy() };
@@ -291,13 +297,13 @@ function callScreen(c) {
   const wasPanel = document.querySelector('aside.panel.demo');
   wasPanel?.replaceWith(profilePanel(true));
   S.host.replaceChildren(
-    h('section.panel', { 'aria-label': 'Live call' },
-      h('header', h('span.dot.run'), h('h3', `Live call with Lily — ${c.card.name}`), h('span.grow'), h('span.chip', 'AI assistant')),
+    h('section.panel', { 'aria-label': t('liveCall') },
+      h('header', h('span.dot.run'), h('h3', t('liveCall')), h('span.grow'), h('span.chip', t('ai'))),
       h('div.stage', orb.el, stateEl, subEl),
-      h('div.controls', wrapC(muteBtn, 'Mute'), wrapC(ccBtn, 'Captions'), wrapC(humanBtn, 'Human'), wrapC(endBtn, 'End')),
+      h('div.controls', wrapC(muteBtn, t('mute')), wrapC(ccBtn, t('captions')), wrapC(humanBtn, t('human')), wrapC(endBtn, t('end'))),
       bannerEl, sideEl, transcriptEl, compose),
     h('section.panel', { 'aria-label': 'Behind the conversation' },
-      h('header', h('h3', 'Behind the conversation'), h('span.grow'), h('span.small.muted', 'Real events from the backend, including each verification attempt')), stageEl, actEl));
+      h('header', h('h3', t('behind')), h('span.grow'), h('span.small.muted', t('behindSub'))), stageEl, actEl));
   drawTranscript(); drawActivity(); refresh();
   if (c.view?.transcript?.length && !c.turns.length) { c.turns = c.view.transcript.map((t, i) => ({ seq: i, speaker: t.speaker, kind: t.kind ?? '', text: t.text })); drawTranscript(); }
   textIn.focus({ preventScroll: true });
@@ -313,19 +319,19 @@ async function summary(c) {
   const list = (items, empty) => items?.length ? h('ul', items.map((i) => h('li', typeof i === 'string' ? i : i.text))) : h('p.small.muted', empty);
   render(top(),
     h('main.summary',
-      h('div', h('span.chip.demo', 'Demo call — fictional data'), h('h1', 'Call summary')),
-      h('div.box', h('span.label', 'Outcome'), h('h2', r?.headline ?? 'Call ended'), h('p.muted', r?.nextStep ?? ''), esc ? h('p', h('span.chip' + (esc.status === 'connected' || esc.status === 'completed' ? '.ok' : '.warn'), `Handover: ${esc.status}`), ` ${esc.reasonLabel}`) : null),
+      h('div', h('span.chip.demo', t('demoCall')), h('h1', t('summary'))),
+      h('div.box', h('span.label', t('outcome')), h('h2', r?.headline ?? t('ended')), h('p.muted', r?.nextStep ?? ''), esc ? h('p', h('span.chip' + (esc.status === 'connected' || esc.status === 'completed' ? '.ok' : '.warn'), `Handover: ${esc.status}`), ` ${esc.reasonLabel}`) : null),
       h('div.grid2',
-        h('div.box', h('h3', 'What you told Lily'), list(r?.customerSaid, 'No details were captured.')),
-        h('div.box', h('h3', 'Confirmed by bank systems'), list(r?.verifiedFacts, 'Nothing was confirmed on this call.'))),
-      h('div.box', h('h3', 'Actions'),
-        actions.length ? h('ul', actions.map((a) => h('li', [a.label, ' ', h('span.chip' + (bucketCls[a.bucket] ? '.' + bucketCls[a.bucket] : ''), a.statusLabel), a.reference ? h('span.small.muted.mono', ` ref ${a.reference}`) : null]))) : h('p.small.muted', 'No account changes were made. Lily never claims an action happened unless a system confirmed it.')),
-      r?.unresolved?.length ? h('div.box', h('h3', 'Still open'), list(r.unresolved)) : null,
-      h('div.box', h('h3', 'What Lily did'),
-        h('details.fold', { open: '' }, h('summary', `${tl.length} recorded steps`),
+        h('div.box', h('h3', t('told')), list(r?.customerSaid, t('noDetails'))),
+        h('div.box', h('h3', t('confirmed')), list(r?.verifiedFacts, t('nothingConfirmed')))),
+      h('div.box', h('h3', t('actions')),
+        actions.length ? h('ul', actions.map((a) => h('li', [a.label, ' ', h('span.chip' + (bucketCls[a.bucket] ? '.' + bucketCls[a.bucket] : ''), a.statusLabel), a.reference ? h('span.small.muted.mono', ` ref ${a.reference}`) : null]))) : h('p.small.muted', t('noChanges'))),
+      r?.unresolved?.length ? h('div.box', h('h3', t('stillOpen')), list(r.unresolved)) : null,
+      h('div.box', h('h3', t('whatLily')),
+        h('details.fold', { open: '' }, h('summary', t('steps', { n: tl.length })),
           h('ol.tl', { style: 'margin-top:.8rem' }, tl.map((e) => h('li' + (e.status ? '.' + e.status : ''), h('div.t', { style: 'font-weight:600' }, e.title), e.detail ? h('div.small.muted', e.detail) : null, h('div.small.muted.mono', fmtTime(e.at))))))),
-      h('div.cta', h('button.btn.primary.lg', { onclick: () => home() }, 'Start another demo'), h('p.small.muted', 'History stays in the dashboard and audit log.'))));
-  say('Call ended. Summary ready.');
+      h('div.cta', h('button.btn.primary.lg', { onclick: () => home() }, t('again')), null)));
+  say(t('summaryReady'));
 }
 
 home();

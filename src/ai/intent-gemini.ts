@@ -28,7 +28,7 @@ Pick the closest intent:
 - payment_not_showing: a payment they made is not showing
 - fee_query: a question about a fee, or asking for a fee to be removed
 - card_declined: a card or payment was declined or will not work
-- account_inquiry: asks about card status, recent transactions or account details
+- account_inquiry: any question about their own account that is not one of the above: card status, recent transactions, credit limit, balance, payment due date, statement, rewards balance, account details
 - none: greetings, thanks, unrelated topics. Put a short label in unsupportedTopic for lending, limits, interest rates, rewards, address changes or closing the account.
 Reply as JSON. confidence is how sure you are from 0 to 1.`;
 

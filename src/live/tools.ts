@@ -13,6 +13,7 @@ import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
 import { handleInput, getContext } from '../conversation/orchestrator.ts';
 import { policy } from '../config/policy.ts';
 import { TOOL } from './lily.ts';
+import { profileById, profileCard } from './profiles.ts';
 
 export interface ToolContext {
   sessionId: string;
@@ -72,7 +73,7 @@ export async function runTool(name: string, args: Record<string, unknown>, c: To
 }
 
 function toolVerb(name: string): string {
-  return name === TOOL.banking ? 'handle that request' : name === TOOL.human ? 'start a human handover' : name === TOOL.kb ? 'search guidance' : name === TOOL.card ? 'check the card number' : name;
+  return name === TOOL.banking ? 'handle that request' : name === TOOL.human ? 'start a human handover' : name === TOOL.kb ? 'search guidance' : name === TOOL.card ? 'check the card number' : name === TOOL.account ? 'look up the account details' : name;
 }
 
 async function dispatch(name: string, args: Record<string, unknown>, c: ToolContext): Promise<Record<string, unknown>> {
@@ -108,6 +109,16 @@ async function dispatch(name: string, args: Record<string, unknown>, c: ToolCont
         ...stateSummary(c.sessionId),
         instruction: GUIDE + ' Never say or hint at the correct card number.',
       };
+    }
+    case TOOL.account: {
+      const row = get<{ profile_id: string | null; verification_status: string }>('SELECT profile_id, verification_status FROM call_sessions WHERE id = ?', [c.sessionId]);
+      // Protected read: gated on the persisted verification status of THIS call, never on what the model says.
+      if (row?.verification_status !== 'verified') return { ok: false, error: 'not_verified', ...stateSummary(c.sessionId), message: 'The customer is not verified yet, so you cannot read their account. Ask them to read the 16-digit demo card number shown on their screen, then use the banking tool.' };
+      const def = row.profile_id ? profileById(row.profile_id) : undefined;
+      if (!def) return { ok: false, error: 'no_profile', message: 'No account details are available for this call. Say so and offer a person.' };
+      const { cardNumber: _never, ...facts } = profileCard(def);
+      emitTimeline(c.sessionId, { type: 'account.read', stage: 'investigate', title: 'Read the verified customer\'s account details', detail: `Question: ${redactText(String(args.question ?? '')).slice(0, 120)}`, status: 'ok', source: 'customer profile' });
+      return { ok: true, account: { name: facts.name, accountRef: facts.accountRef, cardStatus: facts.cardStatus, cardNetwork: facts.cardNetwork, cardProduct: facts.cardProduct, accountStanding: facts.accountStanding, recentTransactions: facts.recentTransactions, fees: facts.fees, declinedPayments: facts.declines, restrictions: facts.restrictions }, not_available: 'Balances, credit limits and statement dates are not part of this demo data. Say so if asked and do not guess.', instruction: 'Answer the customer\'s question using only these facts, in natural spoken words. Keep amounts and dates exact.' };
     }
     case TOOL.human: {
       const text = c.customerText.trim();
