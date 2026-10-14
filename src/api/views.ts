@@ -168,3 +168,55 @@ export function listCases(q: { status?: string; issueType?: string; limit: numbe
   const items = rows.slice(0, q.limit);
   return { items, nextCursor: more ? (items[items.length - 1].created_at as string) : null };
 }
+
+/**
+ * Live operations overview (demo calls only): where active calls are in the procedure, how
+ * actions ended, issue mix, and the most recent interactions for drill-down. Built from
+ * recorded sessions, operations and timeline events — never from estimates.
+ */
+export function opsOverview(hours = 24) {
+  const since = new Date(Date.now() - hours * 3600_000).toISOString();
+  const sessions = all<{ id: string; context_json: string; ended_at: string | null; outcome: string | null; issue_type: string | null; answered_at: string; scenario_id: string | null; verification_status: string }>(
+    "SELECT id, context_json, ended_at, outcome, issue_type, answered_at, scenario_id, verification_status FROM call_sessions WHERE data_origin = 'demo_session' AND answered_at >= ? ORDER BY answered_at DESC LIMIT 200",
+    [since],
+  );
+  const stageCounts: Record<string, number> = Object.fromEntries(STAGES.map((s) => [s, 0]));
+  const issues: Record<string, number> = {};
+  const recent: Record<string, unknown>[] = [];
+  let active = 0;
+  let completed = 0;
+  let handedOff = 0;
+  for (const s of sessions) {
+    const ctx = parseJson<CallContext>(s.context_json, {} as CallContext);
+    const ops = all<{ status: string }>('SELECT status FROM action_operations WHERE session_id = ?', [s.id]);
+    const h = get<{ status: string; reason: string }>('SELECT status, reason FROM handoffs WHERE session_id = ? ORDER BY requested_at DESC LIMIT 1', [s.id]);
+    const ho = !!h && h.status !== 'cancelled';
+    const stage = currentStage(ctx, ops, !!s.ended_at, ho);
+    if (!s.ended_at) {
+      active++;
+      stageCounts[stage]++;
+    } else completed++;
+    if (ho) handedOff++;
+    if (s.issue_type) issues[s.issue_type] = (issues[s.issue_type] ?? 0) + 1;
+    if (recent.length < 12) {
+      const last = get<{ title: string; created_at: string; status: string }>('SELECT title, created_at, status FROM timeline_events WHERE session_id = ? ORDER BY id DESC LIMIT 1', [s.id]);
+      const n = get<{ n: number }>('SELECT COUNT(*) n FROM timeline_events WHERE session_id = ?', [s.id])?.n ?? 0;
+      recent.push({ id: s.id, scenarioId: s.scenario_id, answeredAt: s.answered_at, endedAt: s.ended_at, active: !s.ended_at, stage, outcome: s.outcome, issueType: s.issue_type, issueLabel: s.issue_type ? ISSUE_LABELS[s.issue_type] : null, verification: s.verification_status, handoff: h ? { status: h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[h.reason] ?? h.reason } : null, lastEvent: last ? { title: last.title, at: last.created_at, status: last.status } : null, events: n });
+    }
+  }
+  const actionRows = all<{ action_type: string; status: string; n: number }>(
+    "SELECT action_type, status, COUNT(*) n FROM action_operations WHERE data_origin = 'demo_session' AND requested_at >= ? GROUP BY action_type, status",
+    [since],
+  );
+  const actionOutcomes: Record<string, number> = {};
+  for (const r of actionRows) actionOutcomes[r.status] = (actionOutcomes[r.status] ?? 0) + r.n;
+  return {
+    label: `Demo calls only · last ${hours} hours · synthetic data`,
+    totals: { sessions: sessions.length, active, completed, handedOff },
+    stageDistribution: STAGES.map((s) => ({ stage: s, active: stageCounts[s] })),
+    actionOutcomes: Object.entries(actionOutcomes).map(([status, count]) => ({ status, label: OP_STATUS_LABELS[status as keyof typeof OP_STATUS_LABELS] ?? status, count })),
+    actionsByType: actionRows.map((r) => ({ type: r.action_type, label: ACTION_LABELS[r.action_type as keyof typeof ACTION_LABELS] ?? r.action_type, status: r.status, count: r.n })),
+    categories: Object.entries(issues).map(([issue, count]) => ({ issue, label: ISSUE_LABELS[issue] ?? issue, count })).sort((a, b) => b.count - a.count),
+    recent,
+  };
+}

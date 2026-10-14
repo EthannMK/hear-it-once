@@ -39,7 +39,7 @@ export function registerDemoRoutes(app: FastifyInstance): void {
   app.get('/api/demo/activity', async () => {
     const today = new Date(Date.now() - 24 * 3600_000).toISOString();
     const counts = get<{ calls: number; resolved: number; handed: number }>(
-      `SELECT COUNT(*) calls, SUM(outcome = 'resolved') resolved, SUM(outcome IN ('handed_off','fallback')) handed FROM call_sessions WHERE data_origin = 'demo_session' AND answered_at >= ?`,
+      `SELECT COUNT(*) calls, COALESCE(SUM(outcome = 'resolved'),0) resolved, COALESCE(SUM(outcome IN ('handed_off','fallback')),0) handed FROM call_sessions WHERE data_origin = 'demo_session' AND answered_at >= ?`,
       [today],
     ) ?? { calls: 0, resolved: 0, handed: 0 };
     const confirmed = get<{ n: number }>("SELECT COUNT(*) n FROM action_operations WHERE data_origin = 'demo_session' AND status = 'succeeded' AND requested_at >= ?", [today])?.n ?? 0;

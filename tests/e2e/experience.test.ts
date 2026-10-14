@@ -221,3 +221,28 @@ describe('resolution / agent brief', () => {
     expect(b.verifiedFacts).toEqual([]);
   });
 });
+
+describe('operations overview', () => {
+  it('shows active calls by stage, action outcomes and drill-down — staff only', async () => {
+    const { staffLogin } = await import('./harness.ts');
+    const a = new Caller(app);
+    await a.start('S01');
+    await a.say("There's a charge from Novaplay for $249 that I didn't make");
+    await a.verify('S01');
+    await a.consent();
+    const b = new Caller(app);
+    await b.start('S02');
+    await b.say("I've lost my card");
+    expect((await app.inject({ method: 'GET', url: '/api/ops/overview' })).statusCode).toBe(401);
+    const cookie = await staffLogin(app, 'STF-QA-1');
+    const o = (await app.inject({ method: 'GET', url: '/api/ops/overview', headers: { cookie } })).json();
+    expect(o.label).toMatch(/synthetic/);
+    expect(o.totals.active).toBeGreaterThanOrEqual(2);
+    expect(o.stageDistribution.find((s: { stage: string }) => s.stage === 'verify').active).toBeGreaterThanOrEqual(1);
+    expect(o.actionOutcomes.find((x: { status: string }) => x.status === 'succeeded').count).toBeGreaterThanOrEqual(3);
+    const row = o.recent.find((r: { id: string }) => r.id === a.sessionId);
+    expect(row.events).toBeGreaterThan(10);
+    const tl = await app.inject({ method: 'GET', url: `/api/calls/${a.sessionId}/timeline`, headers: { cookie } });
+    expect(tl.statusCode).toBe(200);
+  });
+});

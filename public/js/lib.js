@@ -1,3 +1,5 @@
+import { brandMark } from './icons.js';
+
 // Shared browser helpers. All rendering uses textContent / DOM nodes — never innerHTML with
 // data — so server-provided text is always output-encoded.
 
@@ -29,6 +31,7 @@ export function h(tag, attrs, ...children) {
   const [name, ...rest] = tag.split(/(?=[.#])/);
   const el = document.createElement(name || 'div');
   for (const r of rest) {
+    if (r.length < 2) continue;
     if (r.startsWith('.')) el.classList.add(r.slice(1));
     else if (r.startsWith('#')) el.id = r.slice(1);
   }
@@ -75,35 +78,39 @@ export const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.
 
 export function topbar(active) {
   const links = [
-    ['/', 'Caller simulator', 'sim'],
-    ['/agent.html', 'Agent console', 'agent'],
+    ['/', 'Talk to the AI', 'home'],
     ['/dashboard.html', 'Operations', 'dash'],
+    ['/agent.html', 'Agent console', 'agent'],
+    ['/lab.html', 'Scenario lab', 'lab'],
   ];
+  const mark = brandMark();
   return [
-    h('div.sim-banner', { role: 'note' }, h('strong', 'Simulated prototype.'), 'Synthetic customers and mock bank systems only — no real card, payment or dispute is ever affected.'),
     h(
       'header.topbar',
-      h('div.wordmark', h('b', 'Hear It Once'), h('span', 'Card services')),
+      h('a.wordmark', { href: '/' }, mark, h('b', 'Hear It Once'), h('span', 'Card services')),
       h('nav.nav', { 'aria-label': 'Main' }, links.map(([href, label, key]) => h('a', { href, 'aria-current': key === active ? 'page' : null }, label))),
       h('div.spacer'),
+      h('span.env-pill', { title: 'Synthetic customers and mock bank systems only — no real card, payment or dispute is affected.' }, 'Demo environment · synthetic data'),
       h('div#who.small.muted'),
     ),
   ];
 }
 
-/** Demo staff sign-in strip. Calls onChange(me) after login/logout. */
+/** Demo staff sign-in strip: one click per synthetic role (not real authentication). */
 export async function staffSignin(container, { roles, onChange }) {
   const me = await api('/api/auth/me');
   const users = (await api('/api/auth/demo-users')).items.filter((u) => roles.includes(u.role));
+  const login = async (id) => {
+    await api('/api/auth/demo-login', { method: 'POST', body: { userId: id } });
+    const n = await api('/api/auth/me');
+    render(n);
+    onChange(n);
+  };
   const render = (m) => {
     if (m.authenticated) {
       mount(container, h('div.signin', h('span.small', `Signed in as ${m.displayName}`), h('button.ghost', { onclick: async () => { await api('/api/auth/logout', { method: 'POST', body: {} }); const n = await api('/api/auth/me'); render(n); onChange(n); } }, 'Sign out')));
     } else {
-      const sel = h('select', { 'aria-label': 'Demo user' }, users.map((u) => h('option', { value: u.id }, u.display_name)));
-      mount(
-        container,
-        h('div.signin', h('label', 'Demo role (not real sign-in)'), sel, h('button.primary', { onclick: async () => { await api('/api/auth/demo-login', { method: 'POST', body: { userId: sel.value } }); const n = await api('/api/auth/me'); render(n); onChange(n); } }, 'Sign in')),
-      );
+      mount(container, h('div.signin', h('span.small.muted', 'Demo sign-in (no password):'), users.map((u) => h('button', { onclick: () => login(u.id) }, `Continue as ${u.display_name.replace(/ \(demo (agent|QA|admin)\)/, '')} · ${u.role}`))));
     }
   };
   render(me);

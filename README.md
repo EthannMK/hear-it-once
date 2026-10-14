@@ -4,13 +4,43 @@
 
 Hear It Once answers a credit-card services call without an IVR menu, discloses that it is an AI, captures the caller's issue **once**, verifies identity, checks six to seven bank systems **in parallel**, explains what those systems confirm, proposes permitted actions, executes them **only after explicit consent and deterministic policy checks**, creates a case during the call, and hands off to a person whenever asked or whenever it can't proceed safely.
 
-It ships three screens on top of one backend:
+> **One conversation. Every action handled. Nothing lost.**
+
+It ships these screens on top of one backend:
 
 | Screen | Path | Who |
 |---|---|---|
-| Caller simulator (text, plus optional browser speech) | `/` | Anyone running the demo |
+| Landing — signature mic orb, text fallback, example requests, judge scenarios, what's simulated | `/` | Anyone |
+| Live call workspace — voice or text conversation beside a live operations view (stage stepper, call tags, parallel system checks, actions with their authorisation lifecycle, event stream, knowledge used, case) | `/#/call` | Anyone |
+| Resolution / agent brief — customer's words, verified facts vs AI interpretation, actions by outcome, unresolved items, evidence, KB references, next step, copy summary, event history | `/#/brief/<call>` | The caller's browser, or staff |
+| Operations — live overview (active calls by stage, action outcomes, categories, drill-down event trails) plus pilot KPIs, QA review, audit, admin | `/dashboard.html` | Demo QA / admin roles |
 | Agent console (warm-handoff briefs, approvals, outcome) | `/agent.html` | Demo agent role |
-| Operations dashboard (KPIs, QA review, audit log, admin) | `/dashboard.html` | Demo QA / admin roles |
+| Scenario lab — all 18 scripted scenarios in the original simulator | `/lab.html` | Anyone |
+
+### What's real and what's simulated
+
+| Real (the application) | Simulated (replaceable adapters) |
+|---|---|
+| Conversation state machine, verification flow, policy/eligibility engine, consent, idempotency, timeout → unknown → reconciliation, cases, handoff briefs, audit, timeline events, SSE stream, KPIs | All 9 bank systems, the identity passcode (shown on a simulated phone), the 9-article knowledge base (synthetic guidance, not bank policy), the agent desk, and the seeded illustrative history |
+| Browser speech recognition / synthesis where the browser supports it (Chrome, Edge); text input always works and is the fallback when the microphone is denied or unsupported | No audio is recorded or sent to the server — only recognised text |
+
+Sentiment is an indicative keyword rule, labelled as such; it is never used to authorise anything.
+
+### Judge scenarios (from the landing page)
+
+| Scenario | Shows |
+|---|---|
+| S01 Unrecognised transaction | verification → six parallel checks → explanation → one consent → block + replacement + dispute, each confirmed by its system |
+| S02 Lost or stolen card | block first, before any other question |
+| S04 Payment not showing | reports only what the payment system returned |
+| S05 / S06 Fee query | eligible courtesy reversal vs. a rule-based refusal with a person offered |
+| S08 Ask for a person | immediate warm handoff with a full agent brief |
+| S10 Verification fails | nothing disclosed or changed; safe escalation |
+| S11 A bank system is down | partial data is never presented as complete |
+| S13 Card block fails | never claims success; urgent escalation |
+| S15 Duplicate request | "Confirm twice at once" → exactly one block |
+
+**Free talk:** press the orb (or type) and describe any card problem. Once the issue is understood a synthetic customer who fits it is attached; the date of birth appears in the persona card and the passcode on the simulated phone. "I don't recognise a transaction for $84.50" works end-to-end. **Reset & replay** re-seeds just that scenario's customer.
 
 ## Requirements
 
@@ -68,13 +98,13 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 
 ## Running a scenario (60 seconds)
 
-1. Open `/`, pick **S01 Unrecognised charge**, press **Start call**.
-2. Click the suggested lines in order (or type your own): the issue, the date of birth, then **Read the code to the assistant** in the simulated-phone panel.
-3. Watch *Behind the call*: verification steps, the parallel lookup lanes (all sources start together), what the systems confirm, the proposal.
-4. Press **Yes, go ahead**. Each action shows its real persisted status and history.
-5. Open `/dashboard.html` as the QA user to see the call in the KPIs and audit log.
+1. Open `/`, press **Start** on **Unrecognised transaction** (S01).
+2. Say or click the suggested line, press **Say it** next to the date of birth, then **Read it to the assistant** on the simulated phone.
+3. Watch the right-hand operations view: the stepper moves Understand → Verify → Investigate…, the six system lanes run concurrently, tags update, KB-101 is retrieved.
+4. Press **Yes, go ahead**. Each action walks Proposed → You confirmed → Authorised → Submitted → Confirmed as the simulated systems respond.
+5. **Open the brief**, then open `/dashboard.html` (one-click QA or admin sign-in) to see the call in Live operations and drill into its event trail.
 
-All 18 scenarios are scripted in [`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHROUGH.md). Changes persist (a blocked card stays blocked) — reset from the dashboard's admin panel or with `npm run db:reset` to replay.
+All 18 scenarios are scripted in [`docs/DEMO_WALKTHROUGH.md`](docs/DEMO_WALKTHROUGH.md) and available in the scenario lab. Changes persist (a blocked card stays blocked) — scenario starts from the landing page reset that customer automatically; `npm run db:reset` resets everything.
 
 ## Documentation
 
@@ -108,7 +138,8 @@ src/
   adapters/       typed contracts + MOCK implementations of the 9 logical bank systems
   config/         env, central policy, BRD pilot targets
   db/             migrations, seed, scenarios, illustrative history, CLI
-public/           HTML/CSS/JS for the three screens (no build step)
+  events/ kb/     live timeline events + SSE bus; synthetic knowledge base adapter
+public/           HTML/CSS/JS (no build step): index.html + js/app.js (landing, workspace, brief), orb.js, voice.js, icons.js; dashboard, agent console, scenario lab
 tests/            unit, integration, e2e (all 18 scenarios through the HTTP API)
 docs/             everything above
 ```

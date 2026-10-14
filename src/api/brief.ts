@@ -90,7 +90,10 @@ export function buildResolution(sessionId: string) {
       ? 'Resolved by the assistant'
       : s.ended_at
         ? 'Call ended — not fully resolved'
-        : 'In progress';
+        : c?.status === 'resolved'
+          ? 'Resolved — call still open'
+          : 'In progress';
+  const nextStep = escalated ? brief.recommendedNextStep : c?.next_steps ? String(c.next_steps) : s.ended_at ? 'No follow-up recorded.' : 'The call is still in progress.';
 
   const copyText = [
     `HEAR IT ONCE — ${headline.toUpperCase()} (SIMULATED DEMO, SYNTHETIC DATA)`,
@@ -119,6 +122,7 @@ export function buildResolution(sessionId: string) {
     simulated: true,
     sessionId,
     headline,
+    nextStep,
     outcome,
     resolutionStatus: s.resolution_status ?? null,
     endedAt: s.ended_at ?? null,
