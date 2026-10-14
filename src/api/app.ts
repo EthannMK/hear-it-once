@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
+import websocket from '@fastify/websocket';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ZodError } from 'zod';
@@ -18,11 +19,17 @@ import { registerCallRoutes } from './routes/calls.ts';
 import { registerStaffRoutes } from './routes/staff.ts';
 import { registerAdminRoutes } from './routes/admin.ts';
 import { registerDemoRoutes } from './routes/demo.ts';
+import { registerLiveRoutes } from './routes/live.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
     staff: StaffPrincipal | null;
   }
+}
+
+/** WebSocket origins for the CSP: same host, ws/wss. Safari does not treat 'self' as covering ws. */
+function wsOrigin(host: string | undefined): string {
+  return host && /^[A-Za-z0-9.:-]+$/.test(host) ? `ws://${host} wss://${host}` : '';
 }
 
 export const STAFF_COOKIE = 'hio_staff';
@@ -44,6 +51,7 @@ export function requireCaller(req: FastifyRequest, sessionId: string): void {
 export async function buildApp(opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 32 * 1024, trustProxy: false });
   await app.register(cookie);
+  await app.register(websocket, { options: { maxPayload: 128 * 1024 } });
   await app.register(rateLimit, {
     global: true,
     max: env().NODE_ENV === 'test' ? 10_000 : 600,
@@ -70,7 +78,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     reply.header('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)');
     reply.header(
       'Content-Security-Policy',
-      "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      `default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ${wsOrigin(req.headers.host)}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     );
     if (req.url.startsWith('/api/')) reply.header('Cache-Control', 'no-store');
     return payload;
@@ -92,6 +100,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   registerStaffRoutes(app);
   registerAdminRoutes(app);
   registerDemoRoutes(app);
+  registerLiveRoutes(app);
 
   const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
   await app.register(fastifyStatic, { root: publicDir, index: ['index.html'], cacheControl: false });

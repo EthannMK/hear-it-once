@@ -70,7 +70,7 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
   return {
     simulated: true,
     workflow: { stage: stageNow, visited: [...new Set([...visited, stageNow])], stages: STAGES },
-    tags: computeTags(sessionId, { issue: ctx.issue, sentiment: ctx.sentiment, flags: ctx.flags }),
+    tags: computeTags(sessionId, { issue: ctx.issue, sentiment: ctx.sentiment, flags: ctx.flags, secondary: ctx.secondary?.map((x) => x.issueType) }),
     persona:
       ctx.persona && sc
         ? { scenarioId: ctx.persona.scenarioId, name: ctx.persona.name, customerNumber: ctx.persona.customerNumber, phoneMasked: ctx.persona.phoneMasked, // Synthetic DOB is a demo helper: caller only, demo mode only, and only until verified.

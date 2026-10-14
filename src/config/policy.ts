@@ -26,14 +26,16 @@ export type SourceName =
   | 'prior_cases'
   | 'dispute_rules'
   | 'payment_status'
-  | 'fee_policy';
+  | 'fee_policy'
+  | 'card_declines';
 
 export type IssueType =
   | 'unrecognised_transaction'
   | 'lost_stolen_card'
   | 'wrong_or_duplicate_charge'
   | 'payment_not_showing'
-  | 'fee_query';
+  | 'fee_query'
+  | 'card_declined';
 
 export interface ActionPolicy {
   /** Verification level the session must have reached. */
@@ -153,6 +155,7 @@ export function buildPolicy(profile: PolicyConfig['profile']): PolicyConfig {
         customer_profile: 3600,
         prior_cases: 900,
         dispute_rules: 86400,
+        card_declines: 300,
       },
       snapshotMaxAgeSeconds: 900,
       circuitBreaker: { failureThreshold: 3, cooldownMs: 30_000 },
@@ -163,6 +166,7 @@ export function buildPolicy(profile: PolicyConfig['profile']): PolicyConfig {
       wrong_or_duplicate_charge: ['customer_profile', 'card_status', 'transactions', 'prior_cases', 'dispute_rules'],
       payment_not_showing: ['customer_profile', 'payment_status', 'transactions'],
       fee_query: ['customer_profile', 'fee_policy'],
+      card_declined: ['customer_profile', 'card_status', 'card_declines'],
     },
     actions,
     disputes: { transactionLookbackDays: 120 },

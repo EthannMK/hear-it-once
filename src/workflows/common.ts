@@ -18,6 +18,7 @@ export const SOURCE_LABELS: Record<SourceName, string> = {
   dispute_rules: 'dispute rules',
   payment_status: 'payment system',
   fee_policy: 'fee system',
+  card_declines: 'card authorisation system',
 };
 
 const ENTRY: Record<string, string> = {

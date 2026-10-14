@@ -41,7 +41,7 @@ describe('seed data', () => {
   beforeEach(() => freshDb());
   it('creates one synthetic customer per scenario and marks them synthetic', () => {
     const rows = all<{ is_synthetic: number }>('SELECT is_synthetic FROM bank_customers');
-    expect(rows).toHaveLength(18);
+    expect(rows).toHaveLength(SCENARIOS.length);
     expect(rows.every((r) => r.is_synthetic === 1)).toBe(true);
   });
   it('contains no full card numbers, CVVs or plaintext DOBs anywhere', () => {

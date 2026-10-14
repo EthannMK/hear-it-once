@@ -8,7 +8,7 @@
  * required source makes the snapshot unsafe for sensitive writes.
  */
 import { adapters } from '../adapters/registry.ts';
-import { SourceUnavailableError, type AdapterContext, type CardSummary, type DisputeRule, type FeeData, type FraudAlert, type PaymentRecord, type PriorCase, type CustomerProfile, type Transaction } from '../adapters/types.ts';
+import { SourceUnavailableError, type AdapterContext, type CardSummary, type DisputeRule, type FeeData, type FraudAlert, type PaymentRecord, type DeclineRecord, type PriorCase, type CustomerProfile, type Transaction } from '../adapters/types.ts';
 import { env } from '../config/env.ts';
 import { policy, type IssueType, type SourceName } from '../config/policy.ts';
 import { get, parseJson, run } from '../db/db.ts';
@@ -48,6 +48,7 @@ export interface SourceDataMap {
   dispute_rules: DisputeRule[];
   payment_status: PaymentRecord[];
   fee_policy: FeeData;
+  card_declines: DeclineRecord[];
 }
 
 export interface Snapshot {
@@ -70,6 +71,7 @@ const SOURCE_SETS: Record<IssueType, SourceName[]> = {
   wrong_or_duplicate_charge: ['customer_profile', 'card_status', 'transactions', 'fraud_alerts', 'prior_cases', 'dispute_rules'],
   payment_not_showing: ['customer_profile', 'card_status', 'transactions', 'fraud_alerts', 'prior_cases', 'payment_status'],
   fee_query: ['customer_profile', 'card_status', 'transactions', 'fraud_alerts', 'prior_cases', 'fee_policy', 'payment_status'],
+  card_declined: ['customer_profile', 'card_status', 'card_declines', 'fraud_alerts', 'prior_cases'],
 };
 export const sourcesForIssue = (t: IssueType) => SOURCE_SETS[t];
 
@@ -86,6 +88,7 @@ function reader(source: SourceName, ctx: AdapterContext, customerId: string): ()
     case 'dispute_rules': return () => r.dispute_rules.getRules(ctx);
     case 'payment_status': return () => r.payment_status.listPayments(ctx, customerId, 45);
     case 'fee_policy': return () => r.fee_policy.getFeeData(ctx, customerId);
+    case 'card_declines': return () => r.card_declines.listDeclines(ctx, customerId, 14);
   }
 }
 

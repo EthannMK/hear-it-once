@@ -10,6 +10,8 @@ ENV NODE_ENV=development \
     ADAPTER_MODE=mock \
     POLICY_PROFILE=prototype-mock \
     INTENT_MODEL=rules \
+    LIVE_PROVIDER=gemini \
+    GOOGLE_CLOUD_LOCATION=us-central1 \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY package*.json ./
 RUN npm ci --no-audit --no-fund

@@ -6,7 +6,7 @@ import { env } from '../config/env.ts';
 import type { AdapterRegistry } from './types.ts';
 import { mockIdentity } from './mock/identity.ts';
 import { mockCardControl, mockDisputeIntake, mockFeeLedger, mockReplacement } from './mock/writers.ts';
-import { mockCards, mockCustomerProfile, mockDisputeRules, mockFees, mockFraud, mockPayments, mockPriorCases, mockTransactions } from './mock/readers.ts';
+import { mockCards, mockCustomerProfile, mockDeclines, mockDisputeRules, mockFees, mockFraud, mockPayments, mockPriorCases, mockTransactions } from './mock/readers.ts';
 
 export const mockRegistry: AdapterRegistry = {
   mode: 'mock',
@@ -20,6 +20,7 @@ export const mockRegistry: AdapterRegistry = {
     dispute_rules: mockDisputeRules,
     payment_status: mockPayments,
     fee_policy: mockFees,
+    card_declines: mockDeclines,
   },
   writers: {
     card_control: mockCardControl,

@@ -33,7 +33,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       .object({
         scope: z.enum(['customer', 'scenario', 'global']),
         scopeRef: z.string().max(40).optional(),
-        target: z.enum(['customer_profile', 'card_status', 'transactions', 'fraud_alerts', 'prior_cases', 'dispute_rules', 'payment_status', 'fee_policy', 'card_control', 'replacement', 'dispute_intake', 'fee_ledger', 'assistant']),
+        target: z.enum(['customer_profile', 'card_status', 'transactions', 'fraud_alerts', 'prior_cases', 'dispute_rules', 'payment_status', 'fee_policy', 'card_declines', 'card_control', 'replacement', 'dispute_intake', 'fee_ledger', 'assistant']),
         fault: z.enum(['unavailable', 'timeout', 'stale', 'fail', 'timeout_after_submit', 'pending', 'error']),
         enabled: z.boolean(),
       })

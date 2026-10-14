@@ -163,6 +163,21 @@ export interface PaymentAdapter {
   listPayments(ctx: AdapterContext, customerId: string, sinceDays: number): Promise<SourceData<PaymentRecord[]>>;
 }
 
+/* ---------------------------------------------------------------- 7b. Card authorisations (declines) */
+export interface DeclineRecord {
+  declineId: string;
+  cardRef: string | null;
+  merchant: string;
+  amountMinor: number;
+  currency: string;
+  declinedAt: string;
+  reasonCode: 'travel_security_rule' | 'insufficient_available_credit' | 'card_blocked' | 'card_expired' | 'merchant_category_restricted';
+  suggestedAction: string | null;
+}
+export interface DeclineAdapter {
+  listDeclines(ctx: AdapterContext, customerId: string, sinceDays: number): Promise<SourceData<DeclineRecord[]>>;
+}
+
 /* ---------------------------------------------------------------- 8. Fees & reversal rules */
 export interface FeeRecord {
   feeId: string;
@@ -234,6 +249,7 @@ export interface AdapterRegistry {
     dispute_rules: DisputeRulesAdapter;
     payment_status: PaymentAdapter;
     fee_policy: FeeAdapter;
+    card_declines: DeclineAdapter;
   };
   writers: {
     card_control: CardControlWriteAdapter;
@@ -253,6 +269,7 @@ const _check: Record<ReaderName, SourceName> = {
   dispute_rules: 'dispute_rules',
   payment_status: 'payment_status',
   fee_policy: 'fee_policy',
+  card_declines: 'card_declines',
 };
 void _check;
 

@@ -50,3 +50,11 @@ Each mock is a *logical* boundary; all are backed by one local database. Nothing
 ## What the tests do and don't show
 
 130 automated tests cover business rules, state transitions, permissions, consent, idempotency, timeouts and reconciliation, privacy redaction, handoff, KPI calculations and every demo scenario end to end through the HTTP API. They do **not** demonstrate real-world handling time, fraud loss, satisfaction, availability, accuracy on real speech, or behaviour against real bank systems.
+
+## Live voice (Lily)
+
+* The real Gemini Live connection and real speech were **not** exercised in the build environment; automated tests use a scripted stand-in. Verify on the deployed service with a real microphone.
+* The default `LIVE_MODEL` must be confirmed against Vertex AI Studio; model IDs change.
+* Handover is an in-app demo to the agent console, not a telephone transfer.
+* Single Cloud Run instance only (SQLite + in-process WebSocket state); a deploy or restart ends active calls and resets demo data.
+* Browser echo cancellation varies; headphones are recommended for the demo.

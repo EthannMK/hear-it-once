@@ -1,0 +1,17 @@
+/* Re-skins the staff pages (agent console, dashboard, lab, classic demo) with the Stitch light system. Loaded after app.css. */
+:root{
+  color-scheme:light;
+  --ink-0:#f9f9ff;--ink-1:#ffffff;--ink-2:#f3f3fb;--ink-3:#ededf5;
+  --hair:#d9d5e6;--hair-2:#c9c4d6;
+  --text:#191b21;--text-2:#474554;--muted:#5f5c6d;
+  --ice:#5846c9;--ice-strong:#4a39b3;--ice-ink:#ffffff;--ice-soft:rgba(88,70,201,.09);--ice-line:rgba(88,70,201,.4);
+  --paper:#f3f3fb;--paper-2:#ffffff;--paper-ink:#191b21;--paper-ink-2:#474554;--paper-muted:#5f5c6d;--paper-line:#d9d5e6;
+  --ok:#1f7a55;--ok-soft:rgba(46,138,99,.13);--warn:#8a5a00;--warn-soft:rgba(201,138,0,.15);--bad:#ba1a1a;--bad-soft:rgba(186,26,26,.1);
+  --pending:#4a39b3;--pending-soft:rgba(88,70,201,.1);--blocked:#6b3fb0;--blocked-soft:rgba(107,63,176,.1);
+  --grid:#e2e2ea;--focus:#7161e4;
+  --paper-bg:var(--ink-0);--surface:var(--ink-1);--surface-2:var(--ink-2);--ink:var(--text);--ink-2-text:var(--text-2);--line:var(--hair);--line-strong:var(--hair-2);
+}
+body{background:var(--ink-0);color:var(--text);font-family:'Plus Jakarta Sans','Instrument Sans',system-ui,sans-serif}
+h1,h2{font-family:'Newsreader',Georgia,serif;font-weight:500}
+button.primary,.primary{color:#fff}
+.live-on{color:var(--ok);font-weight:600}.live-off{color:var(--warn);font-weight:600}

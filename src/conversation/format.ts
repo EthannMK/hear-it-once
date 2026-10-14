@@ -5,6 +5,7 @@ export const ISSUE_LABELS: Record<string, string> = {
   wrong_or_duplicate_charge: 'Wrong or duplicate charge',
   payment_not_showing: 'Payment not showing',
   fee_query: 'Fee query',
+  card_declined: 'Card declined',
 };
 
 export const ACTION_LABELS: Record<string, string> = {

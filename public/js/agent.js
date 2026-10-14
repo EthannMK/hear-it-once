@@ -6,12 +6,13 @@ const app = document.getElementById('app');
 const state = { me: null, items: [], selected: null, detail: null, timer: null, filter: 'active' };
 
 const signin = h('div');
+const liveEl = h('span.small.muted', { role: 'status' });
 const queueEl = h('div');
 const briefEl = h('div');
 const sideEl = h('div');
 mount(
   app,
-  h('div.dash', h('div.panel.filters', h('h1', 'Agent console'), h('span.grow'), signin)),
+  h('div.dash', h('div.panel.filters', h('h1', 'Agent console'), liveEl, h('span.grow'), signin)),
   h(
     'main.console',
     h('aside.panel', h('header', h('h2', 'Calls waiting'), h('span.grow'), h('div.segmented', { role: 'group', 'aria-label': 'Queue filter' }, ['active', 'all'].map((f) => h('button', { 'aria-pressed': String(state.filter === f), onclick: (e) => setFilter(f, e) }, f === 'active' ? 'Active' : 'All')))), queueEl),
@@ -31,12 +32,12 @@ staffSignin(signin, {
   onChange: (me) => {
     state.me = me;
     clearInterval(state.timer);
+    state.es?.close();
     if (me.authenticated && me.role === 'agent') {
       loadQueue();
-      state.timer = setInterval(() => {
-        loadQueue();
-        if (state.selected) loadDetail(state.selected, true);
-      }, 2500);
+      connectLive();
+      // Safety net only: updates normally arrive instantly over the live stream below.
+      state.timer = setInterval(() => { if (!state.live) { loadQueue(); if (state.selected) loadDetail(state.selected, true); } }, 15000);
     } else {
       mount(queueEl, h('div.section.empty', me.authenticated ? 'This console needs the agent role.' : 'Sign in with a demo agent to see the queue.'));
       mount(briefEl, h('div.section.empty', 'No call selected.'));
@@ -44,6 +45,21 @@ staffSignin(signin, {
     }
   },
 });
+
+function connectLive() {
+  const es = new EventSource('/api/handoffs/stream');
+  state.es = es;
+  let pending = null;
+  es.addEventListener('handoff', (ev) => {
+    state.live = true; setLive();
+    let d = {}; try { d = JSON.parse(ev.data); } catch { /* ignore */ }
+    clearTimeout(pending);
+    pending = setTimeout(() => { loadQueue(); if (state.selected && state.detail?.handoff?.session_id === d.sessionId) loadDetail(state.selected, true); else if (state.selected && !d.sessionId) loadDetail(state.selected, true); }, 150);
+  });
+  es.onopen = () => { state.live = true; setLive(); loadQueue(); };
+  es.onerror = () => { state.live = false; setLive(); };
+}
+function setLive() { signin.dataset.live = state.live ? 'on' : 'off'; liveEl.textContent = state.live ? '● Live — updates instantly' : '○ Reconnecting…'; liveEl.className = 'small ' + (state.live ? 'live-on' : 'live-off'); }
 
 async function loadQueue() {
   try {
