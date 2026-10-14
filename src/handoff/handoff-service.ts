@@ -242,6 +242,7 @@ export function agentMessage(handoffId: string, agent: Actor, text: string): voi
   if (!h) throw new AppError('NOT_FOUND', 'Handoff not found.');
   if (h.status !== 'connected' || h.agent_id !== agent.id) throw new AppError('FORBIDDEN', 'Only the connected agent can message the caller.');
   addTurn(h.session_id, 'agent', text.slice(0, 1000));
+  emitTimeline(h.session_id, { type: 'handoff.agent_message', stage: 'handoff', title: 'Agent sent a message', status: 'info', source: 'agent desk (simulated)', ref: handoffId });
   audit({ actor: agent, event: 'handoff.agent_message', status: 'ok', resourceType: 'handoff', resourceId: handoffId, sessionId: h.session_id });
 }
 

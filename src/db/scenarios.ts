@@ -82,6 +82,9 @@ export const SCENARIOS: ScenarioDef[] = [
   { id: 'S18', title: 'Action without consent / permission rejected', issue: 'fee_query', customer: c(18, 'Mia Jensen', '1996-06-06'),
     script: ['Please waive my late fee', '<date of birth: 1996-06-06>', '<passcode>', '<use "Attempt without consent" in the scenario panel>'],
     expected: 'Direct API action attempts without consent (422) or with a QA/admin role (403) are rejected by the backend and audited.' },
+  { id: 'S19', title: 'Card declined abroad → explained, no change made', issue: '—', customer: c(19, 'Jamie Tan', '1991-05-17'),
+    script: ['My card keeps getting declined, I am travelling tomorrow', '<date of birth: 1991-05-17>', '<passcode>'],
+    expected: 'After verification the authorisation system shows a travel-security-rule decline; the assistant explains it, makes no change, and offers a human agent for a travel note.' },
 ];
 
 export const scenarioById = (id: string) => SCENARIOS.find((s) => s.id === id);

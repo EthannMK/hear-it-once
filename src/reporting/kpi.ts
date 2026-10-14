@@ -14,7 +14,7 @@ import { HANDOFF_REASON_LABELS, ISSUE_LABELS } from '../conversation/format.ts';
 export const KpiFilterSchema = z.object({
   from: z.string().max(40).optional(),
   to: z.string().max(40).optional(),
-  issueType: z.enum(['unrecognised_transaction', 'lost_stolen_card', 'wrong_or_duplicate_charge', 'payment_not_showing', 'fee_query']).optional(),
+  issueType: z.enum(['unrecognised_transaction', 'lost_stolen_card', 'wrong_or_duplicate_charge', 'payment_not_showing', 'fee_query', 'card_declined']).optional(),
   outcome: z.enum(['resolved', 'handed_off', 'abandoned', 'verification_failed', 'fallback', 'in_progress', 'ended_unresolved']).optional(),
   handoffReason: z.string().max(40).optional(),
   origin: z.enum(['all', 'demo_session', 'seeded_illustrative']).default('all'),

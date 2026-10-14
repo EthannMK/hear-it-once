@@ -40,6 +40,12 @@ export const KB_ARTICLES: KbArticle[] = [
     ruleRefs: ['DR-FRAUD-01'], version: V, synthetic: true,
   },
   {
+    id: 'KB-107', title: 'Declined card payments', categories: ['card_declined'], keywords: ['declined', 'decline', 'failing', 'travel', 'abroad', 'security rule', 'rejected'],
+    excerpt: 'Report the decline reason exactly as the authorisation system returns it. The assistant makes no change to the card for a decline: a travel security rule, credit availability or a card status issue are explained, and anything that needs a change (such as a travel note) goes to an agent.',
+    steps: ['Verify identity first.', 'Read the most recent declines and the card status.', 'Explain the recorded reason in plain words; never guess a reason.', 'State clearly that nothing was changed on the card.', 'Offer an agent for a travel note or any change.'],
+    ruleRefs: [], version: V, synthetic: true,
+  },
+  {
     id: 'KB-102', title: 'Lost or stolen card — block first', categories: ['lost_stolen_card'], keywords: ['lost', 'stolen', 'block', 'replacement', 'wallet'],
     excerpt: 'After identity verification, blocking the card is the first action. Do not collect non-essential details before the block is confirmed by the card system.',
     steps: ['Verify identity (no exceptions).', 'Confirm which card; propose the block immediately.', 'Only describe the card as blocked once the card system confirms it.', 'If the block fails or the outcome is unknown, escalate urgently.', 'Then offer a replacement and a review of recent transactions.'],

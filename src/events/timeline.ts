@@ -45,12 +45,19 @@ export function emitTimeline(sessionId: string, e: TimelineInput): TimelineEvent
   );
   const ev: TimelineEvent = { id: r.lastInsertRowid, sessionId, type: e.type, stage: e.stage, title, detail, status: e.status ?? 'info', source: e.source ?? null, ref: e.ref ?? null, data: e.data ?? {}, at };
   bus.emit(sessionId, ev);
+  bus.emit('*', ev);
   return ev;
 }
 
 export function subscribe(sessionId: string, fn: (e: TimelineEvent) => void): () => void {
   bus.on(sessionId, fn);
   return () => bus.off(sessionId, fn);
+}
+
+/** Every event for every call (staff-side live queue). Callers must filter by permission. */
+export function subscribeAll(fn: (e: TimelineEvent) => void): () => void {
+  bus.on('*', fn);
+  return () => bus.off('*', fn);
 }
 
 export function listTimeline(sessionId: string, afterId = 0): TimelineEvent[] {

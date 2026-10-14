@@ -23,6 +23,8 @@ gcloud run deploy hear-it-once --source . --region=$REGION \
   --set-secrets=SESSION_SECRET=hio-session-secret:latest
 ```
 
+**Live voice (Lily):** also enable `aiplatform.googleapis.com`, grant the service account `roles/aiplatform.user`, add `--timeout=3600 --session-affinity` and the `LIVE_*`/`GOOGLE_CLOUD_*` variables — see [LILY_VOICE.md](LILY_VOICE.md).
+
 Why `--max-instances=1`: the prototype keeps state in one SQLite file with in-process locking, so it must run as a single instance. `--min-instances=1` keeps that instance (and its demo data) alive between visits. Data lives in the container's `/tmp`, so it **resets on every new deploy or instance restart** — the app re-seeds the 18 scenarios and illustrative history automatically on start. That suits a demo; a persistent deployment needs Cloud SQL (see "Moving beyond the prototype").
 
 Continuous deployment from GitHub: Cloud Run console → *hear-it-once* → **Set up continuous deployment** → GitHub → pick the repo and `main` → build type *Dockerfile*. Every push to `main` then rebuilds and redeploys.
