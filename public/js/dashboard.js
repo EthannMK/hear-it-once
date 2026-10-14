@@ -1,5 +1,5 @@
 // Operations dashboard: KPIs from persisted events, filters, QA review, audit, admin.
-import { api, h, mount, chip, humanise, fmtDateTime, topbar, staffSignin } from './lib.js';
+import { api, h, mount, chip, humanise, fmtDateTime, fmtTime, topbar, staffSignin } from './lib.js';
 
 mount(document.getElementById('chrome'), topbar('dash'));
 const app = document.getElementById('app');
@@ -33,8 +33,11 @@ staffSignin(signin, {
 
 let el = {};
 function renderShell() {
-  el = { filters: h('div.panel.filters'), ledger: h('div.panel'), charts: h('div.grid-2'), calls: h('div.panel'), audit: h('div.panel'), admin: h('div') };
-  mount(body, el.filters, el.ledger, el.charts, el.calls, el.audit, el.admin);
+  el = { live: h('div.panel.live-ops'), filters: h('div.panel.filters'), ledger: h('div.panel'), charts: h('div.grid-2'), calls: h('div.panel'), audit: h('div.panel'), admin: h('div') };
+  mount(body, el.live, h('h2.dash-h', 'Pilot KPIs'), el.filters, el.ledger, el.charts, el.calls, el.audit, el.admin);
+  loadLive();
+  clearInterval(state.liveTimer);
+  state.liveTimer = setInterval(() => document.visibilityState === 'visible' && loadLive(), 5000);
   renderFilters();
   refresh();
   loadCalls();
@@ -351,5 +354,77 @@ async function loadAdmin() {
         h('div.row', nf.scope, nf.ref, nf.target, nf.fault, h('button', { onclick: () => saveFault({ scope: nf.scope.value, scopeRef: nf.scope.value === 'global' ? '*' : nf.ref.value, target: nf.target.value, fault: nf.fault.value, enabled: true }) }, 'Add fault')),
       ),
     ),
+  );
+}
+
+/* ---------------------------------------------------------------- live operations overview */
+const STAGE_LABEL = { understand: 'Understand', verify: 'Verify', investigate: 'Investigate', explain: 'Explain', confirm: 'Confirm', act: 'Act', record: 'Record', resolve: 'Resolve', handoff: 'Handoff' };
+const OUT_TONE = { succeeded: 'ok', failed: 'bad', unknown: 'warn', submitted: 'warn', rejected: 'blocked', awaiting_confirmation: 'pending', awaiting_approval: 'warn' };
+async function loadLive() {
+  let o;
+  try {
+    o = await api('/api/ops/overview');
+  } catch {
+    return;
+  }
+  const open = state.openTrail;
+  const maxStage = Math.max(1, ...o.stageDistribution.map((s) => s.active));
+  const maxAct = Math.max(1, ...o.actionOutcomes.map((a) => a.count));
+  const maxCat = Math.max(1, ...o.categories.map((c) => c.count));
+  const trailBox = h('div.trail-box');
+  mount(
+    el.live,
+    h('header', h('h2', 'Live operations'), h('span.grow'), h('span.small.muted', `${o.label} · refreshes every 5 s`)),
+    h(
+      'div.section',
+      h('div.live-stats', [['Sessions', o.totals.sessions], ['Active now', o.totals.active], ['Completed', o.totals.completed], ['Handed to a person', o.totals.handedOff]].map(([l, n]) => h('div', h('b.num', n), h('span', l)))),
+      h(
+        'div.live-grid',
+        h('div', h('h3', 'Active calls by stage'), h('div.stage-strip', o.stageDistribution.map((s) => h('div', { class: s.active ? 'has' : null, title: `${STAGE_LABEL[s.stage]}: ${s.active} active` }, h('span.col', h('span.fill', { style: `height:${(100 * s.active) / maxStage}%` })), h('b.num', s.active), h('span', STAGE_LABEL[s.stage]))))),
+        h('div', h('h3', 'Action outcomes'), o.actionOutcomes.length ? o.actionOutcomes.map((a) => h(`div.hbar.${OUT_TONE[a.status] ?? 'neutral'}`, h('span', a.label), h('span', h('div.bar', { style: `width:${(100 * a.count) / maxAct}%` })), h('span.num', a.count))) : h('p.empty', 'No actions yet.')),
+        h('div', h('h3', 'Issue categories'), o.categories.length ? o.categories.map((c) => h('div.hbar', h('span', c.label), h('span', h('div.bar', { style: `width:${(100 * c.count) / maxCat}%` })), h('span.num', c.count))) : h('p.empty', 'No calls yet.')),
+      ),
+      h('h3', { style: 'margin-top:18px' }, 'Recent interactions'),
+      o.recent.length
+        ? h(
+            'div',
+            { style: 'overflow-x:auto' },
+            h(
+              'table',
+              h('thead', h('tr', h('th', 'Started'), h('th', 'Issue'), h('th', 'Stage'), h('th', 'Outcome'), h('th', 'Latest event'), h('th', ''))),
+              h(
+                'tbody',
+                o.recent.map((r) =>
+                  h(
+                    'tr',
+                    h('td.small', fmtTime(r.answeredAt), r.scenarioId ? h('div.small.muted', r.scenarioId) : null),
+                    h('td', r.issueLabel ?? '—'),
+                    h('td', r.active ? h('span.live-dot', STAGE_LABEL[r.stage]) : STAGE_LABEL[r.stage]),
+                    h('td', chip(r.outcome ?? 'in_progress'), r.handoff ? h('div.small.muted', r.handoff.reasonLabel) : null),
+                    h('td.small', r.lastEvent ? r.lastEvent.title : '—'),
+                    h('td', h('div.row', { style: 'margin:0;flex-wrap:nowrap' }, h('button.quiet', { 'aria-expanded': String(open === r.id), onclick: () => showTrail(r.id, trailBox) }, `Event trail (${r.events})`), h('a.btn.quiet', { href: `/#/brief/${r.id}` }, 'Brief'))),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : h('p.empty', 'No demo calls in the last 24 hours. Start one from the home page.'),
+      trailBox,
+    ),
+  );
+  if (open) showTrail(open, trailBox, true);
+}
+async function showTrail(id, box, keep = false) {
+  if (!keep && state.openTrail === id) {
+    state.openTrail = null;
+    mount(box);
+    return;
+  }
+  state.openTrail = id;
+  const r = await api(`/api/calls/${id}/timeline`);
+  mount(
+    box,
+    h('h3', { style: 'margin-top:16px' }, `Event trail · ${id}`),
+    h('ul.stream', r.items.map((e) => h('li', h('span.t', fmtTime(e.at)), h('span', { class: `dot ${e.status}` }), h('div.what', h('b', e.title), h('div.meta', h('span.stg', STAGE_LABEL[e.stage]), [e.source, e.ref].filter(Boolean).join(' · ')), e.detail ? h('div.det', e.detail) : null)))),
   );
 }

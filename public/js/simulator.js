@@ -2,7 +2,7 @@
 import { api, h, mount, chip, humanise, fmtTime, uid, topbar } from './lib.js';
 
 const $ = (id) => document.getElementById(id);
-mount($('chrome'), topbar('sim'));
+mount($('chrome'), topbar('lab'));
 
 const state = { scenarios: [], selected: null, sessionId: null, view: null, seen: 0, poll: null, voice: false, toolResult: null, busy: false };
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;

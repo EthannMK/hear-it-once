@@ -93,8 +93,20 @@ All 18 scenarios: **Implemented**, each with an end-to-end API test in `E2E` (S0
 | Working local app + persistent DB | `npm start` | Done |
 | Seed data + safe reset | `db:seed`, `db:reset`, admin reset | Done |
 | Core workflow, adapters, policy, action states, cases, handoff, audit, dashboard | `src/` | Done |
-| Automated tests and results | `npm test` — 130 passing | Done |
+| Automated tests and results | `npm test` — 145 passing | Done |
 | Env example without secrets | `.env.example` | Done |
 | README with commands | README.md | Done |
 | Demo script for all scenarios | DEMO_WALKTHROUGH.md | Done |
 | Assumptions, decisions, simulated integrations, limitations | DECISIONS.md, LIMITATIONS.md | Done |
+
+## Hackathon experience layer (master build prompt)
+
+| Requirement | Implementation | Tests |
+|---|---|---|
+| Landing with animated mic orb, headline, CTAs, demo indicator, text fallback, example prompts, scenarios | `public/index.html`, `public/js/app.js` (landing), `orb.js`, `voice.js` | Browser checks (desktop 1440 / mobile 390, no console errors, no horizontal overflow) |
+| Browser voice with permission-denied / unsupported fallback | `public/js/voice.js` adapters; text input always present | Manual (browser speech not available headless) |
+| Live workspace: stage stepper, transcript, tags, parallel checks, action lifecycle, event stream, KB, case, controls | `app.js` workspace; `GET /api/calls/:id/stream` (SSE), `/timeline`; `src/events/timeline.ts`; `src/conversation/tags.ts`; `src/kb/kb.ts` | `tests/e2e/experience.test.ts` (timeline order, SSE, auth, tags, KB, free talk, reset) |
+| Resolution / agent brief with facts vs statements vs interpretation, action buckets, copy summary | `src/api/brief.ts`, `GET /api/calls/:id/brief`, brief view | `experience.test.ts` (S16 buckets, S08 escalation) |
+| Operations overview: counts, stage distribution, action outcomes, categories, drill-down | `opsOverview()` in `src/api/views.ts`, `GET /api/ops/overview`, `public/js/dashboard.js` | `experience.test.ts` (operations overview) |
+| Replay / reset a scenario | `resetScenario()` in `src/db/seed.ts`, `POST /api/demo/scenarios/:id/reset`, `resetScenario` on start | `experience.test.ts` |
+| Honesty about simulated vs live | `GET /api/demo/environment`, landing section, labels on every panel | `experience.test.ts` (environment honesty) |

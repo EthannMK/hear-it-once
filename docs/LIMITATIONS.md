@@ -19,6 +19,10 @@
 | Telephony | **None** — text simulator | SIP/telephony provider |
 | Intent model | Deterministic rules (default); optional Anthropic adapter, **not exercised against a live model** | Approved LLM provider, evaluation set |
 | Customer satisfaction | **Simulated** demo survey | Real survey programme |
+| Knowledge base | **Synthetic** 9-article guidance written for this demo (not bank policy); keyword/issue scoring | Bank knowledge management + approved retrieval |
+| Call tags / sentiment | Deterministic rules; sentiment is an **indicative keyword cue** only and never gates an action | Approved analytics / QA tooling |
+| Free-talk persona | A synthetic customer is attached by issue type so free talk can be verified | Real caller identification (ANI / account lookup) |
+| Live operations stream | Real recorded events over SSE from one instance (in-process bus) | Shared event bus for multi-instance deployments |
 
 Each mock is a *logical* boundary; all are backed by one local database. Nothing here connects to a bank.
 
