@@ -16,6 +16,8 @@ import { nowIso, nowMs } from '../lib/clock.ts';
 import { newId } from '../lib/ids.ts';
 import { CircuitBreakerRegistry, CircuitOpenError, TimeoutError, withRetries, withTimeout } from '../lib/resilience.ts';
 import { audit, ASSISTANT } from '../audit/audit.ts';
+import { emitTimeline } from '../events/timeline.ts';
+import { SOURCE_DISPLAY } from './labels.ts';
 
 export type SourceStatus = 'ok' | 'error' | 'timeout' | 'unavailable' | 'circuit_open';
 
@@ -157,8 +159,34 @@ export async function retrieveFacts(input: { sessionId: string; correlationId: s
   const ctx: AdapterContext = { correlationId: input.correlationId, sessionId: input.sessionId, scenarioId: input.scenarioId, customerId: input.customerId };
   const names = sourcesForIssue(input.issueType);
 
-  // Concurrent, independent reads.
-  const results = await Promise.all(names.map((n) => readOne(n, ctx, input.customerId)));
+  emitTimeline(input.sessionId, {
+    type: 'systems.queried',
+    stage: 'investigate',
+    title: `Querying ${names.length} systems in parallel`,
+    detail: names.map((n) => SOURCE_DISPLAY[n]).join(' · ') + '. Simulated connectors (mock adapters) — not real bank systems.',
+    status: 'running',
+    source: 'parallel retrieval',
+    ref: id,
+    data: { sources: names },
+  });
+  // Concurrent, independent reads — each reports the moment it finishes.
+  const results = await Promise.all(
+    names.map((n) =>
+      readOne(n, ctx, input.customerId).then((r) => {
+        emitTimeline(input.sessionId, {
+          type: 'source.completed',
+          stage: 'investigate',
+          title: `${SOURCE_DISPLAY[n]}: ${r.status === 'ok' ? (r.stale ? 'returned stale data' : 'returned') : r.status.replace('_', ' ')}`,
+          detail: `${r.latencyMs} ms · ${r.attempts} attempt${r.attempts === 1 ? '' : 's'}${r.asOf ? ` · data as of ${r.asOf}` : ''}${r.errorCode && r.status !== 'ok' ? ` · ${r.errorCode}` : ''}`,
+          status: r.status === 'ok' ? (r.stale ? 'warn' : 'ok') : 'failed',
+          source: `${SOURCE_DISPLAY[n]} (simulated)`,
+          ref: id,
+          data: { source: n, status: r.status, stale: r.stale, latencyMs: r.latencyMs, attempts: r.attempts, startedMs: start },
+        });
+        return r;
+      }),
+    ),
+  );
 
   const sources: Snapshot['sources'] = {};
   for (const r of results) (sources as Record<string, SourceResult>)[r.source] = r;
@@ -188,6 +216,18 @@ export async function retrieveFacts(input: { sessionId: string; correlationId: s
     completedAt, snap.wallMs, snap.sumSourceMs, JSON.stringify(conflicts), JSON.stringify(sources), id,
   ]);
   run('UPDATE call_sessions SET retrieval_completed_at = ? WHERE id = ?', [completedAt, input.sessionId]);
+  const bad = results.filter((r) => r.status !== 'ok' || r.stale).length;
+  emitTimeline(input.sessionId, {
+    type: 'systems.completed',
+    stage: 'investigate',
+    title: bad ? `${results.length - bad} of ${results.length} systems returned usable data` : `All ${results.length} systems returned`,
+    detail: `Finished in ${snap.wallMs} ms; run one after another they would have taken ${snap.sumSourceMs} ms.${conflicts.length ? ` ${conflicts.length} conflict(s) detected.` : ''}`,
+    status: bad || conflicts.length ? 'warn' : 'ok',
+    source: 'parallel retrieval',
+    ref: id,
+    data: { wallMs: snap.wallMs, sumSourceMs: snap.sumSourceMs },
+  });
+  for (const c of conflicts) emitTimeline(input.sessionId, { type: 'systems.conflict', stage: 'investigate', title: 'Systems disagree — no decision will be made on this data', detail: c.detail, status: 'blocked', source: c.sources.join(' vs '), ref: id });
   audit({
     actor: ASSISTANT,
     event: 'source.read_parallel',

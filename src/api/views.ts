@@ -10,6 +10,23 @@ import type { CallContext } from '../conversation/orchestrator.ts';
 import { loadSnapshot } from '../retrieval/retrieval.ts';
 import { opHistory, opsForSession } from '../actions/action-service.ts';
 import { SOURCE_LABELS } from '../workflows/common.ts';
+import { policy } from '../config/policy.ts';
+import { computeTags } from '../conversation/tags.ts';
+import { kbReferencesFor } from '../kb/kb.ts';
+import { scenarioById } from '../db/scenarios.ts';
+
+export const STAGES = ['understand', 'verify', 'investigate', 'explain', 'confirm', 'act', 'record', 'resolve', 'handoff'] as const;
+
+/** Where the call is in Understand → Verify → Investigate → Explain → Confirm → Act → Record → Resolve/Handoff. */
+function currentStage(ctx: CallContext, ops: { status: string }[], ended: boolean, handedOff: boolean): (typeof STAGES)[number] {
+  if (handedOff || ctx.stage === 'handoff' || ctx.stage === 'fallback') return 'handoff';
+  if (ended || ctx.stage === 'wrap_up' || ctx.stage === 'awaiting_survey' || ctx.stage === 'ended') return 'resolve';
+  if (ctx.stage === 'awaiting_issue' || ctx.stage === 'clarifying_issue') return 'understand';
+  if (ctx.stage === 'identifying' || ctx.stage === 'awaiting_dob' || ctx.stage === 'awaiting_otp') return 'verify';
+  if (ops.some((o) => o.status === 'submitted' || o.status === 'unknown')) return 'act';
+  if (ctx.pending?.kind === 'consent') return 'confirm';
+  return 'explain';
+}
 
 export function buildCallView(sessionId: string, opts: { audience: 'caller' | 'staff' }) {
   const s = get<Record<string, unknown>>('SELECT * FROM call_sessions WHERE id = ?', [sessionId]);
@@ -45,8 +62,22 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
   }
   const choices = ctx.pending?.kind === 'choice' ? ctx.pending.options : ctx.pending?.kind === 'yes_no' ? [{ id: '__yes', label: 'Yes' }, { id: '__no', label: 'No' }] : [];
 
+  const handedOff = !!h && h.status !== 'cancelled';
+  const visited = all<{ stage: string }>('SELECT DISTINCT stage FROM timeline_events WHERE session_id = ?', [sessionId]).map((r) => r.stage);
+  const stageNow = currentStage(ctx, ops, !!s.ended_at, handedOff);
+  const sc = ctx.persona ? scenarioById(ctx.persona.scenarioId) : null;
+  const pol = policy();
   return {
     simulated: true,
+    workflow: { stage: stageNow, visited: [...new Set([...visited, stageNow])], stages: STAGES },
+    tags: computeTags(sessionId, { issue: ctx.issue, sentiment: ctx.sentiment, flags: ctx.flags }),
+    persona:
+      ctx.persona && sc
+        ? { scenarioId: ctx.persona.scenarioId, name: ctx.persona.name, customerNumber: ctx.persona.customerNumber, phoneMasked: ctx.persona.phoneMasked, // Synthetic DOB is a demo helper: caller only, demo mode only, and only until verified.
+          dob: opts.audience === 'caller' && env().DEMO_MODE && !verified && s.verification_status !== 'failed' ? sc.customer.dob : null, synthetic: true }
+        : null,
+    freeMode: !!ctx.freeMode,
+    knowledge: kbReferencesFor(sessionId),
     session: {
       id: s.id,
       stage: ctx.stage,
@@ -83,6 +114,7 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
       type: o.action_type,
       label: ACTION_LABELS[o.action_type],
       targetRef: o.target_ref,
+      governance: pol.actions[o.action_type].requiresHumanApproval ? 'human_approval' : pol.actions[o.action_type].requiresConsent ? 'customer_confirmation' : 'automatic',
       status: o.status,
       statusLabel: OP_STATUS_LABELS[o.status],
       externalRef: o.external_ref,
