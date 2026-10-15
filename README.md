@@ -11,7 +11,7 @@ It has two screens on one backend:
 | Screen | Path | Who |
 |---|---|---|
 | Customer page — test identities with dummy card and phone numbers beside a live voice call with Lily, with a picker for the call language (English, Burmese or Tagalog) | `/` | Anyone |
-| Agent workspace — handover queue, suggested solution, CRM search, editable case with audit | `/agent.html` | Demo agent role |
+| Agent CRM — customer search and profile, case summary built from the call, key facts (verified vs. customer-said), suggested next step, editable tags and status, complaint / escalation tickets, timeline | `/#/crm` (the call page flips here when a call ends) | Demo agent role (signed in automatically in demo mode) |
 
 ### What's real and what's simulated
 
@@ -100,7 +100,7 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 
 1. Open `/`, pick a test identity and press **Start talking to Lily**.
 2. Ask anything about banking. For questions about the test account, read the full dummy card number shown on screen when Lily asks. A wrong number gets a retry, three wrong ones prepare a handover.
-3. Say "I want to speak to a person", then open `/agent.html` in another tab and accept the request.
+3. End the call: the page switches to the Agent CRM case for it. Or say "I want to speak to a person", open **Agent CRM** from the waiting banner and accept the handover.
 
 `npm run db:reset` resets all demo data.
 
@@ -108,6 +108,7 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 
 | Document | Contents |
 |---|---|
+| [docs/CRM.md](docs/CRM.md) | Call memory (structured facts) and the Agent CRM: summary, tags, suggestions, tickets |
 | [docs/PLAN.md](docs/PLAN.md) | Phase 0 assessment and stack decision |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, state machines, data model, request flow |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Assumptions and unresolved business decisions, with conservative defaults |
@@ -130,12 +131,13 @@ src/
   workflows/      the five issue workflows (deterministic)
   policy/         central authorisation engine + eligibility rules
   actions/        action lifecycle, consent, idempotency, timeout → unknown, reconciliation
+  crm/            Agent CRM read model, tags, suggestions, tickets
   disputes/ cases/ handoff/ reporting/ audit/ auth/ voice/
   adapters/       typed contracts + MOCK implementations of the 9 logical bank systems
   config/         env, central policy, BRD pilot targets
   db/             migrations, seed, scenarios, illustrative history, CLI
   events/ kb/     live timeline events + SSE bus; synthetic knowledge base adapter
-public/           HTML/CSS/JS (no build step): index.html + js/app.js (landing, workspace, brief), orb.js, voice.js, icons.js; dashboard, agent console, scenario lab
+public/           HTML/CSS/JS (no build step): index.html + lily/app.js (Talk to Lily) + lily/crm.js (Agent CRM)
 tests/            unit, integration, e2e (all 18 scenarios through the HTTP API)
 docs/             everything above
 ```
