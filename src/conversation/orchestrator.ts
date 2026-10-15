@@ -36,7 +36,8 @@ import * as M from './messages.ts';
 import { emitTimeline, type TimelineInput, type Stage as TStage } from '../events/timeline.ts';
 import { computeTags, diffTags, sentimentFrom, type CallTags } from './tags.ts';
 import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
-import { profileById } from '../live/profiles.ts';
+import { profileById, PROFILE_DEFS } from '../live/profiles.ts';
+import { refreshDemoFixtures } from '../db/seed.ts';
 import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
 import { maskPhone } from '../lib/redact.ts';
 import { HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate, formatMoney } from './format.ts';
@@ -97,6 +98,8 @@ export interface CallContext {
   profileId?: string | null;
   /** Structured memory of the call: what is known, with status and source (see facts.ts). */
   facts?: Facts;
+  /** The caller is not pre-identified: the card number they give identifies and verifies them. */
+  cardIdentify?: boolean;
   /** Which virtual agent currently has the call (en = Lily, my = Hnin, fil = Maya). */
   agentLang?: string;
   /** How many times in a row the card number could not be read; picks gentler, more specific help each time. */
@@ -300,6 +303,8 @@ export async function startCall(input: StartCallInput): Promise<string> {
     ctx.profileId = profile.id;
     ctx.freeMode = false;
   }
+  // No customer chosen and not a scripted scenario: the card number the caller gives decides who they are.
+  if (!profile && !input.scenarioId && !ctx.freeMode) { ctx.verificationMode = 'card_number'; ctx.cardIdentify = true; }
   const sc = input.scenarioId ? scenarioById(input.scenarioId) : undefined;
   if (sc) ctx.persona = { scenarioId: sc.id, name: sc.customer.name, customerNumber: sc.customer.number, phoneMasked: maskPhone(sc.customer.phone) };
   run(
@@ -737,7 +742,17 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
     run("UPDATE call_sessions SET verification_status = 'identified' WHERE id = ?", [s.id]);
     run("INSERT INTO verification_attempts (session_id, customer_id, step, method, outcome, created_at) VALUES (?,?, 'identify', 'ani', 'passed', ?)", [s.id, c.verification.identifiedCustomerId, nowIso()]);
   }
-  if (c.verificationMode === 'card_number' && c.verification.identifiedCustomerId) {
+  if (c.cardIdentify && !c.verification.identifiedCustomerId) {
+    // Nobody is assumed. Ask for the card number; whoever holds it is who the caller is.
+    c.verification.status = 'awaiting_card';
+    c.stage = 'awaiting_card';
+    run("UPDATE call_sessions SET verification_status = 'in_progress' WHERE id = ?", [s.id]);
+    const early = captures.get(s.id);
+    if (early && early.digits.length === 16) {
+      captures.set(s.id, { digits: early.digits, confirming: true });
+      say(s, M.cardReadbackEarlier(early.digits.slice(-4)));
+    } else say(s, M.ASK_CARD);
+  } else if (c.verificationMode === 'card_number' && c.verification.identifiedCustomerId) {
     // Active demo customer is known from caller ID (identification only). Ask for the card number.
     c.verification.status = 'awaiting_card';
     run("UPDATE call_sessions SET verification_status = 'identified' WHERE id = ?", [s.id]);
@@ -770,6 +785,23 @@ async function bindFreeTalkPersona(s: Session, issueType: IssueType): Promise<vo
   s.scenarioId = sc.id;
   run('UPDATE call_sessions SET scenario_id = ? WHERE id = ?', [sc.id, s.id]);
   tl(s, { type: 'demo.persona', stage: 'verify', title: `Calling as ${sc.customer.name} (test identity)`, detail: `Chosen because the request is about ${ISSUE_LABELS[issueType].toLowerCase()}. Caller ID matched a synthetic profile — identification only, not proof of identity.`, status: 'info', source: 'demo environment' });
+}
+
+/** The card number identified the customer: take on that demo customer's profile for the rest of the call. */
+function bindIdentifiedCustomer(s: Session): void {
+  const c = s.ctx;
+  if (!c.cardIdentify || c.profileId) return;
+  const cid = c.verification.identifiedCustomerId;
+  const sc = SCENARIOS.find((x) => x.customer.id === cid);
+  if (!sc) return;
+  const profile = PROFILE_DEFS.find((p) => p.scenarioId === sc.id);
+  c.persona = { scenarioId: sc.id, name: sc.customer.name, customerNumber: sc.customer.number, phoneMasked: maskPhone(sc.customer.phone) };
+  s.scenarioId = sc.id;
+  c.profileId = profile?.id ?? null;
+  run('UPDATE call_sessions SET scenario_id = ?, profile_id = ? WHERE id = ?', [sc.id, c.profileId, s.id]);
+  // Start the verified customer from a clean fixture so an earlier tester's actions don't leak in.
+  refreshDemoFixtures(cid!, s.id);
+  tl(s, { type: 'demo.persona', stage: 'verify', title: `Identified as ${sc.customer.name} from the card number`, detail: 'The card number is what identified this caller. No customer was chosen on the page.', status: 'ok', source: 'identity check' });
 }
 
 const vctx = (s: Session) => ({ sessionId: s.id, correlationId: s.correlationId, scenarioId: s.scenarioId, actor: s.actor });
@@ -929,6 +961,7 @@ async function runVerification(s: Session, answer: string): Promise<void> {
     case 'verified':
       c.unclearCount = 0;
       event(s, 'verified');
+      bindIdentifiedCustomer(s);
       recordVerifiedFacts(s);
       tl(s, { type: 'verification.passed', stage: 'verify', title: c.verificationMode === 'card_number' ? 'Card number matched — identity verified' : 'Identity verified (two factors)', detail: c.verificationMode === 'card_number' ? 'The card number matched the active demo customer’s record on the server. Protected reads are now allowed.' : 'Date of birth and one-time passcode both passed. Protected reads are now allowed.', status: 'ok', source: 'identity verification', data: { attemptResult: 'passed' } });
       refreshTags(s, 'verify');

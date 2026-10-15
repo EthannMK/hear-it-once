@@ -60,6 +60,8 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
     );
     if (otp?.demo_display && otp.expires_at > nowIso()) demoDevice = { label: 'SIMULATED registered phone — demo only', message: `Your Northstar Bank passcode is ${otp.demo_display}. Never share it with anyone who calls you.`, code: otp.demo_display, expiresAt: otp.expires_at };
   }
+  // Private entry: the screen offers a box that types straight to the back end, never into the transcript.
+  const secureEntry = ctx.stage === 'awaiting_card' ? { kind: 'card', label: 'Card number', hint: '16 digits', maxLength: 24 } : ctx.stage === 'stepup' ? { kind: 'nrc', label: 'NRC last 4 digits', hint: '4 digits', maxLength: 20 } : null;
   const choices = ctx.pending?.kind === 'choice' ? ctx.pending.options : ctx.pending?.kind === 'yes_no' ? [{ id: '__yes', label: 'Yes' }, { id: '__no', label: 'No' }] : [];
 
   const handedOff = !!h && h.status !== 'cancelled';
@@ -130,6 +132,7 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
       : null,
     handoff: h ? { id: h.id, status: h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[String(h.reason)] ?? h.reason, agentName: h.agent_name ?? null, requestedAt: h.requested_at, connectedAt: h.connected_at, fallback: h.fallback, simulated: true } : null,
     demoDevice,
+    secureEntry,
     // What the caller's own words were heard as, so they can see whether the number was captured correctly. Caller view only; never stored.
     cardCapture: opts.audience === 'caller' ? cardCaptureFor(sessionId) : null,
   };

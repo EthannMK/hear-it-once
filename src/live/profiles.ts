@@ -19,14 +19,16 @@ export interface ProfileDef {
   blurb: string;
   /** A sentence a tester can say to start this customer's scenario. */
   tryPhrase: string;
+  /** What is true of this customer's card and account, in plain words, so a tester picks the right one. */
+  situation: string;
 }
 
 export const PROFILE_DEFS: ProfileDef[] = [
-  { id: 'alex-morgan', scenarioId: 'S01', blurb: 'Has a recent online charge that may look unfamiliar.', tryPhrase: "There's a charge from Novaplay I don't recognise." },
-  { id: 'jamie-tan', scenarioId: 'S19', blurb: 'Is travelling soon and had a card payment declined.', tryPhrase: 'My card keeps getting declined.' },
-  { id: 'tom-becker', scenarioId: 'S05', blurb: 'Was charged a late-payment fee.', tryPhrase: 'Why was I charged a late fee?' },
-  { id: 'priya-shah', scenarioId: 'S02', blurb: 'Everyday cardholder in good standing.', tryPhrase: 'I lost my card.' },
-  { id: 'lena-fischer', scenarioId: 'S08', blurb: 'Everyday cardholder; may prefer to speak to a person.', tryPhrase: 'Is my card active, and what were my last charges?' },
+  { id: 'alex-morgan', scenarioId: 'S01', blurb: 'Has a recent online charge that may look unfamiliar.', tryPhrase: "There's a charge from Novaplay I don't recognise.", situation: 'Card active. Open fraud alert on a $249 NOVAPLAY DIGITAL online charge. Also a $84.50 CITYLINK RIDES charge.' },
+  { id: 'jamie-tan', scenarioId: 'S19', blurb: 'Is travelling soon and had a card payment declined.', tryPhrase: 'My card keeps getting declined.', situation: 'Card active. A $189 EuroRail Booking payment was declined by the travel security rule.' },
+  { id: 'tom-becker', scenarioId: 'S05', blurb: 'Was charged a late-payment fee.', tryPhrase: 'Why was I charged a late fee?', situation: 'Card active. A $29 late payment fee is eligible for one courtesy reversal. A $76 Metro Fuel payment was declined for low available credit.' },
+  { id: 'priya-shah', scenarioId: 'S02', blurb: 'Everyday cardholder in good standing.', tryPhrase: 'I lost my card.', situation: 'Card active, no problems. Good for a lost or stolen card and for general questions.' },
+  { id: 'lena-fischer', scenarioId: 'S08', blurb: 'Everyday cardholder; may prefer to speak to a person.', tryPhrase: 'I want to speak to a person.', situation: 'Card active, no problems. Good for asking for a person and for handover.' },
 ];
 
 export const profileById = (id: string) => PROFILE_DEFS.find((p) => p.id === id);
@@ -77,6 +79,7 @@ export function profileCard(def: ProfileDef) {
     accountStanding: cu?.account_standing ?? 'good',
     blurb: def.blurb,
     tryPhrase: def.tryPhrase,
+    situation: def.situation,
     nrcLast4: nationalIdLast4(sc.customer.id),
     recentTransactions: txns,
     fees,
