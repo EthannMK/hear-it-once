@@ -23,6 +23,11 @@ const RECALL = /\b(what (did|have) i (just )?(say|said|tell|told)|what (do|did) 
 const SECRET_TALK = /\b(my|the)\s+(pin|cvv2?|cvc2?|password|passcode)\b|\bREDACTED-(SECRET|CVV)\b/i;
 const MAKE_THE_BANK_SPEAK = /\b(ignore|disregard|forget)\b.{0,30}\b(instructions?|rules?|prompt)\b|\b(system prompt|developer mode|jailbreak|reveal your (prompt|instructions))\b/i;
 
+const LANGUAGE_ASK = /\b(speak|talk|reply|answer|switch|change|continue)\b.{0,24}\b(english|burmese|tagalog|filipino|myanmar)\b|\b(english|burmese|tagalog) (please|only)\b/i;
+const CONFUSED = /\b(what does (it|that|this) mean|what do you mean|i (don'?t|do not) (understand|get it)|not sure what you mean|confused)\b/i;
+/** A lost item that is not a card: ask whether the card is affected before touching anything. */
+const LOST_OTHER = /\b(lost|stolen|missing|misplaced|forgot)\b.{0,25}\b(phone|mobile|wallet|laptop|bag|passport|keys)\b|\b(phone|mobile|wallet|laptop|bag|passport|keys)\b.{0,25}\b(lost|stolen|missing|misplaced)\b/i;
+
 /** Short, general explanations. They never describe Northstar's own terms or this customer's account. */
 const GENERAL: { re: RegExp; answer: string }[] = [
   { re: /\b(apr|annual percentage rate)\b/i, answer: "In general, APR is the yearly cost of borrowing on a card, shown as a percentage. Northstar's own rates and terms can differ, so I can't quote them here. A colleague can go through your exact rate." },
@@ -71,6 +76,9 @@ export function sideTalk(text: string, o: Opts): Side | null {
     return { kind: 'secret', strike: false, alsoProcess: true, reply: "Please don't share your PIN, CVV or password with me. I will never ask for them. I only need what I ask for, one step at a time." };
   }
   if (!o.inIssueStage) return null;
+  if (LANGUAGE_ASK.test(t)) return { kind: 'general', strike: false, reply: /english/i.test(t) ? 'Of course, we can carry on in English. What can I help you with?' : "I'm Lily and I speak English. If you'd like to speak Burmese or Tagalog, say so and I'll bring in Hnin or Maya. What can I help you with?" };
+  if (CONFUSED.test(t)) return { kind: 'general', strike: false, reply: 'Sorry, let me say it more simply. Tell me what happened in your own words, for example "I lost my card", "there is a charge I don\'t know", "I want to make a deposit" or "where is your nearest branch".' };
+  if (LOST_OTHER.test(t) && !/\bcard\b/i.test(t)) return { kind: 'general', strike: false, reply: "I'm sorry to hear that. Is your Northstar card affected too? If so, say \"my card is lost\" and I'll block it right away. If it was only the phone or something else, tell me what you need from the bank." };
   if (HELLO.test(t)) return { kind: 'hello', strike: true, reply: pick(["I'm here. What can I help you with today? For example a lost card, a charge you don't recognise, a payment or a fee.", "Still here. Tell me what's going on with your card or account, in your own words."]) };
   if (ABUSE.test(t)) return { kind: 'abuse', strike: true, reply: pick(["I'm sorry this has been frustrating. I do want to sort it out. Tell me in a few words what happened with your card or account, or I can bring in a colleague.", "I can hear how annoyed you are, and I'm sorry. Would it help if I brought in a colleague, or shall we try once more with what happened?"]) };
   const general = generalAnswer(t);

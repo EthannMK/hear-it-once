@@ -405,9 +405,23 @@ export function caseWorkspace(caseId: string, actor: Actor) {
     events: all<{ event: string; detail: string | null; actor_id: string; created_at: string }>('SELECT event, detail, actor_id, created_at FROM ticket_events WHERE ticket_id = ? ORDER BY id', [t.id]).map((e) => ({ event: e.event, detail: e.detail, by: staffName(e.actor_id) ?? e.actor_id, at: e.created_at })),
   }));
 
-  const transcript = s
-    ? all<{ seq: number; speaker: string; text: string; created_at: string; sensitive_redacted: number }>('SELECT seq, speaker, text, created_at, sensitive_redacted FROM conversation_turns WHERE session_id = ? ORDER BY seq', [s.id]).map((t) => ({ seq: t.seq, speaker: t.speaker, text: t.text, at: t.created_at, hidden: !!t.sensitive_redacted }))
+  // In a voice call Lily's spoken words and the bank text she was given are both stored. The record
+  // for staff shows what the customer actually heard: when an exchange has a spoken reply, the
+  // matching typed text is left out so each line appears once.
+  const rawTurns = s
+    ? all<{ seq: number; speaker: string; kind: string | null; text: string; created_at: string; sensitive_redacted: number }>('SELECT seq, speaker, kind, text, created_at, sensitive_redacted FROM conversation_turns WHERE session_id = ? ORDER BY seq', [s.id])
     : [];
+  const spokenIn = new Set<number>();
+  {
+    let start = 0;
+    const flush = (end: number) => {
+      const seg = rawTurns.slice(start, end);
+      if (seg.some((x) => x.speaker === 'assistant' && (x.kind === 'voice' || x.kind === 'voice_interrupted'))) for (const x of seg) if (x.speaker === 'assistant' && x.kind === 'utterance') spokenIn.add(x.seq);
+    };
+    rawTurns.forEach((x, i) => { if (x.speaker === 'customer') { flush(i); start = i; } });
+    flush(rawTurns.length);
+  }
+  const transcript = rawTurns.filter((x) => !spokenIn.has(x.seq)).map((t) => ({ seq: t.seq, speaker: t.speaker, kind: t.kind, text: t.text, at: t.created_at, hidden: !!t.sensitive_redacted }));
   const previous = cust.id ? casesForCustomer(cust.id).filter((x) => x.id !== c.id).slice(0, 6) : [];
 
   audit({ actor, event: 'crm.case_viewed', status: 'ok', resourceType: 'case', resourceId: c.id, sessionId: c.session_id });

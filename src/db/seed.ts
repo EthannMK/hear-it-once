@@ -350,3 +350,20 @@ export function resetScenario(id: string): boolean {
 export function isSeeded(): boolean {
   return !!get("SELECT value FROM app_settings WHERE key = 'seeded_at'");
 }
+
+/**
+ * Put a demo customer's changeable bank state back to how it was seeded (card active, fee not
+ * reversed, fraud alert in step with the card, earlier disputes released), WITHOUT deleting any
+ * call, transcript or case. Every tester shares the same few customers, so without this the next
+ * tester inherits the last tester's blocked card and sees a "systems disagree" handover.
+ * Skipped while another call for the same customer is still live.
+ */
+export function refreshDemoFixtures(customerId: string): boolean {
+  const live = get<{ n: number }>("SELECT COUNT(*) n FROM call_sessions WHERE customer_id = ? AND ended_at IS NULL AND updated_at > ?", [customerId, new Date(Date.now() - 10 * 60_000).toISOString()])?.n ?? 0;
+  if (live > 0) return false;
+  run("UPDATE bank_cards SET status = 'active', status_reason = NULL, status_as_of = ? WHERE customer_id = ? AND status != 'active'", [nowIso(), customerId]);
+  run('UPDATE bank_fees SET reversed_at = NULL, reversal_reason = NULL WHERE customer_id = ? AND reversed_at IS NOT NULL', [customerId]);
+  run("UPDATE bank_fraud_alerts SET reported_card_status = 'active' WHERE customer_id = ? AND reported_card_status != 'active'", [customerId]);
+  run("UPDATE disputes SET status = 'rejected', downstream_status = 'released for the next demo call' WHERE customer_id = ? AND status IN ('submitting','submitted','pending','needs_review','unknown')", [customerId]);
+  return true;
+}
