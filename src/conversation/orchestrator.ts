@@ -41,6 +41,7 @@ import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
 import { maskPhone } from '../lib/redact.ts';
 import { HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate, formatMoney } from './format.ts';
 import { createTicket } from '../crm/crm.ts';
+import { THIRD_PARTY, assessContactRisk, checkNationalId, contactChangeKind, parseNationalIdLast4, READ_ALOUD, STEP_UP_MAX_ATTEMPTS, type Assurance, type ContactKind, type Risk } from './security.ts';
 import { sideTalk } from './sidetalk.ts';
 import { normaliseSpoken } from '../live/speech.ts';
 import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
@@ -52,6 +53,7 @@ export type Stage =
   | 'awaiting_dob'
   | 'awaiting_otp'
   | 'awaiting_card'
+  | 'stepup'
   | 'workflow'
   | 'wrap_up'
   | 'awaiting_survey'
@@ -79,7 +81,7 @@ export interface CallContext {
   distressCount: number;
   lastPrompt: string;
   flags: string[];
-  lastUtterance: { hash: string; at: string } | null;
+  lastUtterance: { hash: string; at: string; prompt?: string } | null;
   firstName: string | null;
   /** Free-talk demo mode: the synthetic persona is chosen from the caller's intent. */
   freeMode?: boolean;
@@ -98,6 +100,14 @@ export interface CallContext {
   agentLang?: string;
   /** How many times in a row the card number could not be read; picks gentler, more specific help each time. */
   cardUnparsed?: number;
+  /** basic = normal identity check passed. strong = also passed the second-level check in this call. */
+  assurance?: Assurance;
+  /** A second-level check is being asked for; `then` is what happens once it passes. */
+  stepUp?: { then: 'contact' | 'readout'; returnTo: Stage; attempts: number; unparsed: number } | null;
+  /** A contact-detail change in progress (collected and confirmed here, applied only by a person). */
+  contact?: { kind: ContactKind; step: 'value' | 'confirm1' | 'confirm2'; value?: string; risk: Risk; tries: number } | null;
+  /** True for exactly one answer, after the customer confirmed it is safe to read account activity aloud. */
+  readoutOk?: boolean;
 }
 
 /** Default synthetic persona per issue type for free-talk demos (no injected faults). */
@@ -365,7 +375,7 @@ function takeUnheard(sessionId: string, c: CallContext): string | null {
   // Consent is never inferred from earlier words: Lily may have asked her own question in between.
   if (c.pending?.kind === 'consent') return null;
   // Single-answer steps use only the most recent words.
-  if (c.pending?.kind === 'yes_no' || ['identifying', 'awaiting_dob', 'awaiting_otp', 'awaiting_card', 'awaiting_survey'].includes(c.stage)) return list[list.length - 1].text;
+  if (c.pending?.kind === 'yes_no' || ['identifying', 'awaiting_dob', 'awaiting_otp', 'awaiting_card', 'stepup', 'awaiting_survey'].includes(c.stage)) return list[list.length - 1].text;
   return list.slice(-3).map((u) => u.text).join(' ');
 }
 
@@ -436,7 +446,7 @@ function absorbCardDigits(s: Session, text: string): boolean {
 
 const COMPLAINT = /\b(formal complaint|make a complaint|file a complaint|lodge a complaint|raise a complaint|log a complaint|want to complain|i'?m complaining|i am complaining)\b/i;
 
-const SENSITIVE_STAGES: Stage[] = ['identifying', 'awaiting_dob', 'awaiting_otp', 'awaiting_card'];
+const SENSITIVE_STAGES: Stage[] = ['identifying', 'awaiting_dob', 'awaiting_otp', 'awaiting_card', 'stepup'];
 
 async function dispatch(s: Session, input: CallInput): Promise<void> {
   const c = s.ctx;
@@ -519,11 +529,12 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
   // Duplicate utterance (e.g. double send / echo) inside a short window → ignore.
   const h = sha256(text.toLowerCase().replace(/\s+/g, ' '));
   // A card-number answer is never treated as an echo: repeating a wrong number is a real, counted attempt (capped at three).
-  if (c.stage !== 'awaiting_card' && c.lastUtterance && c.lastUtterance.hash === h && nowMs() - Date.parse(c.lastUtterance.at) < policy().conversation.duplicateUtteranceWindowMs) {
+  if (c.stage !== 'awaiting_card' && c.lastUtterance && c.lastUtterance.hash === h && !(parseYesNo(text) !== null && c.lastUtterance.prompt !== sha256(c.lastPrompt ?? '')) && nowMs() - Date.parse(c.lastUtterance.at) < policy().conversation.duplicateUtteranceWindowMs) {
     event(s, 'duplicate_utterance_ignored');
     return;
   }
-  c.lastUtterance = { hash: h, at: nowIso() };
+  // An echo is the same words twice. The exception is a plain yes or no to a NEW question from us (a double confirmation).
+  c.lastUtterance = { hash: h, at: nowIso(), prompt: sha256(c.lastPrompt ?? '') };
 
 
   if (c.stage === 'handoff') return onWhileInHandoff(s);
@@ -575,6 +586,21 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     else return side.strike ? unclear(s, side.reply) : say(s, side.reply);
   }
 
+  // Sensitive requests are decided here, before any workflow sees the words.
+  if (c.stage === 'stepup') return onStepUpAnswer(s, text);
+  if (isVerified(c.verification) && (c.stage === 'workflow' || c.stage === 'wrap_up')) {
+    if (c.contact) return onContactText(s, text);
+    if (THIRD_PARTY.test(text)) return thirdParty(s);
+    if (c.pending?.kind === 'yes_no' && c.pending.purpose === 'readout:confirm') {
+      const yn = parseYesNo(text);
+      if (yn) { c.pending = null; return onReadoutAnswer(s, yn === 'yes'); }
+      return say(s, M.CONTACT_YES_OR_NO);
+    }
+    const kind = contactChangeKind(text);
+    if (kind) return startContactChange(s, kind);
+    if (c.wf?.name === 'account_inquiry' && READ_ALOUD.test(text) && !/\b(ignore|override|disregard|developer mode|system prompt|jailbreak)\b/i.test(text) && !extractSlots(text).amountMinor && !extractSlots(text).merchantHint) return startReadout(s);
+  }
+
   switch (c.stage) {
     case 'awaiting_issue':
     case 'clarifying_issue':
@@ -592,6 +618,8 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
       if (yn === null && isVerified(c.verification) && text.length > 8) {
         const cls = await classify(s, redactText(text));
         if (cls.issueType && cls.confidence >= policy().conversation.minIntentConfidence) return startSecondaryTopic(s, cls, text);
+        // A follow-up that only names a shop or an amount, after an account enquiry, is another charge check.
+        if (!cls.issueType && c.wf?.name === 'account_inquiry' && (cls.slots.amountMinor != null || cls.slots.merchantHint)) return startSecondaryTopic(s, { ...cls, issueType: 'account_inquiry', confidence: 0.8 }, text);
       }
       if (yn === 'yes' || (yn === null && text.length > 12)) return handoff(s, 'customer_accepted_offer', 'additional request after resolution', "I'll connect you to an agent for that — they'll see everything from this call, so you won't need to repeat it.");
       return goSurvey(s);
@@ -984,7 +1012,7 @@ async function startSecondaryTopic(s: Session, cls: Classification, text: string
 function wfCtx(s: Session, snap?: Snapshot | null): WorkflowCtx {
   const c = s.ctx;
   const sn = snap ?? loadSnapshot(c.snapshotId!)!;
-  return { snap: sn, slots: c.issue!.slots, statement: c.issue!.statement, wf: c.wf!, sessionId: s.id, customerId: c.verification.identifiedCustomerId!, firstName: c.firstName ?? '' };
+  return { snap: sn, slots: c.issue!.slots, statement: c.issue!.statement, wf: c.wf!, sessionId: s.id, customerId: c.verification.identifiedCustomerId!, firstName: c.firstName ?? '', assurance: c.assurance ?? 'basic', readoutOk: !!c.readoutOk };
 }
 
 /* ------------------------------------------------------------------------- workflow I/O */
@@ -1106,6 +1134,7 @@ async function onYesNoAnswer(s: Session, p: Extract<Pending, { kind: 'yes_no' }>
     if (yes) return onReconcile(s);
     return handoff(s, 'action_failed', 'customer declined status check; outcome unknown', "Okay. Because I can't confirm the outcome, I'll transfer you to an agent who can check it directly.");
   }
+  if (p.purpose === 'readout:confirm') return onReadoutAnswer(s, yes);
   if (p.purpose.startsWith('wf:')) return applyResult(s, WORKFLOWS[c.wf!.name].onYesNo(wfCtx(s), p.purpose.slice(3), yes));
 }
 
@@ -1479,6 +1508,204 @@ async function onSilence(s: Session): Promise<void> {
     return endCall(s, c.issue ? undefined : 'abandoned');
   }
   say(s, `Are you still there? ${c.lastPrompt}`);
+}
+
+
+/* ------------------------------------------------------------------------- sensitive requests */
+
+/** A short, bounded pause while the back end checks something, so the customer hears it is being thought through. */
+async function hold(s: Session, title: string, detail: string): Promise<void> {
+  const ms = env().NODE_ENV === 'test' ? 0 : 1200;
+  const at = nowMs();
+  say(s, M.HOLD_LINES[Math.min(s.ctx.unclearCount + (s.ctx.contact?.tries ?? 0), M.HOLD_LINES.length - 1)]);
+  tl(s, { type: 'call.hold', stage: 'investigate', title, detail, status: 'running', source: 'assistant' });
+  if (ms) await new Promise((r) => setTimeout(r, ms));
+  tl(s, { type: 'call.hold_ended', stage: 'investigate', title: `${title} — done`, detail: `Held for ${nowMs() - at} ms (limit 3000 ms).`, status: 'ok', source: 'assistant' });
+}
+
+function reasoning(s: Session, title: string, detail: string, status: 'ok' | 'warn' | 'blocked' = 'ok'): void {
+  event(s, 'reasoning', { title });
+  tl(s, { type: 'reasoning', stage: 'investigate', title: `Reasoning: ${title}`, detail, status, source: 'policy' });
+}
+
+function askStepUp(s: Session, then: 'contact' | 'readout'): void {
+  const c = s.ctx;
+  c.stepUp = { then, returnTo: c.stage === 'stepup' ? 'workflow' : c.stage, attempts: 0, unparsed: 0 };
+  c.stage = 'stepup';
+  c.pending = null;
+  reasoning(s, 'second-level check needed', then === 'contact' ? 'Changing how the bank contacts the customer needs a stronger check than the one used to open the call.' : 'Reading account activity aloud needs a stronger check than the one used to open the call.', 'warn');
+  say(s, then === 'contact' ? M.STEP_UP_CONTACT : M.STEP_UP_READOUT);
+}
+
+async function onStepUpAnswer(s: Session, text: string): Promise<void> {
+  const c = s.ctx;
+  const su = c.stepUp;
+  if (!su || !isVerified(c.verification)) { c.stage = 'workflow'; return; }
+  const back = () => { c.stage = su.returnTo; c.stepUp = null; c.contact = null; c.pending = null; };
+  if (/\b(don'?t|do not|can'?t|cannot|no)\b.{0,20}\b(have|know|remember|want|give)\b|\b(skip|cancel|never ?mind|forget it|not now)\b/i.test(text)) {
+    back();
+    event(s, 'stepup_declined', {});
+    return say(s, M.STEP_UP_DECLINED);
+  }
+  const digits = parseNationalIdLast4(text);
+  if (!digits) {
+    su.unparsed++;
+    if (su.unparsed >= 3) { back(); return say(s, M.STEP_UP_DECLINED); }
+    return say(s, M.STEP_UP_RETRY_UNCLEAR);
+  }
+  su.attempts++;
+  const ok = checkNationalId(c.verification.identifiedCustomerId, digits);
+  event(s, 'stepup_attempt', { ok, attempt: su.attempts });
+  if (ok) {
+    c.assurance = 'strong';
+    tl(s, { type: 'verification.stepup', stage: 'verify', title: 'Second-level check passed', detail: 'National ID digits matched the bank record. The digits are not stored.', status: 'ok', source: 'identity check' });
+    const then = su.then;
+    c.stage = su.returnTo; c.stepUp = null;
+    say(s, M.STEP_UP_OK);
+    return then === 'contact' ? askContactValue(s) : askReadoutConfirm(s);
+  }
+  tl(s, { type: 'verification.stepup', stage: 'verify', title: `Second-level check did not match (attempt ${su.attempts} of ${STEP_UP_MAX_ATTEMPTS})`, detail: 'The customer is not told which part was wrong.', status: 'warn', source: 'identity check' });
+  if (su.attempts >= STEP_UP_MAX_ATTEMPTS) {
+    c.stepUp = null; c.contact = null; c.stage = 'workflow';
+    addRiskFlag(c.caseId!, 'second_level_check_failed');
+    return handoff(s, 'social_engineering_suspected', `second-level check failed ${su.attempts} times after the normal check passed`, M.STEP_UP_LOCKED);
+  }
+  return say(s, M.STEP_UP_RETRY(STEP_UP_MAX_ATTEMPTS - su.attempts));
+}
+
+/* ---- reading account activity aloud: only on request, after the second check, after a spoken confirmation */
+
+async function startReadout(s: Session): Promise<void> {
+  const c = s.ctx;
+  reasoning(s, 'customer asked me to read account activity aloud', 'Default is to check a detail the customer describes, not to read records out. Reading them out needs the second-level check and a spoken confirmation that it is safe to say them.');
+  if (c.assurance !== 'strong') return askStepUp(s, 'readout');
+  return askReadoutConfirm(s);
+}
+
+function askReadoutConfirm(s: Session): void {
+  s.ctx.pending = { kind: 'yes_no', purpose: 'readout:confirm' };
+  say(s, M.READOUT_CONFIRM);
+}
+
+async function onReadoutAnswer(s: Session, yes: boolean): Promise<void> {
+  const c = s.ctx;
+  if (!yes) { reasoning(s, 'customer did not confirm', 'Nothing was read out.'); return say(s, M.READOUT_DECLINED); }
+  reasoning(s, 'double confirmation received', 'Second-level check passed and the customer confirmed it is safe. Reading the most recent purchases once.');
+  c.readoutOk = true;
+  try {
+    await applyResult(s, WORKFLOWS[c.wf!.name].start(wfCtx(s)));
+  } finally {
+    c.readoutOk = false;
+  }
+}
+
+/* ---- contact-detail change: collected and double-confirmed here, applied only by a person */
+
+async function startContactChange(s: Session, kind: ContactKind): Promise<void> {
+  const c = s.ctx;
+  c.pending = null;
+  const risk = assessContactRisk(s.id, c.caseId, c.flags);
+  c.contact = { kind, step: 'value', risk, tries: 0 };
+  event(s, 'contact_change_requested', { kind, risk: risk.level });
+  await hold(s, `Checking the account before a ${kind} change`, 'Looking at what has happened in this call and on the account.');
+  reasoning(
+    s,
+    `${kind} change requested`,
+    risk.signals.length
+      ? `Risk is HIGH: ${risk.signals.join('; ')}. A change of ${kind} right after that is a known takeover pattern. The assistant will not apply it; a specialist reviews it. The second-level check is still required.`
+      : `No risk signals in this call. The second-level check is required and the request goes to staff for review; the assistant never applies a ${kind} change itself.`,
+    risk.level === 'high' ? 'warn' : 'ok',
+  );
+  if (c.caseId) caseEvent(c.caseId, 'contact_change_requested', { kind, risk: risk.level, signals: risk.signals });
+  if (c.assurance !== 'strong') return askStepUp(s, 'contact');
+  return askContactValue(s);
+}
+
+function askContactValue(s: Session): void {
+  const c = s.ctx;
+  c.contact!.step = 'value';
+  c.pending = { kind: 'free_text', purpose: 'contact:value' };
+  say(s, M.CONTACT_ASK_VALUE(c.contact!.kind));
+}
+
+async function thirdParty(s: Session): Promise<void> {
+  const c = s.ctx;
+  c.assurance = undefined;
+  c.readoutOk = false;
+  c.contact = null;
+  c.pending = null;
+  reasoning(s, 'caller says they are not the account holder', 'The identity check was passed by whoever is on the line, but the caller now says the account is someone else\'s. Nothing will be disclosed or changed. A specialist decides what to do.', 'blocked');
+  if (c.caseId) addRiskFlag(c.caseId, 'third_party_caller');
+  return handoff(s, 'social_engineering_suspected', 'caller said they are acting for the account holder', M.THIRD_PARTY);
+}
+
+function validContact(kind: ContactKind, v: string): boolean {
+  if (kind === 'phone') return v.replace(/\D/g, '').length >= 8;
+  if (kind === 'email') return /\S+@\S+\.\S+/.test(v);
+  return v.length >= 12 && /\d/.test(v) && v.split(/\s+/).length >= 3;
+}
+
+async function onContactText(s: Session, text: string): Promise<void> {
+  const c = s.ctx;
+  const ct = c.contact!;
+  const yn = parseYesNo(text);
+  if (/\b(cancel|never ?mind|forget it|stop|don'?t (change|need)|leave it)\b/i.test(text) && ct.step !== 'value') { c.contact = null; c.pending = null; event(s, 'contact_change_cancelled', {}); return say(s, M.CONTACT_CANCELLED); }
+  if (ct.step === 'value') {
+    if (/\b(cancel|never ?mind|forget it|leave it)\b/i.test(text)) { c.contact = null; c.pending = null; return say(s, M.CONTACT_CANCELLED); }
+    let value = text.replace(/^\s*(it'?s|it is|my new \w+ is|the new \w+ is|new \w+:?)\s*/i, '').trim().slice(0, 200);
+    // Spoken email: "name dot test at example dot com".
+    if (ct.kind === 'email' && !value.includes('@')) value = value.replace(/\s+at\s+/i, '@').replace(/\s+dot\s+/gi, '.').replace(/\s+/g, '');
+    if (!validContact(ct.kind, value)) {
+      ct.tries++;
+      if (ct.tries >= 3) { c.contact = null; c.pending = null; return say(s, M.CONTACT_GAVE_UP); }
+      return say(s, M.CONTACT_RETRY_VALUE(ct.kind));
+    }
+    if (ct.kind === 'email') value = value.replace('@', ' at ').replace(/\./g, ' dot ').replace(/\s+/g, ' ').trim();
+    ct.value = value; ct.step = 'confirm1';
+    c.pending = { kind: 'yes_no', purpose: 'contact:confirm' };
+    return say(s, M.CONTACT_READBACK(ct.kind, value));
+  }
+  if (yn === null) return say(s, M.CONTACT_YES_OR_NO);
+  if (ct.step === 'confirm1') {
+    if (yn === 'no') { ct.value = undefined; return askContactValue(s); }
+    ct.step = 'confirm2';
+    c.pending = { kind: 'yes_no', purpose: 'contact:confirm' };
+    return say(s, M.CONTACT_SECOND_CONFIRM(ct.kind, ct.value!, ct.risk.level === 'high'));
+  }
+  // confirm2
+  if (yn === 'no') { c.contact = null; c.pending = null; return say(s, M.CONTACT_CANCELLED); }
+  return submitContactChange(s);
+}
+
+async function submitContactChange(s: Session): Promise<void> {
+  const c = s.ctx;
+  const ct = c.contact!;
+  c.pending = null;
+  await hold(s, `Preparing the ${ct.kind} change for review`, 'Writing the request and the reasons to the case.');
+  const label = `${ct.kind} change`;
+  const high = ct.risk.level === 'high';
+  let ref = '';
+  try {
+    const r = createTicket(c.caseId!, ASSISTANT, {
+      type: 'escalation',
+      reason: `Customer asked to change their ${ct.kind} after passing the second-level check. New ${ct.kind}: ${ct.value}. ${high ? `HIGH RISK: ${ct.risk.signals.join('; ')}.` : 'No risk signals in the call.'} Not applied; needs staff review.`.slice(0, 300),
+      team: 'Fraud and security',
+      priority: high ? 'urgent' : 'normal',
+      requestKey: `contact:${c.caseId}:${ct.kind}:${s.id}`.slice(0, 80),
+    });
+    ref = r.ticket.id as string;
+  } catch (e) {
+    log.warn('contact-change ticket failed', { sessionId: s.id, error: (e as Error).message });
+  }
+  if (c.caseId) caseEvent(c.caseId, 'contact_change_submitted', { kind: ct.kind, risk: ct.risk.level, signals: ct.risk.signals, ticket: ref || null });
+  tl(s, { type: 'contact.change_submitted', stage: 'act', title: `${label} sent for review, not applied`, detail: high ? `Escalated to a specialist. ${ct.risk.signals.join('; ')}.` : 'Queued for staff review. The assistant cannot change contact details.', status: high ? 'warn' : 'ok', source: 'policy', ref: ref || undefined });
+  c.contact = null;
+  if (high) {
+    reasoning(s, 'handing over to a specialist', `Because ${ct.risk.signals[0]}, a person must decide. Handing over now with the request attached.`, 'warn');
+    return handoff(s, 'account_takeover_suspected', `${label} requested while ${ct.risk.signals.join('; ')}`, M.CONTACT_HANDOFF(ct.kind, ct.risk.signals[0]));
+  }
+  say(s, M.CONTACT_SUBMITTED(ct.kind));
+  return wrapUp(s);
 }
 
 function wrapUp(s: Session): void {
