@@ -698,6 +698,8 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .pod .spin { animation: none; opacity: 0.5; } }
 @media (max-width: 900px) {
-  /* On a phone the steps read under the animation, one after another. */
-  .pod-wrap { grid-template-columns: minmax(0, 1fr); gap: 16px; min-height: 0; }
+  /* On a phone the steps read under the animation, one after another. The rings reach 46px past
+     the circle, so the block keeps room for them rather than overlapping the text above. */
+  .pod-wrap { grid-template-columns: minmax(0, 1fr); gap: 20px; min-height: 0; padding: 56px 0 8px; }
+  .pod-wrap .pod { margin: 0 auto; }
 }

@@ -69,12 +69,12 @@ describe('conversation reliability', () => {
   it('choices can be made by voice ("the second one")', async () => {
     const c = new Caller(app);
     await c.start('S01');
-    await c.say("There's a charge I don't recognise");
-    await c.verify('S01');
+    await c.say('Something is wrong with a payment on my card');
     expect(c.view.choices.length).toBeGreaterThan(1);
     const second = c.view.choices[1];
     await c.say('the second one');
-    expect(c.caseRow().transaction_refs_json).toContain(second.id);
+    await c.refresh();
+    expect(JSON.parse(c.session().context_json).issue?.issueType).toBe(second.id);
   });
 });
 

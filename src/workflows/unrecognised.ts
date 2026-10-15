@@ -5,7 +5,7 @@ import { fraudDisputeEligibility } from '../policy/eligibility.ts';
 import { activeDisputeTxnIds, cardConfirmedBlocked } from '../policy/engine.ts';
 import type { Finding } from '../cases/case-service.ts';
 import { formatDate, formatMoney } from '../conversation/format.ts';
-import { cardsOf, describeTxn, matchTransactions, offerAgent, opByType, sourceGuard, txnChoices, uniqueBest } from './common.ts';
+import { askWhichCharge, cardsOf, describeTxn, matchTransactions, offerAgent, opByType, sourceGuard, txnChoices, uniqueBest } from './common.ts';
 import type { ProposedAction, Workflow, WorkflowCtx, WorkflowResult } from './types.ts';
 
 function purchases(ctx: WorkflowCtx): Transaction[] {
@@ -118,13 +118,23 @@ export const unrecognisedWorkflow: Workflow = {
     const scored = matchTransactions(txns, ctx.slots, ctx.statement);
     const best = uniqueBest(scored);
     if (best) return evaluateUnrecognised(ctx, best.txn);
-    ctx.wf.step = 'choose_txn';
+    // The caller described something and more than one charge fits it: narrowing down what they
+    // themselves raised is not disclosure, so the shortlist is theirs to choose from.
     if (scored.length) {
-      return { kind: 'clarify', purpose: 'choose_txn', message: 'I found more than one charge that could match. Which one don’t you recognise?', choices: txnChoices(scored.map((s) => s.txn)) };
+      ctx.wf.step = 'choose_txn';
+      return { kind: 'clarify', purpose: 'choose_txn', message: 'I found more than one charge that could match what you described. Which one don’t you recognise?', choices: txnChoices(scored.map((s) => s.txn)) };
     }
-    const alerted = new Set((sourceData(ctx.snap, 'fraud_alerts') ?? []).filter((a) => a.status === 'open').map((a) => a.transactionId));
-    const candidates = [...txns.filter((t) => alerted.has(t.transactionId)), ...txns.filter((t) => !alerted.has(t.transactionId))];
-    return { kind: 'clarify', purpose: 'choose_txn', message: 'Which of these recent charges don’t you recognise?', choices: txnChoices(candidates) };
+    // Nothing was described. FP-01: the caller names the charge, the bank confirms it. A list of
+    // merchants and amounts here would hand an unverified story exactly what it came for.
+    ctx.wf.step = 'describe_txn';
+    ctx.wf.clarifications++;
+    if (ctx.wf.clarifications > 2) {
+      return {
+        kind: 'handoff', reason: 'needs_human_judgement', detail: 'caller could not identify the charge', findings: [],
+        message: 'I don’t want to guess at which charge this is, so I’ll pass you to a colleague who can go through the account with you. They’ll have everything we’ve covered.',
+      };
+    }
+    return askWhichCharge(txns, ctx.wf.clarifications > 1);
   },
   onChoice(ctx, purpose, id) {
     if (purpose === 'choose_txn') {
