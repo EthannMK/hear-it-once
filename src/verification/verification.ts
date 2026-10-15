@@ -40,7 +40,7 @@ export type VerificationStatus = 'not_started' | 'identifying' | 'awaiting_dob' 
 export interface VerificationState {
   status: VerificationStatus;
   identifiedCustomerId: string | null;
-  identifiedBy: 'ani' | 'customer_number' | null;
+  identifiedBy: 'ani' | 'customer_number' | 'card_number' | null;
   idAttempts: number;
   dobAttempts: number;
   otpAttempts: number;
@@ -136,7 +136,7 @@ export async function submitVerificationAnswer(ctx: Ctx, s: VerificationState, a
   const a = adapters().identity;
   const actx = { correlationId: ctx.correlationId, sessionId: ctx.sessionId, scenarioId: ctx.scenarioId, customerId: s.identifiedCustomerId };
 
-  if (s.status === 'awaiting_card' && s.identifiedCustomerId) {
+  if (s.status === 'awaiting_card') {
     const maxTries = cfg.maxCardAttempts;
     const number = parseCardNumber(answer);
     // Too little was captured to be an answer: ask again without using up an attempt.
@@ -147,7 +147,15 @@ export async function submitVerificationAnswer(ctx: Ctx, s: VerificationState, a
     const t0 = Date.now();
     let ok: boolean;
     try {
-      ok = await checkCardWithRetry(() => a.checkCardNumber(actx, s.identifiedCustomerId!, number), cfg.cardCheckTimeoutMs);
+      // A caller who has not been identified yet is found by the card number itself.
+      ok = await checkCardWithRetry(async () => {
+        if (s.identifiedCustomerId) return a.checkCardNumber(actx, s.identifiedCustomerId, number);
+        const hit = await a.identifyByCardNumber(actx, number);
+        if (!hit) return false;
+        s.identifiedCustomerId = hit.customerId;
+        s.identifiedBy = 'card_number';
+        return true;
+      }, cfg.cardCheckTimeoutMs);
     } catch {
       const latencyMs = Date.now() - t0;
       noteCardOutcome('temporarily_unavailable', latencyMs);

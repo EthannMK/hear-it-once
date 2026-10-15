@@ -38,6 +38,15 @@ export const mockIdentity: IdentityVerificationAdapter = {
     const r = get<{ id: string }>('SELECT id FROM bank_customers WHERE customer_number = ?', [n.replace(/\D/g, '')]);
     return r ? { customerId: r.id } : null;
   },
+  async identifyByCardNumber(_ctx, cardNumber) {
+    await simulatedLatency(30, 30);
+    const given = sha256(cardNumber.replace(/\D/g, ''));
+    const rows = all<{ customer_id: string; demo_pan: string | null }>('SELECT customer_id, demo_pan FROM bank_cards WHERE demo_pan IS NOT NULL');
+    // Compare against every card so timing does not reveal which one matched.
+    let hit: string | null = null;
+    for (const r of rows) if (safeEqual(sha256(r.demo_pan!.replace(/\D/g, '')), given)) hit = r.customer_id;
+    return hit ? { customerId: hit } : null;
+  },
   async checkDateOfBirth(_ctx, customerId, isoDob) {
     await simulatedLatency(30, 30);
     const r = get<{ dob_hash: string }>('SELECT dob_hash FROM bank_customers WHERE id = ?', [customerId]);

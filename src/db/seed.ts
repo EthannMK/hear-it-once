@@ -358,8 +358,8 @@ export function isSeeded(): boolean {
  * tester inherits the last tester's blocked card and sees a "systems disagree" handover.
  * Skipped while another call for the same customer is still live.
  */
-export function refreshDemoFixtures(customerId: string): boolean {
-  const live = get<{ n: number }>("SELECT COUNT(*) n FROM call_sessions WHERE customer_id = ? AND ended_at IS NULL AND updated_at > ?", [customerId, new Date(Date.now() - 10 * 60_000).toISOString()])?.n ?? 0;
+export function refreshDemoFixtures(customerId: string, exceptSessionId?: string): boolean {
+  const live = get<{ n: number }>("SELECT COUNT(*) n FROM call_sessions WHERE customer_id = ? AND ended_at IS NULL AND id != ? AND updated_at > ?", [customerId, exceptSessionId ?? '', new Date(Date.now() - 10 * 60_000).toISOString()])?.n ?? 0;
   if (live > 0) return false;
   run("UPDATE bank_cards SET status = 'active', status_reason = NULL, status_as_of = ? WHERE customer_id = ? AND status != 'active'", [nowIso(), customerId]);
   run('UPDATE bank_fees SET reversed_at = NULL, reversal_reason = NULL WHERE customer_id = ? AND reversed_at IS NOT NULL', [customerId]);

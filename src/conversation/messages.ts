@@ -39,7 +39,7 @@ export function ackIssue(issueType: string, alreadyVerified = false): string {
 }
 
 export const ASK_DOB = 'Please tell me your date of birth.';
-export const ASK_CARD = 'Could you read me your 16-digit card number? A few digits at a time is fine.';
+export const ASK_CARD = "To confirm it's you, I need your 16-digit card number. If you're not somewhere private, type it in the secure box on screen. Or read it to me a few digits at a time.";
 /** The customer already said which card (last four) — use it, and ask only for what is still needed. */
 export const askCardKnowing = (last4: string) => `Thanks, I've noted it's the card ending ${[...last4].join(' ')}. To confirm it's you, could you read me the full 16-digit card number? A few digits at a time is fine.`;
 /** The customer gave the full number before the security step: confirm it rather than asking again. */
@@ -141,8 +141,8 @@ export const HOLD_LINES = [
   'Give me a moment. I want to look at this properly.',
   'Bear with me for a second while I go through it.',
 ];
-export const STEP_UP_CONTACT = 'I can help with that. Changing contact details is something I protect closely, so I need one more check first. Please tell me the last four digits of your NRC or national ID number.';
-export const STEP_UP_READOUT = "For your privacy I don't read out account activity on the normal check. I can do it after one more check. Please tell me the last four digits of your NRC or national ID number.";
+export const STEP_UP_CONTACT = 'I can help with that. Changing contact details is something I protect closely, so I need one more check first. Please give me the last four digits of your NRC or national ID number. You can type them in the secure box on screen.';
+export const STEP_UP_READOUT = "For your privacy I don't read out account activity on the normal check. I can do it after one more check. Please give me the last four digits of your NRC or national ID number. You can type them in the secure box on screen.";
 export const STEP_UP_OK = 'Thank you, that matches.';
 export const STEP_UP_RETRY_UNCLEAR = "I didn't catch four digits. Please say or type the last four digits of your NRC or national ID number, or say skip if you'd rather leave it.";
 export const STEP_UP_RETRY = (left: number) => `That doesn't match what I have. You have ${left} ${left === 1 ? 'try' : 'tries'} left. Please give me the last four digits of your NRC or national ID number again.`;

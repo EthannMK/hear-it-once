@@ -105,66 +105,60 @@ async function home() {
   } catch (e) {
     S.cards = []; S.status = { available: false, reason: e.message }; S.loadError = e.message;
   }
-  if (!S.selected || !S.cards.some((c) => c.id === S.selected)) S.selected = S.cards[0]?.id ?? null;
   drawHome();
 }
-const card = () => S.cards.find((c) => c.id === S.selected);
 
-/** Test data for judges: compact, clearly framed as dummy data to type or read to Lily. */
-function testPanel(locked) {
-  const c = card();
-  const copy = (v, label) => h('button.copy', { type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(v); toast(`${label} copied`); } catch { toast('Copy is not available here.'); } } }, 'Copy');
-  S.tdOpen ??= !!window.matchMedia?.('(min-width: 901px)').matches;
-  const box = h('details.tdbox', { ...(S.tdOpen ? { open: '' } : {}), ontoggle: (e) => { S.tdOpen = e.currentTarget.open; } },
-    h('summary', icon('flask'), h('span.tt', h('b', 'Test guide'), h('small', c ? `Card scenarios use ${c.name}` : 'How to test'))),
-    h('div.how', h('b', 'Ask anything'), h('p', 'Chat freely, use your own name, ask about branches, deposits, rates or hours. If Lily does not have the answer she says so.')),
-    h('div.how', h('b', 'Test a card scenario'), h('p', 'Pick a test customer, say the line below, then read Lily the card number when she asks.')),
-    h('div.ptabs', { role: 'radiogroup', 'aria-label': 'Choose a test customer' }, S.cards.map((x) =>
-      h('button', { type: 'button', role: 'radio', 'aria-checked': String(x.id === S.selected), disabled: locked, onclick: () => { S.selected = x.id; drawHome(); } }, x.name.split(' ')[0]))),
-    !c ? h('p.small.muted', S.loadError ?? 'No test customers are available.') : [
-      h('div.who', h('b', c.name), h(`span.chip${c.cardStatus === 'active' ? '.ok' : '.warn'}`, `Card ${c.cardStatus}`)),
-      h('p.say', h('span', 'Say'), h('q', c.tryPhrase ?? c.blurb)),
-      h('dl',
-        h('div', h('dt', 'Card number'), h('dd', h('span.pan', group4(c.cardNumber)), copy(c.cardNumber, 'Card number'))),
-        c.nrcLast4 ? h('div', h('dt', 'NRC last 4 digits'), h('dd', h('span.pan', c.nrcLast4), copy(c.nrcLast4, 'NRC digits')), h('small.dnote', 'Asked only for address changes or reading out charges.')) : null),
-      c.restrictions?.length ? h('div.lockn', c.restrictions.join(' · ')) : null,
-      h('details.more', h('summary', 'More about this customer'),
-        h('dl', h('div', h('dt', 'Caller ID'), h('dd.mono', c.phone)), h('div', h('dt', 'Account reference'), h('dd.mono', c.accountRef))),
-        h('p.small.muted', `What the bank's systems hold (${(c.recentTransactions?.length ?? 0) + (c.declines?.length ?? 0)} records)`),
-        h('ul.tx', (c.recentTransactions ?? []).map((x) => h('li', h('span.m', x.merchant), h('span.mono', x.amount), h('span.s', `${x.at}${x.kind === 'fee' ? ' · fee' : ''}${x.status && x.status !== 'posted' ? ' · ' + x.status : ''}`))),
-          (c.declines ?? []).map((d) => h('li', h('span.m', `Declined: ${d.merchant}`), h('span.mono', d.amount), h('span.s', `${d.at} · ${d.reason}`))))),
-    ],
-    locked ? h('p.lockn', 'The test customer is fixed during a call.') : null,
-    h('p.fine', `${S.bank} is fictional. Never enter real card details.`));
-  return h('aside.td', { 'aria-label': 'Test guide' }, box);
+/** Demo data for judges: one table, copy buttons, and what is special about each card. */
+function demoTable() {
+  const copy = (v, label) => h('button.copy', { type: 'button', 'aria-label': `Copy ${label}`, onclick: async (e) => { try { await navigator.clipboard.writeText(v); const b = e.currentTarget; b.textContent = 'Copied'; b.classList.add('done'); setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1400); } catch { toast('Copy is not available here.'); } } }, 'Copy');
+  const rows = S.cards.map((x) => h('tr',
+    h('th', { scope: 'row', 'data-l': 'Customer' }, h('b', x.name), h(`span.chip${x.cardStatus === 'active' ? '.ok' : '.warn'}`, `Card ${x.cardStatus}`)),
+    h('td', { 'data-l': 'Card number' }, h('span.pan', group4(x.cardNumber)), copy(x.cardNumber, `${x.name} card number`)),
+    h('td', { 'data-l': 'NRC last 4' }, h('span.pan', x.nrcLast4), copy(x.nrcLast4, `${x.name} NRC digits`)),
+    h('td.sit', { 'data-l': 'What is true' }, x.situation),
+    h('td.say', { 'data-l': 'Try saying' }, h('q', x.tryPhrase))));
+  return h('section.demo', { 'aria-labelledby': 'demo-t' },
+    h('div.demo-h', h('div', h('h2#demo-t', icon('flask'), 'Demo data'), h('p', 'Use the data below for any card scenario. Lily works out who you are from the card number you give, so pick any row. Anything else, such as branches, deposits or rates, you can just ask.')),
+      h('span.fine', `${S.bank} is fictional. Never enter real card details.`)),
+    S.cards.length ? h('div.tablewrap', h('table.dtable', h('thead', h('tr', ['Customer', 'Card number', 'NRC last 4', 'What is true', 'Try saying'].map((x) => h('th', { scope: 'col' }, x)))), h('tbody', rows)))
+      : h('p.small.muted', S.loadError ?? 'No demo data is available.'),
+    h('p.dnote', 'The NRC digits are only asked for an address change or to read out charges. A card number that is not in this table will not match: Lily lets you retry, then offers a person. Card changes reset for the next call.'));
+}
+
+/** Compact copy list shown beside the call, so judges can paste a card number without leaving. */
+function demoMini() {
+  const one = (v, label) => h('button.copy', { type: 'button', 'aria-label': `Copy ${label}`, onclick: async (e) => { try { await navigator.clipboard.writeText(v); const b = e.currentTarget; b.textContent = 'Copied'; b.classList.add('done'); setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1400); } catch { /* clipboard blocked */ } } }, 'Copy');
+  return h('aside.card.dmini', { 'aria-label': 'Demo data' },
+    h('h2', icon('flask'), 'Demo data'),
+    h('p.small.muted', 'Copy a card number, then type it in the secure box or read it out.'),
+    h('ul', S.cards.map((x) => h('li', h('b', x.name), h('span.pan', group4(x.cardNumber)), one(x.cardNumber, `${x.name} card number`), h('span.sit', x.situation), h('span.nrc', `NRC last 4: ${x.nrcLast4}`), one(x.nrcLast4, `${x.name} NRC digits`)))));
 }
 
 function drawHome() {
   const ready = !!S.status?.available;
-  const bars = h('div.bars', { 'aria-hidden': 'true' }, [14, 26, 38, 48, 34, 44, 24, 16].map((n) => h('i', { style: `height:${n}px` })));
-  const c = card();
+  const bars = h('div.bars', { 'aria-hidden': 'true' }, [14, 26, 38, 48, 34, 44, 24, 16].map((n, i) => h('i', { style: `height:${n}px;--d:${i * 90}ms` })));
   render('talk', h('main.judge',
-    testPanel(false),
     h('section', { 'aria-label': 'Talk to Lily' },
       h('div.hero',
-        h('div',
+        h('div.hero-t',
           h('h1', 'Meet Lily.', h('br'), h('em', 'Your banking questions,'), ' heard.'),
-          h('p.lede', `Talk to Lily, ${S.bank}'s voice assistant, the way you'd talk to a person. She verifies who you are, checks the bank's systems while you talk, and hands you to a human with the full story whenever you ask.`),
+          h('p.lede', `Talk to Lily, ${S.bank}'s voice assistant, the way you'd talk to a person. She checks who you are, looks at the bank's systems while you talk, and hands you to a human with the full story whenever you ask.`),
           h('ul.langs', { 'aria-label': 'Languages and agents' }, [['en', 'English', 'Lily'], ['my', 'Burmese', 'Hnin'], ['fil', 'Tagalog', 'Maya']].map(([k, n, a]) => h('li', h(`i.flag.${k}`), h('span', h('b', n), h('small', a))))),
           h('p.langnote', 'Lily speaks English. Speak Burmese or Tagalog and she will offer Hnin or Maya.'),
-          h('button.connect', { type: 'button', disabled: !c, onclick: () => startCall(c) },
-            h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', c ? `As test customer ${c.name}` : 'Choose a test customer first')), icon('arrow')),
+          h('button.connect', { type: 'button', onclick: () => startCall() },
+            h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', 'Voice or typing, your choice')), icon('arrow')),
           h('div.subs',
             h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
             h('p', icon('info'), h('span', 'You are speaking with an AI. Your browser will ask for the microphone and no audio is stored. No microphone? Start anyway and type.')))),
         h('div.pod-wrap',
           h('div.pod', h('div', bars, h('div.mic', icon('wave')), h('h3', 'Lily'), h(`div.ready${ready ? '' : '.off'}`, ready ? 'Ready to listen' : 'Typing only'))),
-          h('div.float.f1', icon('lock'), 'Verifies you before any account detail'),
+          h('div.float.f1', icon('lock'), 'Checks you before any account detail'),
           h('div.float.f2', icon('headset'), 'Human handover any time'))),
       !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
-      h('div.card.asks', h('span.cap', 'Things to try'), h('div.chips', [...(tList('ex') ?? []), 'Where is your nearest branch?', 'How do I make a deposit?'].map((x) => h('span', `“${x}”`)))),
+      demoTable(),
+      h('div.card.asks', h('span.cap', 'Or just ask'), h('div.chips', ['Where is your nearest branch?', 'How do I make a deposit?', 'What is APR and how is it calculated?', 'How do I spot a card scam?', 'I want to speak to a person', 'How are you today?'].map((x) => h('span', `“${x}”`)))),
       h('div.flow',
-        h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. Lily verifies you with the test card number.')),
+        h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. For card matters Lily asks for a card number from the table.')),
         h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each step as it happens: checks, decisions, actions and handover.')),
         h('div.card', h('b', h('span', '3'), 'Agent CRM'), h('p', 'When you end the call, you land in the agent’s case workspace: summary, verified facts, suggested next step and tickets.'))))));
 }
@@ -184,15 +178,15 @@ function sheet(steps, extra = {}) {
 }
 const closeSheet = () => document.querySelector('.overlay')?.remove();
 
-async function startCall(c) {
+async function startCall() {
   const live = !!S.status?.available;
   const steps = [
     { k: 'mic', label: 'Microphone', detail: 'Your browser will ask for permission.', state: live ? 'run' : 'skip' },
-    { k: 'call', label: 'Starting your call', detail: `Test customer ${c.name}`, state: 'todo' },
+    { k: 'call', label: 'Starting your call', detail: 'Lily will ask who you are', state: 'todo' },
     { k: 'lily', label: 'Connecting to Lily', detail: live ? 'Live voice' : 'Voice isn’t available right now', state: 'todo' },
   ];
   const set = (k, state, detail) => { const s = steps.find((x) => x.k === k); s.state = state; if (detail) s.detail = detail; };
-  const call = new Call(c);
+  const call = new Call();
   let cancelled = false;
   const cancelBtn = () => h('button.btn', { type: 'button', onclick: () => { cancelled = true; call.destroy(); closeSheet(); } }, 'Cancel');
   sheet(steps, { actions: [cancelBtn()] });
@@ -206,7 +200,7 @@ async function startCall(c) {
   // 2. Create the call.
   set('call', 'run'); sheet(steps, { actions: [cancelBtn()] });
   try { await call.create(); set('call', 'ok', `Call ${call.id}`); }
-  catch (e) { set('call', 'fail', e.message); sheet(steps, { error: `The call could not start: ${e.message}`, actions: [h('button.btn.primary', { type: 'button', onclick: () => { closeSheet(); startCall(c); } }, icon('retry'), 'Try again'), cancelBtn()] }); call.destroy(); return; }
+  catch (e) { set('call', 'fail', e.message); sheet(steps, { error: `The call could not start: ${e.message}`, actions: [h('button.btn.primary', { type: 'button', onclick: () => { closeSheet(); startCall(); } }, icon('retry'), 'Try again'), cancelBtn()] }); call.destroy(); return; }
   if (cancelled) return;
   // 3. Live voice.
   if (!live) {
@@ -230,8 +224,8 @@ async function startCall(c) {
 
 /* ------------------------------------------------------------------ call controller */
 class Call {
-  constructor(c) {
-    this.card = c; this.id = null; this.ws = null; this.mic = null; this.player = null;
+  constructor() {
+    this.id = null; this.ws = null; this.mic = null; this.player = null;
     this.muted = false; this.phase = 'idle'; this.reconnecting = false; this.ended = false; this.ending = false;
     this.voiceReady = false; this.textOnly = false; this.micDenied = false;
     this.agent = { lang: 'en', name: 'Lily' };
@@ -245,7 +239,7 @@ class Call {
     try { await this.mic.start(); } catch (e) { this.mic = null; throw e; }
   }
   async create() {
-    const r = await api('/api/calls', { method: 'POST', body: { channel: 'voice_browser', profileId: this.card.id } });
+    const r = await api('/api/calls', { method: 'POST', body: { channel: 'voice_browser' } });
     this.id = r.sessionId; this.view = r.view;
     this.turns = (r.view?.transcript ?? []).map((x) => ({ seq: x.seq, speaker: x.speaker, kind: x.kind ?? '', text: x.text, at: x.at }));
     S.lastCall = this.id;
@@ -307,10 +301,10 @@ class Call {
     }
   }
   setMuted(v) { this.muted = v; this.mic?.setMuted(v); if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ type: 'mute', muted: v })); this.ui.refresh?.(); say(v ? 'Microphone muted' : 'Microphone on'); }
-  async sendText(text) {
+  async sendText(text, masked = false) {
     if (!text.trim()) return;
     if (this.ws?.readyState === 1 && this.voiceReady) { this.player?.flush(); this.ws.send(JSON.stringify({ type: 'text', text })); return; }
-    this.partial.customer = text; this.phase = 'processing'; this.ui.transcript?.(); this.ui.refresh?.();
+    this.partial.customer = masked ? 'Private details sent' : text; this.phase = 'processing'; this.ui.transcript?.(); this.ui.refresh?.();
     try {
       const v = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'utterance', text } });
       this.absorb(v);
@@ -401,6 +395,22 @@ function callScreen(c) {
   const list = h('div.tx-list', { role: 'log', 'aria-label': 'Live transcript' });
   const input = h('input', { type: 'text', placeholder: 'Type to Lily…', 'aria-label': 'Type a message to Lily', maxlength: '500', autocomplete: 'off' });
   const form = h('form.compose', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (v) { c.sendText(v); input.value = ''; } } }, input, h('button.btn.primary', { type: 'submit' }, icon('send'), 'Send'));
+  // Private entry: a box that goes straight to the back end. What is typed is masked and never shown in the transcript.
+  const secureEl = h('div.secure'); let secKind = null;
+  function drawSecure() {
+    const se = c.view?.secureEntry;
+    const show = se && !c.view?.cardCapture?.confirming && !c.ended && !c.ending;
+    if (!show) { secKind = null; secureEl.replaceChildren(); secureEl.classList.remove('on'); return; }
+    if (secKind === se.kind) return;
+    secKind = se.kind;
+    const box = h('input', { type: 'password', inputmode: 'numeric', autocomplete: 'off', name: `s${Math.random().toString(36).slice(2, 8)}`, maxlength: String(se.maxLength), placeholder: se.hint, 'aria-label': se.label });
+    const eye = h('button.eye', { type: 'button', 'aria-pressed': 'false', 'aria-label': 'Show what I typed', onclick: () => { const on = box.type === 'password'; box.type = on ? 'text' : 'password'; eye.setAttribute('aria-pressed', String(on)); eye.textContent = on ? 'Hide' : 'Show'; } }, 'Show');
+    secureEl.replaceChildren(h('form.sform', { onsubmit: (e) => { e.preventDefault(); const v = box.value.trim(); if (v) { c.sendText(v, true); box.value = ''; box.type = 'password'; } } },
+      h('div.sh', icon('lock'), h('b', `Type your ${se.label.toLowerCase()} privately`), h('span', 'Not shown or saved in the transcript. Prefer to speak it? Just say it.')),
+      h('div.sr', box, eye, h('button.btn.primary', { type: 'submit' }, 'Send privately'))));
+    secureEl.classList.add('on');
+    setTimeout(() => { try { box.focus({ preventScroll: true }); } catch { /* ignore */ } }, 250);
+  }
   const muteBtn = h('button.mute', { type: 'button', 'aria-pressed': 'false', onclick: () => c.setMuted(!c.muted) }, icon('mic'), h('span.lbl', 'Mute'));
   const ccBtn = h('button.cc', { type: 'button', 'aria-pressed': 'true', onclick: () => { captions = !captions; ccBtn.setAttribute('aria-pressed', String(captions)); list.hidden = !captions; } }, icon('cc'), h('span.lbl', 'Captions'));
   const humanBtn = h('button.human', { type: 'button', onclick: () => c.requestHuman() }, icon('headset'), 'Transfer to a human');
@@ -412,10 +422,11 @@ function callScreen(c) {
     const v = c.view ?? {};
     const secs = v.session?.answeredAt ? Math.round((Date.now() - Date.parse(v.session.answeredAt)) / 1000) : 0;
     const verified = v.tags?.identity === 'verified';
+    const who = v.persona?.name ?? null;
     head.replaceChildren(
       h('div.av', icon('wave'), h(`i${c.voiceReady ? '' : '.off'}`)),
       h('div', h('h1', c.agent.name, h(`i.flag.${c.agent.lang}`, { title: `${c.agent.name} speaks ${{ en: 'English', my: 'Burmese', fil: 'Tagalog' }[c.agent.lang]}` })), h('div.meta', h('span.t', fmtDur(secs)), h('span', '·'), h('span', c.voiceReady ? 'Live voice' : 'Typing mode'))),
-      h('div.cust', h('span.mono2', c.card.name.split(' ').map((x) => x[0]).join('').slice(0, 2)), h('div', h('b', c.card.name, verified ? icon('check') : null), h('span', verified ? 'Identity verified · test customer' : v.tags?.identity === 'failed' ? 'Verification failed' : 'Not verified yet · test customer'))));
+      h(`div.cust${verified ? '.ok' : ''}`, h('span.mono2', verified && who ? who.split(' ').map((x) => x[0]).join('').slice(0, 2) : '?'), h('div', h('b', verified && who ? who : 'Caller', verified ? icon('check') : null), h('span', verified ? 'Identity verified' : v.tags?.identity === 'failed' ? 'Verification failed' : 'Not verified yet'))));
   }
   function drawTranscript() {
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
@@ -496,7 +507,7 @@ function callScreen(c) {
     muteBtn.replaceChildren(icon(c.muted ? 'micOff' : 'mic'), h('span.lbl', c.muted ? 'Unmute' : 'Mute'));
     humanBtn.disabled = !!(c.view?.handoff && c.view.handoff.status !== 'cancelled');
     endBtn.disabled = c.ending;
-    drawSide();
+    drawSide(); drawSecure();
   }
 
   /* visualizer: driven by the real mic / playback level */
@@ -538,9 +549,9 @@ function callScreen(c) {
   c.ui = { refresh, transcript: drawTranscript, activity: drawActivity, stop: () => { cancelAnimationFrame(raf); clearInterval(tick); } };
 
   render('talk', h('main.judge.in-call',
-    testPanel(true),
+    demoMini(),
     h('section.call-main', { 'aria-label': 'Live call with Lily' }, head, stage, bannerEl, extras, handEl, consentEl,
-      h('section.card.tx', h('div.tx-h', h('h2', 'Live transcript'), h('span.badge.lav', c.voiceReady ? 'Live captions' : 'Typed')), list, form),
+      h('section.card.tx', h('div.tx-h', h('h2', 'Live transcript'), h('span.badge.lav', c.voiceReady ? 'Live captions' : 'Typed')), list, secureEl, form),
       h('div.controls', { role: 'toolbar', 'aria-label': 'Call controls' }, muteBtn, ccBtn, h('span.sp'), humanBtn, endBtn)),
     btc));
   drawHead(); drawTranscript(); drawActivity(); refresh();

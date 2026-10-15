@@ -28,3 +28,9 @@ To add knowledge, add an entry to `INFO` (or a branch to `BRANCHES`) in that fil
 ## What is not tested
 
 The scripted tests cover the typed path with rule-based intent. Real Gemini voice and the Gemini intent model are not reachable from tests, so whether the live model follows the prompt rules (match don't tell, honest not-knowing) needs a live call to confirm.
+
+## Identification by card number and secure typed entry
+
+No customer is picked on the home page. The page shows a table of demo profiles with copy buttons and what is special about each card. When a call needs verification, Lily asks for the 16-digit card number. The number identifies the customer and verifies them in one step, after a read-back of the last four digits. The profile, persona and scenario are bound only after that match, so a judge can switch scenario by giving a different card on the next call. A number that matches no card gets a retry, and three misses hand over to a person.
+
+Card numbers and the NRC digits can be typed in a secure box on the call screen. Typed values go to the server only, are never sent to the model, and the transcript stores a redacted marker. Speaking them still works.

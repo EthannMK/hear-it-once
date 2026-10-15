@@ -185,13 +185,11 @@ describe('verification state machine', () => {
     // No raw answer stored anywhere.
     expect(JSON.stringify(all('SELECT * FROM verification_attempts WHERE session_id = ?', [c.sessionId]))).not.toMatch(/1975|000000/);
   });
-  it('unknown caller ID asks for the customer number first', async () => {
+  it('unknown caller ID asks for the card number first', async () => {
     const c = new Caller(app);
     await c.start(undefined, { callerAni: '+1 555 999 0000' });
     await c.say('I lost my card');
-    expect(c.lastAssistant()).toMatch(/customer number/);
-    await c.say('40010002');
-    expect(c.lastAssistant()).toMatch(/date of birth/);
+    expect(c.lastAssistant()).toMatch(/16-digit card number/);
   });
   it('another caller token cannot read or drive the call', async () => {
     const c = new Caller(app);
