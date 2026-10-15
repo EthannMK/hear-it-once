@@ -102,6 +102,8 @@ export interface CallContext {
   cardIdentify?: boolean;
   /** Last general topic answered, so a short follow-up such as "how do I do it at an ATM" keeps its subject. */
   lastInfoTopic?: string;
+  /** How many times a person was offered after an unclear request, so the wording changes. */
+  offerCount?: number;
   /** Which virtual agent currently has the call (en = Lily, my = Hnin, fil = Maya). */
   agentLang?: string;
   /** How many times in a row the card number could not be read; picks gentler, more specific help each time. */
@@ -587,7 +589,7 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
 
   // Things that are not an answer to the current question (repeat that, small talk, a PIN typed by mistake):
   // answer them like a person would and keep the call on track.
-  const side = sideTalk(text, { inIssueStage: c.stage === 'awaiting_issue' || c.stage === 'clarifying_issue', sensitive, lastPrompt: c.lastPrompt, facts: c.facts, strikes: c.unclearCount });
+  const side = sideTalk(text, { inIssueStage: c.stage === 'awaiting_issue' || c.stage === 'clarifying_issue', sensitive, lastPrompt: c.lastPrompt, facts: c.facts, strikes: c.unclearCount, awaitingYesNo: c.pending?.kind === 'yes_no' });
   if (side) {
     event(s, 'side_talk', { kind: side.kind });
     if (side.alsoProcess) say(s, side.reply);
@@ -677,6 +679,13 @@ function tryBankInfo(s: Session, text: string, opts: { allowNotFound: boolean })
 
 async function onIssueText(s: Session, text: string, distressed: boolean): Promise<void> {
   const c = s.ctx;
+  // The offer of a person after an unclear request: a plain yes or no answers it, anything else is a new try.
+  if (c.pending?.kind === 'yes_no' && c.pending.purpose === 'offer_agent' && c.pending.agentReason === 'ai_uncertain') {
+    const p = c.pending;
+    const yn = parseYesNo(text);
+    if (yn) return onYesNoAnswer(s, p, yn === 'yes');
+    c.pending = null;
+  }
   const combined = c.issue && c.stage === 'clarifying_issue' ? `${c.issue.statement} ${redactText(text)}` : redactText(text);
   const cls = await classify(s, combined);
   // A general question ("what are your fees", "how do I deposit") is never about this caller's account.
@@ -707,7 +716,16 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
   if (cls.issueType && cls.confidence >= min) return setIssue(s, cls.issueType, cls.confidence, distressed);
 
   if (clarifications >= policy().conversation.maxIssueClarifications) {
-    return handoff(s, 'ai_uncertain', `intent confidence ${cls.confidence.toFixed(2)} after ${clarifications} clarification(s)`, "I'm not completely sure I've understood, and I don't want to guess with your account. I'm transferring you to an agent, and I'll pass on what you've told me so you won't need to start again.");
+    // Unclear is not a reason to transfer. Offer a person once and keep listening if the caller declines.
+    c.stage = 'clarifying_issue';
+    c.pending = { kind: 'yes_no', purpose: 'offer_agent', agentReason: 'ai_uncertain' };
+    event(s, 'issue_unclear_offer_agent', { confidence: cls.confidence });
+    tl(s, { type: 'clarification.requested', stage: 'understand', title: 'Still unclear, offered a person', detail: 'Unclear input does not transfer the call by itself. The customer chooses.', status: 'pending', source: 'conversation' });
+    c.offerCount = (c.offerCount ?? 0) + 1;
+    say(s, c.offerCount === 1
+      ? "I'm sorry, I still haven't caught what you need. Would you like me to connect you with a person? Or you can tell me again in your own words."
+      : "I can bring in a person whenever you like, just say yes. Or tell me in a few words what you need and I will try again.");
+    return;
   }
   c.issue.clarifications++;
   c.stage = 'clarifying_issue';
@@ -1205,6 +1223,12 @@ async function onYesNoAnswer(s: Session, p: Extract<Pending, { kind: 'yes_no' }>
   c.pending = null;
   if (p.purpose === 'offer_agent') {
     if (yes) return handoff(s, p.agentReason ?? 'customer_accepted_offer', 'customer accepted offer of an agent', "I'll transfer you now. The agent will see everything we've covered.");
+    if (p.agentReason === 'ai_uncertain') {
+      // Declined a person after an unclear request: go back to listening instead of ending the call.
+      c.issue = null; c.stage = 'awaiting_issue';
+      say(s, "No problem. Go ahead and tell me what you need, in your own words.");
+      return;
+    }
     return wrapUp(s);
   }
   if (p.purpose === 'reconcile') {
@@ -1486,7 +1510,6 @@ async function onReconcile(s: Session): Promise<void> {
 async function handoff(s: Session, reason: string, detail: string, message: string, opts: { missing?: string[]; priority?: 'normal' | 'urgent' } = {}): Promise<void> {
   const c = s.ctx;
   if (c.stage === 'handoff') return;
-  if (message) say(s, message);
   c.caseId = ensureCase({
     sessionId: s.id,
     customerId: isVerified(c.verification) ? c.verification.identifiedCustomerId : null,
@@ -1515,7 +1538,8 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
     tl(s, { type: 'handoff.queued', stage: 'handoff', title: `Waiting for an agent (position ${r.queuePosition ?? 1})`, detail: 'The transfer is not complete until an agent accepts it.', status: 'pending', source: 'agent desk', ref: r.handoffId });
     c.stage = 'handoff';
     run("UPDATE call_sessions SET outcome = 'handed_off' WHERE id = ?", [s.id]);
-    say(s, `${M.TRANSFER_INTRO('this')} Thank you for your patience. You are number ${r.queuePosition ?? 1} in the queue, and the agent will see your case ${c.caseId}.`, 'system');
+    // One message per handoff: the reason line and the queue facts together, never two separate texts.
+    say(s, message ? `${message} You are number ${r.queuePosition ?? 1} in the queue, and the agent will see your case ${c.caseId}.` : `${M.TRANSFER_INTRO('this')} Thank you for your patience. You are number ${r.queuePosition ?? 1} in the queue, and the agent will see your case ${c.caseId}.`, message ? undefined : 'system');
   } else {
     say(
       s,
