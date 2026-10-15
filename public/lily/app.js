@@ -419,7 +419,8 @@ function callScreen(c) {
     if (atBottom || c.partial.customer || c.partial.assistant) list.scrollTop = list.scrollHeight;
   }
   function drawActivity() {
-    const evs = c.events.filter((e) => !/^voice\.(muted|unmuted)/.test(e.type));
+    // Technical steps (tool calls, model confidence, knowledge lookups) stay out of the customer's view.
+    const evs = c.events.filter((e) => !/^(voice\.|tool\.|kb\.|input\.|account\.read|tags\.updated|call\.tagged|analysis\.|summary\.generated|disclosure\.|demo\.|verification\.(readback|timing|card_noted))/.test(e.type));
     const ok = evs.filter((e) => e.status === 'ok').length;
     const pend = evs.filter((e) => e.status === 'pending' || e.status === 'running').length;
     tlSub.textContent = `${ok} steps done · ${pend} in progress`;
@@ -428,7 +429,7 @@ function callScreen(c) {
     const badge = (e) => e.type.startsWith('verification') && e.status === 'ok' ? ['ok', 'Verified'] : e.type === 'actions.proposed' ? ['pending', 'Awaiting consent'] : e.type.startsWith('handoff.') && e.status !== 'failed' ? ['escalated', e.type === 'handoff.connected' ? 'Accepted' : 'Handover'] : [e.status, { ok: 'Done', warn: 'Attention', failed: 'Failed', blocked: 'Blocked', pending: 'Pending', running: 'Running', info: 'Info' }[e.status] ?? e.status];
     tl.replaceChildren(...(evs.length ? [...evs].reverse().map((e, i) => {
       const [cls, label] = badge(e);
-      return h(`li${i === 0 ? '.fresh' : ''}`, h(`span.n.${cls === 'escalated' ? 'blocked' : cls}`), h('div', h('div.top2', h('b', e.title), h(`span.st.${cls}`, label)), h('div.when', `${fmtTime(e.at)} · ${STAGE_LABEL[e.stage] ?? e.stage}`), e.detail ? h('div.det', e.detail) : null));
+      return h(`li${i === 0 ? '.fresh' : ''}`, h(`span.n.${cls === 'escalated' ? 'blocked' : cls}`), h('div', h('div.top2', h('b', e.title), h(`span.st.${cls}`, label)), h('div.when', `${fmtTime(e.at)} · ${STAGE_LABEL[e.stage] ?? e.stage}`), e.detail && /^(verification\.(failed|retry)|actions?\.|consent\.|handoff\.|safety\.|case\.|ticket\.)/.test(e.type) ? h('div.det', e.detail) : null));
     }) : [h('li', h('span.n.info'), h('p.small.muted', 'Nothing yet. Each step (verification, checks, actions) appears here as it happens.'))]));
   }
   function drawSide() {

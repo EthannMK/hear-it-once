@@ -22,6 +22,27 @@ const FACT = { verified: ['mint', 'Verified'], confirmed: ['mint', 'Confirmed by
 const ACT = { completed: 'mint', awaiting_customer: 'lav', awaiting_approval: 'amber', in_progress: 'amber', failed: 'coral', unknown: 'coral', declined: 'lav' };
 const badge = (tone, text) => h(`span.badge.${tone}`, text);
 
+
+/**
+ * A small in-page confirmation box (a native <dialog>), used instead of the browser's own pop-ups.
+ * Resolves true / false, or the typed text when `ask` is set and the person confirms.
+ */
+function confirmBox({ title, body, confirmLabel = 'Confirm', ask = null, tone = 'dark' }) {
+  return new Promise((resolve) => {
+    const dlg = h('dialog.crm-dlg', { 'aria-labelledby': 'crm-dlg-title' });
+    const field = ask ? h('textarea', { rows: '3', maxlength: '300', 'aria-label': ask, placeholder: ask }) : null;
+    const done = (v) => { dlg.close(); dlg.remove(); resolve(v); };
+    const ok = h('button.btn.' + tone, { type: 'submit' }, confirmLabel);
+    dlg.append(h('form', { method: 'dialog', onsubmit: (e) => { e.preventDefault(); if (field && field.value.trim().length < 3) { field.focus(); return; } done(field ? field.value.trim() : true); } },
+      h('h2#crm-dlg-title', title), body ? h('p', body) : null, field,
+      h('div.row3', ok, h('button.btn', { type: 'button', onclick: () => done(false) }, 'Cancel'))));
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(false); });
+    document.body.append(dlg);
+    dlg.showModal();
+    (field ?? ok).focus();
+  });
+}
+
 function stop() { clearInterval(C.timer); C.timer = null; }
 
 /** Demo sign-in: the CRM is a staff screen, so the judge is signed in as the demo agent. */
@@ -169,7 +190,7 @@ function handoverBar(w) {
     return h('section.crm-hand.on', K.icon('headset'),
       h('div', h('b', `You’re with the customer${hd.agentName && !mine ? ` (${hd.agentName})` : ''}`), h('span', 'Messages you send appear in the customer’s conversation.'),
         h('form.row3', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (!v) return; act(e.submitter, () => api(`/api/handoffs/${hd.id}/message`, { method: 'POST', body: { text: v } }), 'Message sent.'); } }, input, h('button.btn', { type: 'submit', disabled: !mine }, 'Send'))),
-      h('div.row3', outcome, h('button.btn.dark', { type: 'button', disabled: !mine, onclick: (e) => { if (confirm('End the handover and record this outcome?')) act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/complete`, { method: 'POST', body: { outcome: outcome.value, notes: '', customerRepeatedIssue: false } }), 'Handover completed.'); } }, 'Finish')));
+      h('div.row3', outcome, h('button.btn.dark', { type: 'button', disabled: !mine, onclick: async (e) => { const b = e.currentTarget; if (await confirmBox({ title: 'Finish this handover?', body: 'The outcome you chose is recorded on the case.', confirmLabel: 'Finish' })) act(b, () => api(`/api/handoffs/${hd.id}/complete`, { method: 'POST', body: { outcome: outcome.value, notes: '', customerRepeatedIssue: false } }), 'Handover completed.'); } }, 'Finish')));
   }
   return h('section.crm-hand', K.icon('headset'), h('div', h('b', hd.status === 'completed' ? `Handled by ${hd.agentName ?? 'an agent'}` : 'No agent was available'), h('span', hd.status === 'completed' ? `Outcome: ${String(hd.outcome ?? '').replace(/_/g, ' ')}` : 'A callback was requested.')));
 }
@@ -248,12 +269,13 @@ function tagsCard(w) {
     return h('label.fld', h('span', label, ov[key] ? h('em', ' · changed') : null), sel);
   };
   const notes = h('textarea', { rows: '3', maxlength: '3000', 'aria-label': 'Case notes', placeholder: 'Notes for the next person who opens this case', oninput: () => { C.dirty = true; } }, w.notes);
-  const form = h('form.crm-tags', { onsubmit: (e) => {
+  const form = h('form.crm-tags', { onsubmit: async (e) => {
     e.preventDefault();
+    const submitter = e.submitter;
     const fd = new FormData(e.target); const overrides = {};
     for (const k of ['category', 'issueType', 'priority', 'status', 'resolutionType', 'escalationReason']) { const v = fd.get(k); overrides[k] = v ? v : null; }
-    if (overrides.status === 'resolved' && ai.status !== 'resolved' && !confirm('Mark this case resolved? The customer’s case record will show it as resolved too.')) return;
-    act(e.submitter, () => api(`/api/crm/cases/${w.case.id}`, { method: 'PATCH', body: { version: w.case.version, overrides, notes: notes.value } }), 'Case saved.');
+    if (overrides.status === 'resolved' && ai.status !== 'resolved' && !(await confirmBox({ title: 'Mark this case resolved?', body: 'The customer’s case record will show it as resolved too.', confirmLabel: 'Mark resolved' }))) return;
+    act(submitter, () => api(`/api/crm/cases/${w.case.id}`, { method: 'PATCH', body: { version: w.case.version, overrides, notes: notes.value } }), 'Case saved.');
   } },
     h('div.fields',
       field('category', 'Category', tx.categories, ai.category),
@@ -275,8 +297,8 @@ function actionsCard(w) {
       h('div', h('b', a.label), h('span', a.reference ? `Ref ${a.reference}` : a.error ?? '')),
       badge(ACT[a.state] ?? 'lav', a.stateLabel),
       a.canApprove ? h('div.row3',
-        h('button.btn.mint', { type: 'button', onclick: (e) => { if (confirm(`Approve “${a.label}”? This sends it to the bank system.`)) act(e.currentTarget, () => api(`/api/actions/${a.id}/approve`, { method: 'POST', body: {} }), 'Approved and sent.'); } }, 'Approve'),
-        h('button.btn.ghost', { type: 'button', onclick: (e) => { const reason = prompt('Why are you rejecting it?'); if (reason && reason.trim().length >= 3) act(e.currentTarget, () => api(`/api/actions/${a.id}/reject`, { method: 'POST', body: { reason: reason.trim() } }), 'Rejected. Nothing was changed.'); } }, 'Reject')) : null,
+        h('button.btn.mint', { type: 'button', onclick: async (e) => { const b = e.currentTarget; if (await confirmBox({ title: `Approve “${a.label}”?`, body: 'This sends the request to the bank. It cannot be undone from here.', confirmLabel: 'Approve and send', tone: 'mint' })) act(b, () => api(`/api/actions/${a.id}/approve`, { method: 'POST', body: {} }), 'Approved and sent.'); } }, 'Approve'),
+        h('button.btn.ghost', { type: 'button', onclick: async (e) => { const b = e.currentTarget; const reason = await confirmBox({ title: `Reject “${a.label}”?`, body: 'Nothing will be changed on the account.', ask: 'Why are you rejecting it?', confirmLabel: 'Reject' }); if (reason) act(b, () => api(`/api/actions/${a.id}/reject`, { method: 'POST', body: { reason } }), 'Rejected. Nothing was changed.'); } }, 'Reject')) : null,
       a.canCheck ? h('button.btn', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/actions/${a.id}/reconcile`, { method: 'POST', body: {} }), 'Status checked with the bank system.') }, K.icon('retry'), 'Check status') : null))));
 }
 
@@ -328,8 +350,8 @@ function conversationCard(w) {
 }
 
 function previousCard(w) {
-  return h('section.card.crm-sec', h('h2', 'Earlier cases'),
-    w.previousCases.length ? h('div.crm-list.flat', w.previousCases.map(caseItem(null))) : h('p.small.muted', 'No earlier cases for this customer.'));
+  return h('section.card.crm-sec', h('h2', 'Other cases for this customer'),
+    w.previousCases.length ? h('div.crm-list.flat', w.previousCases.map(caseItem(null))) : h('p.small.muted', 'No other cases for this customer.'));
 }
 
 /* ------------------------------------------------------------------ customer page */

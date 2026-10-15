@@ -21,7 +21,7 @@ import { emitTimeline, listTimeline } from '../events/timeline.ts';
 import { caseEvent, updateCase } from '../cases/case-service.ts';
 import { buildResolution } from '../api/brief.ts';
 import { ACTION_LABELS, HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate, formatMoney } from '../conversation/format.ts';
-import { factRows, type Facts } from '../conversation/facts.ts';
+import { factRows, setFact, type Facts } from '../conversation/facts.ts';
 import type { CallContext } from '../conversation/orchestrator.ts';
 import { SOURCE_DISPLAY } from '../retrieval/labels.ts';
 import { PROFILE_DEFS } from '../live/profiles.ts';
@@ -242,6 +242,14 @@ function computeMeta(c: CaseRow, s: SessionRow | undefined) {
   const flags = parseJson<string[]>(c.risk_flags_json, []);
   const map = c.issue_type ? ISSUE_MAP[c.issue_type] : undefined;
   const facts = (ctx.facts ?? {}) as Facts;
+  // Cases that were not written by a live call (earlier history) have no working memory. Rebuild the
+  // basics from the saved case so the "what we know" table is never empty for them.
+  if (!Object.keys(facts).length) {
+    const said = c.customer_reported ?? s?.issue_statement ?? null;
+    if (said && !said.startsWith('[')) setFact(facts, 'issue', said, 'provided', 'customer');
+    if (c.issue_type) setFact(facts, 'issue_type', ISSUE_LABELS[c.issue_type] ?? c.issue_type, 'provided', 'workflow');
+    if (c.verification_outcome === 'verified' || s?.verification_status === 'verified') setFact(facts, 'identity', 'Verified during the call', 'verified', 'verification');
+  }
   const live = !!s && !s.ended_at && s.data_origin === 'demo_session';
 
   // Priority: explicit rules over recorded state. Sentiment never raises it beyond "high".

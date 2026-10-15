@@ -33,6 +33,9 @@ export function seedCrmHistory(): void {
        VALUES (?,?,?,?, 'closed', ?, 'verified', ?, ?, ?, 'seeded_illustrative', ?, ?, ?)`,
       [caseId, sid, it.customer, it.issue, it.resolution, it.said, it.summary, it.next, ts, end, end],
     );
+    // A short transcript, so the case reads like a real call.
+    [['assistant', 'Thank you for calling Northstar Bank. This is Lily, an AI assistant. How can I help?'], ['customer', it.said], ['assistant', it.summary]]
+      .forEach(([who, text], i) => run('INSERT INTO conversation_turns (session_id, seq, speaker, kind, text, created_at) VALUES (?,?,?,?,?,?)', [sid, i + 1, who, 'utterance', text, new Date(at.getTime() + i * 20_000).toISOString()]));
     if (it.complaint) {
       const tid = newId('TCK', 8);
       run(
