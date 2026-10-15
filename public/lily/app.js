@@ -62,7 +62,7 @@ function header(active) {
     LANGS.map(([c, n]) => h('option', { value: c, lang: c === 'fil' ? 'fil' : c, ...(c === getLang() ? { selected: '' } : {}) }, n)));
   return h('header.top',
     h('a.brand', { href: '#/' }, h('span.mk', icon('wave')), h('b', 'Hear It Once')),
-    h('span.badge.lav', `${S.bank} · demo`),
+    h('span.badge.lav.bank', S.bank),
     h('nav.tabs', { 'aria-label': 'Screens' },
       h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Talk to Lily'),
       h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Agent CRM')),
@@ -117,18 +117,18 @@ const card = () => S.cards.find((c) => c.id === S.selected);
 function testPanel(locked) {
   const c = card();
   const copy = (v, label) => h('button.copy', { type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(v); toast(`${label} copied`); } catch { toast('Copy is not available here.'); } } }, 'Copy');
-  return h('aside.td', { 'aria-label': 'Test data for judges' },
-    h('h2', icon('flask'), 'Test data for judges'),
-    h('div.how', h('b', 'These are fictional test details, not your own.'), ' Pick a test customer before you start. During the call:',
-      h('ol', h('li', 'Ask Lily anything about cards or banking.'), h('li', 'When she asks to verify you, read out the ', h('b', 'card number'), ' below.'), h('li', 'Try a wrong number first to see her retry safely.'))),
+  S.tdOpen ??= !!window.matchMedia?.('(min-width: 901px)').matches;
+  const box = h('details.tdbox', { ...(S.tdOpen ? { open: '' } : {}), ontoggle: (e) => { S.tdOpen = e.currentTarget.open; } },
+    h('summary', icon('flask'), h('span.tt', h('b', 'Test customer'), c ? h('small', `${c.name} · card number and details`) : null)),
+    h('p.how', 'Fictional details for testing. Read the card number to Lily when she asks. Try a wrong one first to see her retry.'),
     h('div.ptabs', { role: 'radiogroup', 'aria-label': 'Choose a test customer' }, S.cards.map((x) =>
       h('button', { type: 'button', role: 'radio', 'aria-checked': String(x.id === S.selected), disabled: locked, onclick: () => { S.selected = x.id; drawHome(); } }, x.name.split(' ')[0]))),
     !c ? h('p.small.muted', S.loadError ?? 'No test customers are available.') : [
       h('div.who', h('b', c.name), h(`span.chip${c.cardStatus === 'active' ? '.ok' : '.warn'}`, `Card ${c.cardStatus}`)),
       h('p.blurb', c.blurb),
       h('dl',
-        h('div', h('dt', 'Card number to read out (dummy)'), h('dd', h('span.pan', group4(c.cardNumber)), copy(c.cardNumber, 'Card number'))),
-        h('div', h('dt', 'Calling from (caller ID, dummy)'), h('dd.mono', c.phone)),
+        h('div', h('dt', 'Card number to read out'), h('dd', h('span.pan', group4(c.cardNumber)), copy(c.cardNumber, 'Card number'))),
+        h('div', h('dt', 'Caller ID'), h('dd.mono', c.phone)),
         h('div', h('dt', 'Account reference'), h('dd.mono', c.accountRef, ' ', copy(c.accountRef, 'Account reference')))),
       c.restrictions?.length ? h('div.lockn', c.restrictions.join(' · ')) : null,
       h('details', h('summary', `What the bank's systems hold (${(c.recentTransactions?.length ?? 0) + (c.declines?.length ?? 0)} records)`),
@@ -136,7 +136,8 @@ function testPanel(locked) {
           (c.declines ?? []).map((d) => h('li', h('span.m', `Declined: ${d.merchant}`), h('span.mono', d.amount), h('span.s', `${d.at} · ${d.reason}`))))),
     ],
     locked ? h('p.lockn', 'The test customer is fixed during a call.') : null,
-    h('p.fine', `${S.bank} is fictional. Every name, number and record here is invented for this demo. Never enter real card details.`));
+    h('p.fine', `${S.bank} is a fictional bank. Never enter real card details.`));
+  return h('aside.td', { 'aria-label': 'Test customer' }, box);
 }
 
 function drawHome() {
@@ -148,20 +149,18 @@ function drawHome() {
     h('section', { 'aria-label': 'Talk to Lily' },
       h('div.hero',
         h('div',
-          h('span.badge.mint', icon('lock'), 'AI assistant · dummy data'),
           h('h1', 'Meet Lily.', h('br'), h('em', 'Your banking questions,'), ' heard.'),
-          h('p.lede', `Talk to Lily, ${S.bank}'s AI assistant, the way you'd talk to a person. She verifies who you are, checks the bank's systems while you talk, does what she's allowed to — and hands you to a human with the full story whenever you ask.`),
+          h('p.lede', `Talk to Lily, ${S.bank}'s voice assistant, the way you'd talk to a person. She verifies who you are, checks the bank's systems while you talk, and hands you to a human with the full story whenever you ask.`),
           h('button.connect', { type: 'button', disabled: !c, onclick: () => startCall(c) },
             h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', c ? `As test customer ${c.name}` : 'Choose a test customer first')), icon('arrow')),
           h('div.subs',
             h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
-            h('p', icon('info'), h('span', 'You are speaking with an AI, not a person. Your browser will ask for the microphone. No audio is stored.')),
-            h('p', icon('keyboard'), h('span', 'No microphone? Start anyway and type — Lily still answers.')))),
+            h('p', icon('info'), h('span', 'You are speaking with an AI. Your browser will ask for the microphone and no audio is stored. No microphone? Start anyway and type.')))),
         h('div.pod-wrap',
           h('div.pod', h('div', bars, h('div.mic', icon('wave')), h('h3', 'Lily'), h(`div.ready${ready ? '' : '.off'}`, ready ? 'Ready to listen' : 'Typing only'), h('div.prov', `Call language: ${LANGS.find(([k]) => k === getLang())?.[1] ?? 'English'}`))),
           h('div.float.f1', icon('lock'), 'Verifies you before any account detail'),
           h('div.float.f2', icon('headset'), 'Human handover any time'))),
-      !ready && S.status?.reason ? h('p.banner.warn', S.status.reason) : null,
+      !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
       h('div.card.asks', h('span.cap', 'Things to try'), h('div.chips', [...(tList('ex') ?? []), 'How are you today?'].map((x) => h('span', `“${x}”`)))),
       h('div.flow',
         h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. Lily verifies you with the test card number.')),
@@ -388,8 +387,8 @@ function callScreen(c) {
   const list = h('div.tx-list', { role: 'log', 'aria-label': 'Live transcript' });
   const input = h('input', { type: 'text', placeholder: 'Type to Lily…', 'aria-label': 'Type a message to Lily', maxlength: '500', autocomplete: 'off' });
   const form = h('form.compose', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (v) { c.sendText(v); input.value = ''; } } }, input, h('button.btn.primary', { type: 'submit' }, icon('send'), 'Send'));
-  const muteBtn = h('button.mute', { type: 'button', 'aria-pressed': 'false', onclick: () => c.setMuted(!c.muted) }, icon('mic'), 'Mute');
-  const ccBtn = h('button.cc', { type: 'button', 'aria-pressed': 'true', onclick: () => { captions = !captions; ccBtn.setAttribute('aria-pressed', String(captions)); list.hidden = !captions; } }, icon('cc'), 'Captions');
+  const muteBtn = h('button.mute', { type: 'button', 'aria-pressed': 'false', onclick: () => c.setMuted(!c.muted) }, icon('mic'), h('span.lbl', 'Mute'));
+  const ccBtn = h('button.cc', { type: 'button', 'aria-pressed': 'true', onclick: () => { captions = !captions; ccBtn.setAttribute('aria-pressed', String(captions)); list.hidden = !captions; } }, icon('cc'), h('span.lbl', 'Captions'));
   const humanBtn = h('button.human', { type: 'button', onclick: () => c.requestHuman() }, icon('headset'), 'Transfer to a human');
   const endBtn = h('button.endc', { type: 'button', onclick: () => c.end() }, icon('end'), 'End call');
   const tagsEl = h('dl.tags2'); const stageBar = h('div.stagebar'); const tl = h('ol.tl'); const tlSub = h('p.subt');
@@ -401,7 +400,7 @@ function callScreen(c) {
     const verified = v.tags?.identity === 'verified';
     head.replaceChildren(
       h('div.av', icon('wave'), h(`i${c.voiceReady ? '' : '.off'}`)),
-      h('div', h('h1', 'Lily', h('span.badge.lav', 'AI assistant')), h('div.meta', h('span.t', fmtDur(secs)), h('span', '·'), h('span', c.voiceReady ? 'Live voice' : 'Typing mode'))),
+      h('div', h('h1', 'Lily'), h('div.meta', h('span.t', fmtDur(secs)), h('span', '·'), h('span', c.voiceReady ? 'Live voice' : 'Typing mode'))),
       h('div.cust', h('span.mono2', c.card.name.split(' ').map((x) => x[0]).join('').slice(0, 2)), h('div', h('b', c.card.name, verified ? icon('check') : null), h('span', verified ? 'Identity verified · test customer' : v.tags?.identity === 'failed' ? 'Verification failed' : 'Not verified yet · test customer'))));
   }
   function drawTranscript() {
@@ -411,7 +410,7 @@ function callScreen(c) {
       if (tr.speaker === 'customer' && /^\[verification answer/.test(tr.text)) return h('div.b.cust', h('div.wl', h('b', 'You'), tr.at ? h('span', fmtTime(tr.at)) : null), h('div.txt', h('i', 'Security answer given · not stored')));
       if (tr.speaker === 'system' || !['customer', 'assistant', 'agent'].includes(tr.speaker)) return tr.text ? h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim()) : null;
       const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
-      const who = cls === 'lily' ? [h('span.av', 'L'), h('b', 'Lily'), 'AI'] : cls === 'agent' ? [h('b', 'Human agent')] : [h('b', 'You')];
+      const who = cls === 'lily' ? [h('span.av', 'L'), h('b', 'Lily')] : cls === 'agent' ? [h('b', 'Human agent')] : [h('b', 'You')];
       return h(`div.b.${cls}`, h('div.wl', who, tr.at ? h('span', fmtTime(tr.at)) : null), h('div.txt', tr.text));
     });
     for (const sp of ['customer', 'assistant']) if (c.partial[sp]) nodes.push(h(`div.b.partial.${sp === 'customer' ? 'cust' : 'lily'}`, h('div.wl', sp === 'customer' ? h('b', 'You') : [h('span.av', 'L'), h('b', 'Lily')], h('span', sp === 'customer' ? 'hearing…' : 'speaking…')), h('div.txt', c.partial[sp])));
@@ -471,13 +470,14 @@ function callScreen(c) {
     const st = c.state;
     const [label, subText] = STATE_TEXT[st] ?? [st, ''];
     stage.dataset.state = st;
+    stage.classList.toggle('typing', st === 'typing');
     pill.replaceChildren(icon(st === 'speaking' ? 'volume' : st === 'muted' ? 'micOff' : st === 'processing' ? 'activity' : st === 'waiting' || st === 'agent' ? 'headset' : st === 'typing' ? 'keyboard' : 'mic'), label);
     sub.textContent = subText;
     const segKey = st === 'hearing' ? 'listening' : st;
     for (const [k, el] of Object.entries(seg)) el.setAttribute('aria-current', String(k === segKey));
     muteBtn.disabled = !c.mic || !c.voiceReady;
     muteBtn.setAttribute('aria-pressed', String(c.muted));
-    muteBtn.replaceChildren(icon(c.muted ? 'micOff' : 'mic'), c.muted ? 'Unmute' : 'Mute');
+    muteBtn.replaceChildren(icon(c.muted ? 'micOff' : 'mic'), h('span.lbl', c.muted ? 'Unmute' : 'Mute'));
     humanBtn.disabled = !!(c.view?.handoff && c.view.handoff.status !== 'cancelled');
     endBtn.disabled = c.ending;
     drawSide();

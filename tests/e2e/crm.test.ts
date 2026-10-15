@@ -76,7 +76,7 @@ describe('case workspace built from the call', () => {
     expect(facts.identity).toBe('verified');
     expect(facts.transaction).toBe('confirmed');
     // Tags come from rules over recorded state.
-    expect(w.tags.effective).toMatchObject({ category: 'Transaction dispute', issueType: 'Unrecognized transaction', priority: 'high', status: 'awaiting_customer' });
+    expect(w.tags.effective).toMatchObject({ category: 'Transaction dispute', issueType: 'Unrecognised transaction', priority: 'high', status: 'awaiting_customer' });
     // Proposed actions are waiting for the customer, not shown as done.
     expect(w.actions.length).toBeGreaterThan(0);
     expect(w.actions.every((a: any) => a.state === 'awaiting_customer')).toBe(true);

@@ -6,7 +6,7 @@
  * a banking action.
  */
 export const CATEGORIES = ['Card services', 'Payment issue', 'Transaction dispute', 'Card security', 'Fee inquiry', 'General inquiry'] as const;
-export const ISSUE_TYPES = ['Unrecognized transaction', 'Payment not received', 'Lost or stolen card', 'Duplicate or wrong charge', 'Fee question', 'Card declined', 'Account question', 'Other'] as const;
+export const ISSUE_TYPES = ['Unrecognised transaction', 'Payment not received', 'Lost or stolen card', 'Duplicate or wrong charge', 'Fee question', 'Card declined', 'Account question', 'Other'] as const;
 export const PRIORITIES = ['normal', 'high', 'urgent'] as const;
 export const STATUSES = ['new', 'in_progress', 'awaiting_customer', 'awaiting_bank', 'escalated', 'resolved'] as const;
 export const RESOLUTION_TYPES = ['Resolved by assistant', 'Information given', 'Action taken, awaiting bank', 'Passed to an agent', 'Resolved by agent', 'Not resolved'] as const;
@@ -37,7 +37,7 @@ export const STATUS_LABELS: Record<CrmStatus, string> = {
 
 /** Issue key (as stored on the case) → CRM category and issue type. */
 export const ISSUE_MAP: Record<string, { category: (typeof CATEGORIES)[number]; issueType: (typeof ISSUE_TYPES)[number]; team: (typeof TEAMS)[number] }> = {
-  unrecognised_transaction: { category: 'Transaction dispute', issueType: 'Unrecognized transaction', team: 'Disputes' },
+  unrecognised_transaction: { category: 'Transaction dispute', issueType: 'Unrecognised transaction', team: 'Disputes' },
   wrong_or_duplicate_charge: { category: 'Transaction dispute', issueType: 'Duplicate or wrong charge', team: 'Disputes' },
   lost_stolen_card: { category: 'Card security', issueType: 'Lost or stolen card', team: 'Fraud and security' },
   payment_not_showing: { category: 'Payment issue', issueType: 'Payment not received', team: 'Payments operations' },
