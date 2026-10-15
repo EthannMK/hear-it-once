@@ -17,18 +17,19 @@ import { log } from '../lib/logger.ts';
 import { redactText } from '../lib/redact.ts';
 import { audit, ASSISTANT } from '../audit/audit.ts';
 import { emitTimeline, subscribe, type TimelineEvent } from '../events/timeline.ts';
-import { getContext, handleInput, observeSpeech } from '../conversation/orchestrator.ts';
+import { getContext, handleInput, observeSpeech, setAgentLang } from '../conversation/orchestrator.ts';
 import { addTurn } from '../handoff/handoff-service.ts';
 import { buildCallView } from '../api/views.ts';
 import type { LiveConnectOptions, LiveProvider, LiveSession, LiveToolCall } from './provider.ts';
-import { LILY_TOOLS, lilySystemInstruction } from './lily.ts';
-import type { LangCode } from './languages.ts';
+import { LILY_TOOLS, TOOL, lilySystemInstruction } from './lily.ts';
+import { LANGUAGES, isLang, type LangCode } from './languages.ts';
 import { runTool } from './tools.ts';
 import { normaliseSpoken } from './speech.ts';
 import { knownForAssistant } from '../conversation/facts.ts';
 
 export type ServerMessage =
-  | { type: 'ready'; provider: string; model: string; resumed: boolean }
+  | { type: 'ready'; provider: string; model: string; resumed: boolean; agent: { lang: string; name: string } }
+  | { type: 'agent'; lang: string; name: string; from: string }
   | { type: 'audio'; data: string }
   | { type: 'interrupted' }
   | { type: 'partial'; speaker: 'customer' | 'assistant'; text: string }
@@ -74,13 +75,20 @@ export class LiveBridge {
     readonly sessionId: string,
     private readonly send: (m: ServerMessage) => void,
     private readonly provider: LiveProvider,
-    private readonly language: LangCode = 'en',
+    private language: LangCode = 'en',
   ) {}
+
+  /** Set when the customer agreed to move to another agent; applied once the current agent finishes the handover sentence. */
+  private pendingAgent: LangCode | null = null;
+  private pendingAgentTimer: NodeJS.Timeout | null = null;
 
   /* ------------------------------------------------------------------ lifecycle */
 
   async start(): Promise<void> {
     this.lastSentSeq = 0;
+    // A resumed call keeps the agent it had; a new call always starts with Lily.
+    const saved = getContext(this.sessionId).agentLang;
+    this.language = isLang(saved) ? saved : 'en';
     this.unsubscribe = subscribe(this.sessionId, (e) => this.onTimeline(e));
     // Anything beyond the on-screen notice means the conversation is already under way.
     const resumed = this.turnsSoFar().some((t) => t.speaker !== 'system');
@@ -91,7 +99,7 @@ export class LiveBridge {
       this.unsubscribe = null;
       throw e;
     }
-    this.send({ type: 'ready', provider: this.provider.name, model: this.provider.model, resumed });
+    this.send({ type: 'ready', provider: this.provider.name, model: this.provider.model, resumed, agent: { lang: this.language, name: LANGUAGES[this.language].agent } });
     this.syncTurns();
     this.pushView();
     emitTimeline(this.sessionId, { type: 'voice.connected', stage: 'understand', title: resumed ? 'Voice connection restored' : 'Live voice connected', detail: `${this.provider.name} · ${this.provider.model}`, status: 'ok', source: 'voice bridge' });
@@ -101,9 +109,10 @@ export class LiveBridge {
     }
   }
 
-  private async openProviderSession(resumed: boolean): Promise<void> {
+  private async openProviderSession(resumed: boolean, joinedFrom: LangCode | null = null): Promise<void> {
     const opts: LiveConnectOptions = {
-      systemInstruction: lilySystemInstruction({ recap: resumed ? this.recap() : null, language: this.language }),
+      systemInstruction: lilySystemInstruction({ recap: resumed ? this.recap() : null, language: this.language, joinedFrom }),
+      voice: this.language === 'en' ? undefined : LANGUAGES[this.language].voice,
       tools: LILY_TOOLS,
       events: {
         onAudio: (b64) => {
@@ -130,6 +139,7 @@ export class LiveBridge {
     if (this.closed) return;
     this.closed = true;
     if (this.goAwayTimer) clearTimeout(this.goAwayTimer);
+    if (this.pendingAgentTimer) clearTimeout(this.pendingAgentTimer);
     this.unsubscribe?.();
     this.session?.close();
     this.session = null;
@@ -241,6 +251,62 @@ export class LiveBridge {
     this.closeUserTurn();
     this.flushModelTurn(false);
     this.send({ type: 'partial', speaker: 'assistant', text: '' });
+    // The outgoing agent has finished the handover sentence: bring in the next one.
+    if (this.pendingAgent) void this.performAgentSwitch();
+  }
+
+  /* ------------------------------------------------------------------ agent handover (language) */
+
+  /** The customer agreed to another language. The outgoing agent says one short line, then the call moves. */
+  private requestAgentSwitch(call: LiveToolCall): void {
+    const to = call.args.language;
+    if (!isLang(to) || to === this.language) {
+      this.session?.sendToolResponse({ id: call.id, name: call.name }, { ok: false, message: 'That agent already has the call. Carry on.' });
+      return;
+    }
+    this.pendingAgent = to;
+    // If the turn never completes (dropped audio), the move still happens.
+    this.pendingAgentTimer = setTimeout(() => void this.performAgentSwitch(), 7000);
+    this.suppressModelText = false;
+    this.session?.sendToolResponse({ id: call.id, name: call.name }, { ok: true, message: `Say one short sentence in the current language handing the call to ${LANGUAGES[to].agent}, who speaks ${LANGUAGES[to].name}. Say nothing else; ${LANGUAGES[to].agent} will take over.` });
+  }
+
+  private async performAgentSwitch(): Promise<void> {
+    const to = this.pendingAgent;
+    if (!to || this.closed || this.reconnecting) return;
+    this.pendingAgent = null;
+    if (this.pendingAgentTimer) clearTimeout(this.pendingAgentTimer);
+    const from = this.language;
+    this.reconnecting = true;
+    const old = this.session;
+    this.session = null;
+    try { old?.close(); } catch { /* already gone */ }
+    this.language = to;
+    setAgentLang(this.sessionId, to);
+    addTurn(this.sessionId, 'system', `${LANGUAGES[from].agent} passed the call to ${LANGUAGES[to].agent} (${LANGUAGES[to].name}).`, { kind: `agent_switch:${LANGUAGES[to].agent}` });
+    emitTimeline(this.sessionId, { type: 'agent.switched', stage: 'understand', title: `${LANGUAGES[to].agent} (${LANGUAGES[to].name}) took over from ${LANGUAGES[from].agent}`, detail: 'The customer agreed to the language change. Everything already known was carried across.', status: 'ok', source: 'voice bridge' });
+    this.syncTurns();
+    this.userText = ''; this.userConsumed = false; this.modelText = ''; this.suppressModelText = false;
+    for (let attempt = 1; attempt <= MAX_RECONNECTS && !this.closed; attempt++) {
+      try {
+        await this.openProviderSession(true, from);
+        this.reconnecting = false;
+        this.send({ type: 'agent', lang: to, name: LANGUAGES[to].agent, from: LANGUAGES[from].agent });
+        this.awaitingGreeting = false;
+        (this.session as LiveSession | null)?.sendText(`You have just taken over the call from ${LANGUAGES[from].agent}. Introduce yourself now, following your instructions.`);
+        this.pushView();
+        return;
+      } catch (e) {
+        log.warn('agent switch failed to connect', { sessionId: this.sessionId, attempt, error: (e as Error).message });
+        await new Promise((r) => setTimeout(r, 600 * attempt));
+      }
+    }
+    this.reconnecting = false;
+    if (!this.closed) {
+      this.language = from;
+      setAgentLang(this.sessionId, from);
+      this.send({ type: 'voice', status: 'lost', message: 'The language change did not connect. You can keep going by typing; nothing on the call was lost.' });
+    }
   }
 
   /** Persist what Lily said ONLY when she spoke freely (no tool result owns this turn). */
@@ -272,6 +338,7 @@ export class LiveBridge {
 
   private async runOne(call: LiveToolCall): Promise<void> {
     if (this.closed || !this.session) return;
+    if (call.name === TOOL.switch) return this.requestAgentSwitch(call);
     this.send({ type: 'phase', phase: 'processing', tool: call.name });
     await this.waitForCustomerWords();
     const turnId = String(++this.turnCounter);
@@ -402,7 +469,7 @@ export class LiveBridge {
     const known = knownForAssistant(getContext(this.sessionId).facts);
     const lines = this.turnsSoFar()
       .slice(-12)
-      .map((t) => `${t.speaker === 'customer' ? 'Customer' : 'Lily/system'}: ${t.text}`);
+      .map((t) => `${t.speaker === 'customer' ? 'Customer' : 'Agent/system'}: ${t.text}`);
     const facts = Object.entries(known).map(([k, v]) => `- ${k}: ${v}`);
     return [...lines, ...(facts.length ? ['', 'Already known (do not ask again):', ...facts] : [])].join('\n');
   }

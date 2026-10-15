@@ -35,11 +35,9 @@ const D = {
   },
 };
 
-// The screen is English only. The chosen language applies to the call (what Lily speaks and understands).
-let callLang = 'en';
-try { const v = localStorage.getItem('hio_lang'); if (v && LANGS.some(([c]) => c === v)) callLang = v; } catch { /* storage may be blocked */ }
-export const getLang = () => callLang;
-export function setLang(l) { if (!LANGS.some(([c]) => c === l)) return; callLang = l; try { localStorage.setItem('hio_lang', l); } catch { /* ignore */ } }
+// The screen is English only.
+// Every call starts in English with Lily. Burmese (Hnin) and Tagalog (Maya) join only when the caller asks.
+export const getLang = () => 'en';
 /** t('key', { n: 3 }) → English interface text. */
 export const t = (k, v = {}) => String(D.en[k] ?? k).replace(/\{(\w+)\}/g, (_, x) => (v[x] ?? ''));
 export const tList = (k) => D.en[k];

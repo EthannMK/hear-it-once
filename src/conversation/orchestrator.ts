@@ -41,6 +41,8 @@ import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
 import { maskPhone } from '../lib/redact.ts';
 import { HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate, formatMoney } from './format.ts';
 import { createTicket } from '../crm/crm.ts';
+import { sideTalk } from './sidetalk.ts';
+import { normaliseSpoken } from '../live/speech.ts';
 import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
 
 export type Stage =
@@ -92,6 +94,10 @@ export interface CallContext {
   profileId?: string | null;
   /** Structured memory of the call: what is known, with status and source (see facts.ts). */
   facts?: Facts;
+  /** Which virtual agent currently has the call (en = Lily, my = Hnin, fil = Maya). */
+  agentLang?: string;
+  /** How many times in a row the card number could not be read; picks gentler, more specific help each time. */
+  cardUnparsed?: number;
 }
 
 /** Default synthetic persona per issue type for free-talk demos (no injected faults). */
@@ -560,6 +566,15 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     if (c.distressCount >= 2) return handoff(s, 'communication_breakdown', 'customer distress', "I can hear this is stressful. Let me get you to a person right away — they'll see everything we've covered.");
   }
 
+  // Things that are not an answer to the current question (repeat that, small talk, a PIN typed by mistake):
+  // answer them like a person would and keep the call on track.
+  const side = sideTalk(text, { inIssueStage: c.stage === 'awaiting_issue' || c.stage === 'clarifying_issue', sensitive, lastPrompt: c.lastPrompt, facts: c.facts, strikes: c.unclearCount });
+  if (side) {
+    event(s, 'side_talk', { kind: side.kind });
+    if (side.alsoProcess) say(s, side.reply);
+    else return side.strike ? unclear(s, side.reply) : say(s, side.reply);
+  }
+
   switch (c.stage) {
     case 'awaiting_issue':
     case 'clarifying_issue':
@@ -622,7 +637,7 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
   c.pending = { kind: 'choice', purpose: 'issue_type', options: M.ISSUE_CHOICES, scope: 'issue' };
   event(s, 'issue_clarification_requested', { confidence: cls.confidence });
   tl(s, { type: 'clarification.requested', stage: 'understand', title: 'Asked one clarifying question', detail: 'Below the confidence threshold — offered the five supported issue types rather than guessing.', status: 'pending', source: 'conversation' });
-  say(s, M.CLARIFY_ISSUE);
+  say(s, clarifications >= 1 ? M.CLARIFY_AGAIN : M.CLARIFY_ISSUE);
 }
 
 function slotSummary(sl: IssueSlots): string {
@@ -650,7 +665,7 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
   event(s, 'issue_captured', { issueType, confidence });
   setIssueFacts(c.facts ??= {}, c.issue.statement, issueType, true);
   if (c.freeMode && !c.verification.identifiedCustomerId) await bindFreeTalkPersona(s, issueType);
-  say(s, (distressed ? 'I understand — and if at any point you’d prefer a person, just say so. ' : '') + M.ackIssue(issueType));
+  say(s, (distressed ? 'I understand — and if at any point you’d prefer a person, just say so. ' : '') + M.ackIssue(issueType, isVerified(c.verification)));
   tl(s, { type: 'verification.started', stage: 'verify', title: issueType === 'lost_stolen_card' ? 'Identity verification started — card block will follow immediately' : 'Identity verification started', detail: c.verificationMode === 'card_number' ? 'The full card number is checked on the server against the customer’s record. Nothing about the account is read until it matches.' : 'Two factors required: date of birth, then a one-time passcode to the registered phone. Nothing about the account is read until both pass.', status: 'running', source: 'identity verification' });
   // Verification begins immediately (lost/stolen fast path uses the same flow, nothing else first).
   const ev = await startVerification(vctx(s), c.verification, null, c.verificationMode ?? 'dob_otp');
@@ -793,6 +808,8 @@ async function onVerificationAnswer(s: Session, text: string): Promise<void> {
         return say(s, `Thanks, I've noted that. ${cap && !cap.confirming && cap.digits.length < 16 ? M.cardProgress(cap.digits, spoken(cap.digits)) : M.ASK_CARD}`);
       }
     }
+    // Typed number words ("four nine nine nine ...") are read the same way as spoken ones.
+    text = normaliseSpoken(text);
     const confirmed = collectCard(s, text);
     if (confirmed === null) return;
     // Only a confirmed 16-digit number is acknowledged and checked; anything else goes to the verifier to ask again.
@@ -835,7 +852,8 @@ async function runVerification(s: Session, answer: string): Promise<void> {
       }
       if (!ev.unparsed) tl(s, { type: 'verification.retry', stage: 'verify', title: ev.step === 'card' ? `Card number check failed — no match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)` : `Verification answer did not match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)`, detail: ev.step === 'card' ? 'The number given did not match the active customer’s record. The expected number is never revealed and the call carries on.' : 'Generic message given — the caller is not told which detail was wrong.', status: 'warn', source: 'identity verification', data: { attemptResult: 'failed', attemptsRemaining: ev.remaining } });
       else if (ev.step === 'card') tl(s, { type: 'verification.unclear', stage: 'verify', title: 'Card number not captured clearly — asked again (no attempt used)', status: 'info', source: 'identity verification' });
-      return say(s, M.retryVerification(ev.step, ev.remaining, ev.unparsed));
+      c.cardUnparsed = ev.unparsed && ev.step === 'card' ? (c.cardUnparsed ?? 0) + 1 : 0;
+      return say(s, M.retryVerification(ev.step, ev.remaining, ev.unparsed, c.cardUnparsed ?? 1));
     case 'locked':
       setFact(c.facts ??= {}, 'identity', `Not verified: ${ev.step === 'card' ? 'card number' : 'answers'} did not match after the maximum attempts`, 'needs_clarification', 'verification');
       event(s, 'verification_failed', { step: ev.step });
@@ -991,7 +1009,7 @@ async function onWorkflowText(s: Session, text: string): Promise<void> {
     if (isCorrection(text) || hasNewDetails(c, text)) return onCorrection(s, text);
     const yn = parseYesNo(text);
     if (yn) return onConsent(s, p.proposalId, yn === 'yes' ? 'accept' : 'decline', 'utterance');
-    return unclear(s, 'Sorry — should I go ahead? Please say yes or no, or ask for an agent.');
+    return unclear(s, M.CONSENT_NUDGE[Math.min(s.ctx.unclearCount, M.CONSENT_NUDGE.length - 1)]);
   }
   if (p?.kind === 'yes_no') {
     if (/\b(check|status|did it work|worked|go through|went through)\b/i.test(text) && p.purpose === 'reconcile') return onReconcile(s);
@@ -1527,4 +1545,11 @@ export async function hangup(sessionId: string): Promise<void> {
 
 export function getContext(sessionId: string): CallContext {
   return load(sessionId).ctx;
+}
+
+/** Remember which virtual agent has the call, so a reconnect or a new browser tab resumes with the same one. */
+export function setAgentLang(sessionId: string, lang: string): void {
+  const s = load(sessionId);
+  s.ctx.agentLang = lang;
+  save(s);
 }

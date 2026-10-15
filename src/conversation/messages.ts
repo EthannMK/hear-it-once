@@ -9,7 +9,8 @@ export const GREETING_NOTICE =
 export const GREETING =
   "Thanks for calling Northstar Bank. I'm Lily, an AI assistant. You can ask for a person at any time. How can I help today?";
 
-export const CLARIFY_ISSUE = 'Just so I get this right, which of these is closest?';
+export const CLARIFY_ISSUE = "I want to be sure I help with the right thing. Is it a lost or stolen card, a charge you don't recognise, a duplicate or wrong charge, a payment that isn't showing, a fee, or a declined card?";
+export const CLARIFY_AGAIN = 'I still want to get this right. In a few words, what happened with your card or account?';
 
 export const ISSUE_CHOICES = [
   { id: 'unrecognised_transaction', label: "A charge I don't recognise" },
@@ -31,9 +32,10 @@ const ISSUE_PHRASES: Record<string, string> = {
   account_inquiry: 'your account information',
 };
 
-export function ackIssue(issueType: string): string {
-  if (issueType === 'lost_stolen_card') return "I'm sorry, that's stressful. Let's get the card blocked quickly. First I just need to check it's you.";
-  return `I can help with ${ISSUE_PHRASES[issueType] ?? ISSUE_LABELS[issueType].toLowerCase()}. I've got the details you gave me. First, a quick security check.`;
+export function ackIssue(issueType: string, alreadyVerified = false): string {
+  if (issueType === 'lost_stolen_card') return alreadyVerified ? "I'm sorry, that's stressful. Let's get the card blocked quickly." : "I'm sorry, that's stressful. Let's get the card blocked quickly. First I just need to check it's you.";
+  const what = ISSUE_PHRASES[issueType] ?? ISSUE_LABELS[issueType].toLowerCase();
+  return alreadyVerified ? `Sure, I can help with ${what}.` : `I can help with ${what}. I've got the details you gave me. First, a quick security check.`;
 }
 
 export const ASK_DOB = 'Please tell me your date of birth.';
@@ -48,10 +50,12 @@ export const VERIFIED = "Thanks, you're verified. Let me take a look.";
 export const LOCKED =
   "I'm sorry, I couldn't confirm it's you, so I can't look at or change anything on the account. I'll pass you to a colleague who can verify you another way.";
 
-export function retryVerification(step: 'identify' | 'dob' | 'otp' | 'card', remaining: number, unparsed: boolean): string {
+export function retryVerification(step: 'identify' | 'dob' | 'otp' | 'card', remaining: number, unparsed: boolean, tries = 1): string {
   if (step === 'card') {
     return unparsed
-      ? "I didn't catch the whole number. Could you read all 16 digits again, slowly?"
+      ? tries <= 1 ? "I didn't catch the whole number. Could you read all 16 digits again, slowly?"
+        : tries === 2 ? "Let's do it in small groups. Read me the first four digits and I'll tell you what I heard."
+        : "That's okay. You can type the number instead of saying it, or I can bring in a colleague. Which would you prefer?"
       : `That number doesn't match the card we have on file. Could you check the card and read it again? You have ${remaining} attempt${remaining === 1 ? '' : 's'} left.`;
   }
   if (unparsed) {
@@ -114,6 +118,11 @@ export const TRANSFER_INTRO = (reason: string) => `I'm going to connect you with
 export const SURVEY = 'Before you go, on a scale of 1 to 5, how was this call?';
 export const GOODBYE = 'Thanks for calling Northstar Bank. Take care.';
 
+/** Nudges when the caller has not said yes or no to a proposed change. Different each time, never pushy. */
+export const CONSENT_NUDGE = [
+  'Sorry, I need a yes or no before I do that. Should I go ahead?',
+  "No rush. I'll only do it if you say yes. Would you like me to go ahead, or leave it for now?",
+];
 export const CARD_ACK = 'Thanks. One moment while I check that.';
 export const CARD_TOO_MANY = (n: number) => `I heard ${n} digits, which is more than 16. Let's start again. Could you read the card number slowly, a few digits at a time?`;
 export const cardProgress = (digits: string, said: string) => {

@@ -47,6 +47,8 @@ export interface LiveSession {
 
 export interface LiveConnectOptions {
   systemInstruction: string;
+  /** Prebuilt voice for this agent; the provider default is used when absent. */
+  voice?: string;
   tools: LiveToolDecl[];
   events: LiveEvents;
 }

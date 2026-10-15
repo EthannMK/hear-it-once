@@ -182,7 +182,7 @@ export function buildPolicy(profile: PolicyConfig['profile']): PolicyConfig {
     conversation: {
       maxSilenceReprompts: 2,
       minIntentConfidence: 0.6,
-      maxIssueClarifications: 1,
+      maxIssueClarifications: 2,
       asrMinConfidence: 0.55,
       duplicateUtteranceWindowMs: 3000,
     },

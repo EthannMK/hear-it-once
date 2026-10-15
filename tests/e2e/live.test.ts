@@ -591,3 +591,87 @@ describe('spoken numbers and dates are normalised without inventing digits', () 
     expect(out.toLowerCase()).toBe(expected.toLowerCase());
   });
 });
+
+describe('virtual agents by language (Lily, Hnin, Maya)', () => {
+  /** The customer agreed to move; the outgoing agent says its line and the turn completes. */
+  async function moveTo(session: ScriptedSession, lang: string) {
+    const before = ScriptedProvider.sessions.length;
+    const answered = session.toolResponses.length;
+    session.toolCall(TOOL.switch, { language: lang });
+    const start = Date.now();
+    while (session.toolResponses.length === answered && Date.now() - start < 4000) await sleep(25);
+    session.said('Of course, I will bring in a colleague.');
+    session.turnComplete();
+    const t0 = Date.now();
+    while (ScriptedProvider.sessions.length === before && Date.now() - t0 < 4000) await sleep(25);
+    await sleep(60);
+  }
+
+  it('every call starts in English with Lily and the default voice', async () => {
+    const { session } = await connect('S01');
+    expect(session.opts.systemInstruction).toMatch(/^You are Lily,/);
+    expect(session.opts.voice).toBeUndefined();
+    expect(session.opts.systemInstruction).toMatch(/do NOT switch by yourself/);
+    expect(session.opts.tools.map((t) => t.name)).toContain(TOOL.switch);
+  });
+
+  it('moves to Hnin after the customer agreed: new voice, new name, same facts, recorded in the transcript', async () => {
+    const { client, sessionId, session } = await connect('S01');
+    await customerSaysThenTool(client, session, "There's a charge from Novaplay for $249 that I didn't make");
+    await moveTo(session, 'my');
+    const hnin = ScriptedProvider.last;
+    expect(hnin).not.toBe(session);
+    expect(session.closed).toBe(true);
+    expect(hnin.opts.voice).toBe('Kore');
+    expect(hnin.opts.systemInstruction).toMatch(/^You are Hnin,/);
+    expect(hnin.opts.systemInstruction).toMatch(/Burmese/);
+    // Carried across, so nothing has to be asked again.
+    expect(hnin.opts.systemInstruction).toMatch(/JOINING A CALL THAT IS ALREADY IN PROGRESS/);
+    expect(hnin.opts.systemInstruction).toMatch(/Already known/);
+    expect(hnin.texts.at(-1)).toMatch(/taken over/);
+    const msg = await client.waitFor((m) => m.type === 'agent');
+    expect(msg).toMatchObject({ lang: 'my', name: 'Hnin', from: 'Lily' });
+    expect(get<{ context_json: string }>('SELECT context_json FROM call_sessions WHERE id = ?', [sessionId])!.context_json).toContain('"agentLang":"my"');
+    expect(all<{ kind: string }>('SELECT kind FROM conversation_turns WHERE session_id = ?', [sessionId]).some((t) => t.kind === 'agent_switch:Hnin')).toBe(true);
+    expect(timelineTypes(sessionId)).toContain('agent.switched');
+  });
+
+  it('keeps the new agent through a dropped connection and a new browser tab', async () => {
+    const { client, sessionId, token, session } = await connect('S01');
+    await moveTo(session, 'fil');
+    expect(ScriptedProvider.last.opts.systemInstruction).toMatch(/^You are Maya,/);
+    expect(ScriptedProvider.last.opts.voice).toBe('Leda');
+    const before = ScriptedProvider.sessions.length;
+    ScriptedProvider.last.drop('network');
+    const t0 = Date.now();
+    while (ScriptedProvider.sessions.length === before && Date.now() - t0 < 6000) await sleep(50);
+    expect(ScriptedProvider.last.opts.systemInstruction).toMatch(/^You are Maya,/);
+    client.ws.close();
+    const again = await new LiveClient(sessionId, token).open();
+    const ready = await again.waitFor((m) => m.type === 'ready');
+    expect(ready.agent).toEqual({ lang: 'fil', name: 'Maya' });
+    expect(ScriptedProvider.last.opts.systemInstruction).toMatch(/^You are Maya,/);
+  });
+
+  it('can go back to Lily, and refuses a switch to the same or an unknown language', async () => {
+    const { session } = await connect('S01');
+    session.toolCall(TOOL.switch, { language: 'en' });
+    await sleep(120);
+    expect((session.toolResponses.at(-1)!.response as any).ok).toBe(false);
+    session.toolCall(TOOL.switch, { language: 'xx' });
+    await sleep(120);
+    expect((session.toolResponses.at(-1)!.response as any).ok).toBe(false);
+    await moveTo(session, 'my');
+    await moveTo(ScriptedProvider.last, 'en');
+    expect(ScriptedProvider.last.opts.systemInstruction).toMatch(/^You are Lily,/);
+    expect(ScriptedProvider.last.opts.voice).toBeUndefined();
+  });
+
+  it('the other agents keep Lily by name only where she is a team member', async () => {
+    const { session } = await connect('S01');
+    await moveTo(session, 'my');
+    const p = ScriptedProvider.last.opts.systemInstruction;
+    expect(p).toMatch(/Lily \(English, the main agent\)/);
+    expect(p).not.toMatch(/You are Lily/);
+  });
+});

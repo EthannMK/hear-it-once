@@ -91,7 +91,7 @@ export class GeminiLiveProvider implements LiveProvider {
         // Transcripts of both sides drive the on-screen conversation and consent checks.
         inputAudioTranscription: {},
         outputAudioTranscription: {},
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: env().LIVE_VOICE } } },
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice ?? env().LIVE_VOICE } } },
         // Callers pause between groups of digits. A longer silence window stops Lily cutting in mid-number.
         realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW, silenceDurationMs: 1100 } },
         ...(rich ? { sessionResumption: {}, contextWindowCompression: { slidingWindow: {} } } : {}),
