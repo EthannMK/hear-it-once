@@ -50,7 +50,9 @@ export function requireCaller(req: FastifyRequest, sessionId: string): void {
 }
 
 export async function buildApp(opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 32 * 1024, trustProxy: false });
+  const app = Fastify({ logger: opts.logger ?? false, bodyLimit: 32 * 1024, // On Cloud Run the Google front end is one trusted hop and appends the real client address, so
+    // per-client rate limits work. Anywhere else the header is not trusted.
+    trustProxy: process.env.K_SERVICE ? (_a: string, hop: number) => hop === 0 : false });
   await app.register(cookie);
   await app.register(websocket, { options: { maxPayload: 128 * 1024 } });
   await app.register(rateLimit, {
@@ -96,7 +98,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Something went wrong. No action was taken.' } });
   });
 
-  app.get('/api/health', async () => ({ status: 'ok', simulated: true, time: new Date().toISOString() }));
+  app.get('/api/health', async () => ({ status: 'ok', simulated: true, revision: process.env.K_REVISION ?? 'local', time: new Date().toISOString() }));
 
   registerCallRoutes(app);
   registerStaffRoutes(app);

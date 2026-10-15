@@ -412,7 +412,8 @@ describe('cross-scenario privacy', () => {
     await c.verify('S01');
     await c.consent();
     for (const { name } of all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'")) {
-      for (const row of all(`SELECT * FROM ${name}`)) expect(containsProhibitedCardData(JSON.stringify(row)), name + " " + JSON.stringify(row).slice(0, 400)).toBe(false);
+      for (const row of all(`SELECT * FROM ${name}`)) // ISO timestamps and 13-digit epoch milliseconds pass the Luhn check about one time in ten: not card data.
+      expect(containsProhibitedCardData(JSON.stringify(row).replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z?/g, 'TS').replace(/\b1[6-9]\d{11}\b/g, 'EPOCHMS')), name + " " + JSON.stringify(row).slice(0, 400)).toBe(false);
     }
     await c.refresh();
     expect(containsProhibitedCardData(JSON.stringify(c.view))).toBe(false);
