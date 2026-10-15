@@ -77,7 +77,8 @@ export async function crmRoute(hash) {
 function frame(activeId, ...content) {
   const rail = h('aside.crm-rail', { 'aria-label': 'Cases and customers' });
   drawRail(rail, activeId);
-  K.render('crm', h('main.crm', rail, h('div.crm-main', ...content)));
+  const back = activeId ? h('a.crm-back', { href: '#/crm' }, K.icon('arrow'), 'All cases') : null;
+  K.render('crm', h('main.crm' + (activeId ? '.has-case' : ''), rail, h('div.crm-main', back, ...content)));
 }
 
 async function drawRail(rail, activeId) {
@@ -89,7 +90,7 @@ async function drawRail(rail, activeId) {
   let t = 0;
   search.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { C.q = search.value.trim(); load(); }, 220); });
   rail.replaceChildren(h('div.crm-search', K.icon('search'), search), tabs, results,
-    h('p.crm-me', K.icon('person'), C.me?.authenticated ? `Signed in as ${String(C.me.displayName ?? '').replace(/ \(demo agent\)/, '')} · demo agent` : 'Not signed in'));
+    h('p.crm-me', K.icon('person'), C.me?.authenticated ? `Signed in as ${String(C.me.displayName ?? '').replace(/ \(demo agent\)/, '')}` : 'Not signed in'));
   async function load() {
     results.replaceChildren(h('p.small.muted.pad', 'Loading…'));
     try {
@@ -166,7 +167,7 @@ function caseView(w) {
   return [
     head,
     handoverBar(w),
-    h('div.crm-grid2', keyInfo(w), recommendation(w)),
+    h('div.crm-grid2.lead', keyInfo(w), recommendation(w)),
     summaryCard(w),
     h('div.crm-grid2', factsCard(w), tagsCard(w)),
     actionsCard(w),
@@ -204,7 +205,7 @@ async function act(btn, fn, okMsg) {
 
 function keyInfo(w) {
   const ic = { ok: 'check', warn: 'alert', bad: 'x', unknown: 'info' };
-  return h('section.card.crm-sec', h('h2', 'Key information', h('span.badge.lav', 'From bank records')),
+  return h('section.card.crm-sec', h('h2', 'Key information'),
     h('ul.keys', w.keyInfo.map((k) => h(`li.${k.state}`, h('span.k', K.icon(ic[k.state])), h('div', h('b', k.label), h('span', k.detail))))));
 }
 
@@ -227,7 +228,7 @@ function recommendation(w) {
           h('button.btn', { type: 'button', onclick: () => { C.openRec = r.kind; casePage(w.case.id, { keepScroll: true }); } }, 'Edit'),
           h('button.btn.ghost', { type: 'button', disabled: r.status === 'rejected', onclick: (e) => act(e.currentTarget, () => api(`/api/crm/cases/${w.case.id}/recommendations/${r.kind}`, { method: 'POST', body: { decision: 'reject' } }), 'Suggestion rejected.') }, 'Reject')));
   };
-  return h('section.card.crm-sec.crm-recs', h('h2', 'Suggested next step', badge('violet', 'AI suggestion'), badge('amber', 'Not done yet')),
+  return h('section.card.crm-sec.crm-recs', h('h2', 'Suggested next step', badge('amber', 'Not done yet')),
     top ? one(top, true) : h('p.muted', 'No suggestion for this case.'),
     rest.length ? h('details', h('summary', `${rest.length} more suggestion${rest.length > 1 ? 's' : ''}`), rest.map((r) => one(r, false))) : null);
 }
@@ -235,7 +236,7 @@ function recommendation(w) {
 function summaryCard(w) {
   const s = w.summary;
   const li = (items, cls, iconName, empty) => items.length ? h(`ul.list.${cls}`, items.map((x) => h('li', K.icon(iconName), h('span', x)))) : h('p.small.muted', empty);
-  return h('section.card.crm-sec', h('h2', 'Case summary', badge('violet', 'Written from recorded facts')),
+  return h('section.card.crm-sec', h('h2', 'Case summary'),
     h('p.prose', w.summaryText),
     h('div.crm-sum',
       h('div', h('span.cap', 'What the customer reported'), h('p', s.reported ? `“${s.reported}”` : h('span.muted', 'Not captured'))),
@@ -251,8 +252,8 @@ function summaryCard(w) {
 }
 
 function factsCard(w) {
-  return h('section.card.crm-sec', h('h2', 'What we know', badge('lav', 'Captured during the call')),
-    h('p.small.muted', 'Shows where each detail came from. “Customer said” has not been checked by any bank system.'),
+  return h('section.card.crm-sec', h('h2', 'What we know'),
+    h('p.small.muted', '“Customer said” means no bank system has checked it yet.'),
     h('table.crm-facts', h('thead', h('tr', h('th', 'Detail'), h('th', 'Value'), h('th', 'Status'))),
       h('tbody', w.facts.map((f) => h('tr',
         h('th', { scope: 'row' }, f.label),
@@ -287,12 +288,12 @@ function tagsCard(w) {
     h('p.small.muted', `Priority rule: ${ai.priorityReason}${ai.sentiment ? ` · Customer mood: ${ai.sentiment} (indicative only, never used to act)` : ''}`),
     h('label.fld.wide', h('span', 'Notes'), notes),
     h('div.row3', h('button.btn.dark', { type: 'submit' }, 'Save changes'), w.tags.editedBy ? h('span.small.muted', `Last changed by ${w.tags.editedBy} · ${fmtFull(w.tags.editedAt)}`) : null));
-  return h('section.card.crm-sec', h('h2', 'Tags and status', badge('lav', 'Set by rules, editable')), form);
+  return h('section.card.crm-sec', h('h2', 'Tags and status'), form);
 }
 
 function actionsCard(w) {
   if (!w.actions.length) return null;
-  return h('section.card.crm-sec', h('h2', 'Account actions', badge('lav', 'Status from the bank systems')),
+  return h('section.card.crm-sec', h('h2', 'Account actions'),
     h('ul.crm-acts', w.actions.map((a) => h('li',
       h('div', h('b', a.label), h('span', a.reference ? `Ref ${a.reference}` : a.error ?? '')),
       badge(ACT[a.state] ?? 'lav', a.stateLabel),
@@ -369,7 +370,7 @@ async function customerPage(id) {
     h('div.crm-grid2',
       h('section.card.crm-sec', h('h2', 'Cards'), h('ul.crm-acts', cu.cards.map((k) => h('li', h('div', h('b', `${k.network} ${k.product}`), h('span', `${k.masked} · ${k.holder}`)), badge(k.status === 'active' ? 'mint' : 'coral', k.status + (k.statusReason ? ` · ${k.statusReason}` : '')))))),
       h('section.card.crm-sec', h('h2', `Cases (${p.cases.length})`), p.cases.length ? h('div.crm-list.flat', p.cases.map(caseItem(null))) : h('p.small.muted', 'No cases yet.'))),
-    h('section.card.crm-sec', h('h2', 'Recent transactions', badge('lav', 'Bank records')),
+    h('section.card.crm-sec', h('h2', 'Recent transactions'),
       h('table.crm-facts', h('thead', h('tr', h('th', 'Date'), h('th', 'Merchant'), h('th', 'Amount'), h('th', 'Status'))),
         h('tbody', p.transactions.map((t) => h('tr', h('td', fmtWhen(t.at)), h('td', t.merchant, t.disputed ? badge('amber', 'Disputed') : null, h('div.small.muted', `${t.kind}${t.card ? ` · ${t.card}` : ''}`)), h('td.mono', t.amount), h('td', t.status)))))),
     p.tickets.length ? h('section.card.crm-sec', h('h2', 'Tickets'), h('ul.crm-tk', p.tickets.map((t) => h('li', h('div.rt', h('b', `${t.typeLabel} · ${t.id}`), badge(t.status === 'closed' || t.status === 'resolved' ? 'mint' : 'amber', t.status.replace('_', ' ')), h('span.small.muted', fmtFull(t.createdAt))), h('p', t.reason), h('a', { href: `#/crm/case/${encodeURIComponent(t.caseId)}` }, 'Open the case'))))) : null);

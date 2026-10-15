@@ -496,3 +496,87 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .crm-dlg h2 { font: 600 1.25rem var(--display, inherit); }
 .crm-dlg p { color: var(--muted); }
 .crm-dlg textarea { width: 100%; border-radius: 14px; border: 1px solid var(--line, #d9d6e8); padding: 10px 12px; font: inherit; }
+
+/* ================================================================ UX refinement
+   Same components, calmer hierarchy, readable at phone and desktop widths. */
+:where(a, button, select, input, textarea, summary):focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+
+/* Test customer: one collapsible box. Open on desktop, closed on phones so the page starts with Lily. */
+.td { gap: 0; padding: 14px 16px; }
+.tdbox > summary { display: flex; align-items: center; gap: 10px; list-style: none; cursor: pointer; min-height: 40px; }
+.tdbox > summary::-webkit-details-marker { display: none; }
+.tdbox > summary::after { content: ''; margin-left: auto; width: 8px; height: 8px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg); transition: transform 0.15s; }
+.tdbox[open] > summary::after { transform: rotate(-135deg); }
+.tdbox > summary svg.i { color: var(--violet); flex: none; }
+.tdbox .tt { display: grid; gap: 1px; min-width: 0; }
+.tdbox .tt b { font: 600 1rem var(--sans); color: var(--aub); }
+.tdbox .tt small { color: var(--muted); font-size: 0.78rem; }
+.tdbox[open] .tt small { display: none; }
+.tdbox > :not(summary) { margin-top: 12px; }
+.td .how { margin-top: 10px; }
+
+/* Typing mode needs no voice dial: keep the page for the conversation. */
+.stage.typing { padding: 14px 18px; gap: 6px; }
+.stage.typing canvas, .stage.typing .seg { display: none; }
+
+/* Case list tabs as a tidy 2 x 2 */
+.crm-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; background: var(--ivory); padding: 4px; border-radius: 14px; }
+.crm-tabs button { text-align: center; padding: 7px 8px; border-radius: 10px; }
+.crm-tabs button[aria-selected='true'] { background: var(--white); box-shadow: 0 1px 2px rgba(30, 24, 60, 0.12); }
+.fields { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.crm-facts .badge { white-space: nowrap; }
+.stagebar span { font-size: 0.64rem; }
+.crm-item .badge { font-size: 0.62rem; }
+.crm-back { display: none; align-items: center; gap: 6px; min-height: 44px; font-weight: 600; color: var(--violet-d); text-decoration: none; }
+.crm-back svg.i { transform: rotate(180deg); }
+
+@media (max-width: 900px) {
+  /* Order on a phone: Lily first, test details second. In a call the test box is a slim bar on top. */
+  .judge > .td { order: 2; }
+  .judge.in-call > .td { order: -1; padding: 6px 12px; }
+  .judge { gap: 14px; padding: 12px 16px 28px; }
+  .hero { gap: 6px; padding-top: 4px; }
+  .pod-wrap { min-height: 190px; }
+  .pod { width: min(180px, 50vw); }
+  .float { display: none; }
+  .hero h1 { margin: 6px 0 10px; }
+  .hero .lede { font-size: 1rem; margin-bottom: 18px; }
+  .connect { width: 100%; }
+  .stage canvas { width: min(190px, 52vw); height: min(190px, 52vw); }
+  .tx-list { max-height: 48vh; min-height: 160px; }
+  /* Call controls stay in reach while the transcript scrolls. */
+  .controls { position: sticky; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); z-index: 20; box-shadow: 0 8px 28px rgba(30, 24, 60, 0.35); flex-wrap: nowrap; gap: 8px; padding: 8px; }
+  .controls button { min-height: 44px; flex: 0 0 auto; }
+  .controls .human, .controls .endc { flex: 1 1 auto; justify-content: center; }
+  .btn, .copy, .ptabs button, .crm-tabs button { min-height: 40px; }
+}
+@media (max-width: 560px) {
+  .controls .mute .lbl, .controls .cc .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .controls .human { font-size: 0.8rem; padding: 9px 10px; }
+  /* Header: brand and language on one row, screens below. */
+  .top { flex-wrap: wrap; row-gap: 8px; }
+  .top .bank { display: none; }
+  .top .grow { flex: 1; }
+  .top .brand { order: 1; } .top .grow { order: 2; } .top .langwrap { order: 3; }
+  .top .tabs { order: 4; width: 100%; display: grid; grid-template-columns: 1fr 1fr; text-align: center; }
+  .top .tabs a { padding: 9px 8px; }
+}
+@media (max-width: 760px) {
+  /* Agent CRM on a phone: the list is the home screen, a case replaces it, and "All cases" brings it back. */
+  .crm { padding: 12px 16px 32px; gap: 14px; }
+  .crm-rail { max-height: none; }
+  .crm-list { overflow: visible; max-height: none; }
+  .crm.has-case .crm-rail { display: none; }
+  .crm-back { display: inline-flex; }
+  .crm-empty { padding: 20px; }
+  .crm-empty h1 { font-size: 1.6rem; }
+  .crm-empty p { display: none; }
+  .crm-grid2.lead > :nth-child(2) { order: -1; }
+  .crm-sec { padding: 16px; }
+  /* Fact rows become small cards instead of a squeezed three-column table. */
+  .crm-facts thead { display: none; }
+  .crm-facts, .crm-facts tbody, .crm-facts tr, .crm-facts th, .crm-facts td { display: block; width: 100%; }
+  .crm-facts tr { padding: 10px 0; border-top: 1px solid var(--hair); }
+  .crm-facts th, .crm-facts td { border: 0; padding: 2px 0; }
+  .crm-facts tbody th { width: auto; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+}
