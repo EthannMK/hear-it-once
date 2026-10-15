@@ -25,6 +25,14 @@ gcloud run deploy hear-it-once --source . --region=$REGION \
 
 **Live voice (Lily):** also enable `aiplatform.googleapis.com`, grant the service account `roles/aiplatform.user`, add `--timeout=3600 --session-affinity` and the `LIVE_*`/`GOOGLE_CLOUD_*` variables — see [LILY_VOICE.md](LILY_VOICE.md).
 
+### Keeping transcripts, cases and call memory across restarts
+
+The database is one SQLite file on the container's local disk, and Cloud Run discards that disk on every restart and every new revision. Set `HIO_BACKUP_BUCKET` and the app saves a consistent copy of the database to that Cloud Storage bucket a few seconds after anything changes (and once more on shutdown), then restores the newest copy on start. Transcripts, Lily's saved facts for each call, cases, tickets and agent edits all live in that file, so they survive.
+
+One-time setup, then deploy with `--min-instances=1 --no-cpu-throttling` and the `HIO_BACKUP_BUCKET` variable (see the deploy command in the README). The service account needs `roles/storage.objectAdmin` on the bucket only.
+
+To start again with fresh demo data, delete the saved copy: `gcloud storage rm gs://BUCKET/hear-it-once/hio.db`. Limits: a crash (not a normal shutdown) can lose the last few seconds of writes, and the card number a caller is still reading out is held in memory only and is never saved. Locally, `HIO_BACKUP_DIR=./backup` does the same with a folder. Transcripts are kept for `TRANSCRIPT_RETENTION_DAYS` (default 365); the illustrative history from the seed is never purged.
+
 Why `--max-instances=1`: the prototype keeps state in one SQLite file with in-process locking, so it must run as a single instance. `--min-instances=1` keeps that instance (and its demo data) alive between visits. Data lives in the container's `/tmp`, so it **resets on every new deploy or instance restart** — the app re-seeds the 18 scenarios and illustrative history automatically on start. That suits a demo; a persistent deployment needs Cloud SQL (see "Moving beyond the prototype").
 
 Continuous deployment from GitHub: Cloud Run console → *hear-it-once* → **Set up continuous deployment** → GitHub → pick the repo and `main` → build type *Dockerfile*. Every push to `main` then rebuilds and redeploys.
