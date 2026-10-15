@@ -136,6 +136,14 @@ function demoMini() {
     h('ul', S.cards.map((x) => h('li', h('b', x.name), h('span.pan', group4(x.cardNumber)), one(x.cardNumber, `${x.name} card number`), h('span.sit', x.situation), h('span.nrc', `NRC last 4: ${x.nrcLast4}`), one(x.nrcLast4, `${x.name} NRC digits`)))));
 }
 
+/** The three things a judge does, read beside the animation rather than below the page. */
+function steps() {
+  return h('div.flow',
+    h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. For card matters Lily asks for a card number from the table.')),
+    h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each step as it happens: checks, decisions, actions and handover.')),
+    h('div.card', h('b', h('span', '3'), 'Agent CRM'), h('p', 'When you end the call, you land in the agent’s case workspace: summary, verified facts, suggested next step and tickets.')));
+}
+
 function drawHome() {
   const ready = !!S.status?.available;
   const bars = h('div.bars', { 'aria-hidden': 'true' }, [14, 26, 38, 48, 34, 44, 24, 16].map((n, i) => h('i', { style: `height:${n}px;--d:${i * 90}ms` })));
@@ -153,16 +161,13 @@ function drawHome() {
             h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
             h('p', icon('info'), h('span', 'You are speaking with an AI. Your browser will ask for the microphone and no audio is stored. No microphone? Start anyway and type.')))),
         h('div.pod-wrap',
-          h('div.pod', h('div', bars, h('div.mic', icon('wave')), h('h3', 'Lily'), h(`div.ready${ready ? '' : '.off'}`, ready ? 'Ready to listen' : 'Typing only'))),
-          h('div.float.f1', icon('lock'), 'Checks you before any account detail'),
-          h('div.float.f2', icon('headset'), 'Human handover any time'))),
+          // The pod is the voice: a ring travelling round the wave while it waits.
+          h('div.pod', h('span.spin', { 'aria-hidden': 'true' }), h('div', bars, h('div.mic', icon('wave')))),
+          steps())),
       !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
       demoTable(),
       h('div.card.asks', h('span.cap', 'Or just ask'), h('div.chips', ['Where is your nearest branch?', 'How do I make a deposit?', 'What is APR and how is it calculated?', 'How do I spot a card scam?', 'I want to speak to a person', 'How are you today?'].map((x) => h('span', `“${x}”`)))),
-      h('div.flow',
-        h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. For card matters Lily asks for a card number from the table.')),
-        h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each step as it happens: checks, decisions, actions and handover.')),
-        h('div.card', h('b', h('span', '3'), 'Agent CRM'), h('p', 'When you end the call, you land in the agent’s case workspace: summary, verified facts, suggested next step and tickets.'))))));
+      )));
 }
 
 /* ------------------------------------------------------------------ connecting */
