@@ -20,6 +20,7 @@ import { registerStaffRoutes } from './routes/staff.ts';
 import { registerAdminRoutes } from './routes/admin.ts';
 import { registerDemoRoutes } from './routes/demo.ts';
 import { registerLiveRoutes } from './routes/live.ts';
+import { registerCrmRoutes } from './routes/crm.ts';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -102,6 +103,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   registerAdminRoutes(app);
   registerDemoRoutes(app);
   registerLiveRoutes(app);
+  registerCrmRoutes(app);
 
   const publicDir = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
   await app.register(fastifyStatic, { root: publicDir, index: ['index.html'], cacheControl: false });
