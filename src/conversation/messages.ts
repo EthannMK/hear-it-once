@@ -164,3 +164,5 @@ export const CONTACT_SUBMITTED = (kind: string) => `Done. I've sent your ${kind}
 export const CONTACT_HANDOFF = (kind: string, why: string) => `Thank you. I can't change your ${kind} myself, and because ${why}, I'm passing you to a specialist who will review it with you. Everything you've told me is saved, and nothing on your account has changed yet.`;
 
 export const THIRD_PARTY = "Thank you for telling me. I can only discuss this account with the account holder, so I won't share or change anything. I'm passing you to a specialist who can explain the right way to do this.";
+
+export const INFO_FOLLOWUP = 'Is there anything else you would like to know?';

@@ -41,6 +41,7 @@ import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
 import { maskPhone } from '../lib/redact.ts';
 import { HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate, formatMoney } from './format.ts';
 import { createTicket } from '../crm/crm.ts';
+import { answerFromInfo, NOT_FOUND } from '../kb/bank-info.ts';
 import { THIRD_PARTY, assessContactRisk, checkNationalId, contactChangeKind, parseNationalIdLast4, READ_ALOUD, STEP_UP_MAX_ATTEMPTS, type Assurance, type ContactKind, type Risk } from './security.ts';
 import { sideTalk } from './sidetalk.ts';
 import { normaliseSpoken } from '../live/speech.ts';
@@ -453,7 +454,7 @@ async function dispatch(s: Session, input: CallInput): Promise<void> {
   switch (input.kind) {
     case 'hangup':
       event(s, 'customer_hangup');
-      return endCall(s, c.issue ? undefined : 'abandoned');
+      return endCall(s, c.issue || get("SELECT 1 FROM kb_references WHERE session_id = ? AND article_id LIKE 'INFO-%'", [s.id]) ? undefined : 'abandoned');
     case 'interrupt':
       event(s, 'barge_in', { stage: c.stage });
       return;
@@ -621,6 +622,7 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
         // A follow-up that only names a shop or an amount, after an account enquiry, is another charge check.
         if (!cls.issueType && c.wf?.name === 'account_inquiry' && (cls.slots.amountMinor != null || cls.slots.merchantHint)) return startSecondaryTopic(s, { ...cls, issueType: 'account_inquiry', confidence: 0.8 }, text);
       }
+      if (yn === null && tryBankInfo(s, text, { allowNotFound: true })) return;
       if (yn === 'yes' || (yn === null && text.length > 12)) return handoff(s, 'customer_accepted_offer', 'additional request after resolution', "I'll connect you to an agent for that — they'll see everything from this call, so you won't need to repeat it.");
       return goSurvey(s);
     }
@@ -633,10 +635,43 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
 
 /* ------------------------------------------------------------------------- issue capture */
 
+
+/* ------------------------------------------------------------------------- general bank information */
+
+const BANKING_WORDS = /\b(my (card|account|payment|fee|charge|statement)|charge|charged|transaction|stolen|lost|dispute|fraud|decline|declined|refund|late fee)\b/i;
+const QUESTION_START = /^(what|how|where|when|why|which|who|do you|does|can i|can you|could i|is there|are there|will you|i want to|i would like to|i'd like to|i need to)\b/i;
+
+/**
+ * A general question about the bank (branches, deposits, rates, how things work), answered only from
+ * the bank information. Returns true when the call was answered here. A question that sounds like
+ * general banking but is not covered gets an honest "I don't have that" instead of a guess or a transfer.
+ */
+function tryBankInfo(s: Session, text: string, opts: { allowNotFound: boolean }): boolean {
+  const c = s.ctx;
+  const found = answerFromInfo(text);
+  if (found) {
+    event(s, 'bank_info_answered', { topic: found.entry.id });
+    recordKbReference(s.id, { article: { id: found.entry.id } as never, score: 3, reason: 'general bank information' }, redactText(text), { supportsNextStep: false, agentReview: false });
+    tl(s, { type: 'kb.info', stage: 'explain', title: `Answered from bank information: ${found.entry.topic}`, detail: 'General information, not specific to this customer.', status: 'ok', source: 'bank information (demo)' });
+    say(s, `${found.reply} ${M.INFO_FOLLOWUP}`);
+    return true;
+  }
+  if (opts.allowNotFound && !BANKING_WORDS.test(text) && QUESTION_START.test(text.trim()) && text.trim().length > 15) {
+    event(s, 'bank_info_not_found', {});
+    tl(s, { type: 'kb.info', stage: 'explain', title: 'No matching bank information', detail: 'The assistant says it does not have this rather than guessing.', status: 'warn', source: 'bank information (demo)' });
+    say(s, NOT_FOUND);
+    return true;
+  }
+  return false;
+}
+
 async function onIssueText(s: Session, text: string, distressed: boolean): Promise<void> {
   const c = s.ctx;
   const combined = c.issue && c.stage === 'clarifying_issue' ? `${c.issue.statement} ${redactText(text)}` : redactText(text);
   const cls = await classify(s, combined);
+  // General bank questions are answered from the bank information without starting a case.
+  if (!cls.issueType && !c.issue && tryBankInfo(s, text, { allowNotFound: true })) { c.unclearCount = 0; return; }
+  if (cls.unsupportedTopic && !cls.issueType && !c.issue && tryBankInfo(s, text, { allowNotFound: false })) return;
   const min = policy().conversation.minIntentConfidence;
   const clarifications = c.issue?.clarifications ?? 0;
   c.issue = { ...cls, statement: combined, slots: mergeSlots(c.issue?.slots, cls.slots), clarifications };
@@ -1505,7 +1540,7 @@ async function onSilence(s: Session): Promise<void> {
   if (c.stage === 'handoff') return;
   if (c.silenceCount > policy().conversation.maxSilenceReprompts) {
     say(s, `I haven't heard anything for a while, so I'll end the call now.${c.caseId ? ` Everything is saved on case ${c.caseId}.` : ''} Please call back any time.`);
-    return endCall(s, c.issue ? undefined : 'abandoned');
+    return endCall(s, c.issue || get("SELECT 1 FROM kb_references WHERE session_id = ? AND article_id LIKE 'INFO-%'", [s.id]) ? undefined : 'abandoned');
   }
   say(s, `Are you still there? ${c.lastPrompt}`);
 }
@@ -1729,6 +1764,13 @@ async function onSurvey(s: Session, score: number | null): Promise<void> {
   return endCall(s);
 }
 
+/** A short, factual summary for calls that never opened a case (general questions): what was asked and how it ended. */
+function writeCallSummary(s: Session): void {
+  const asked = all<{ text: string }>("SELECT text FROM conversation_turns WHERE session_id = ? AND speaker = 'customer' AND sensitive_redacted = 0 ORDER BY seq", [s.id]).map((r) => r.text).filter((x) => x.trim().length > 3).slice(0, 6);
+  const topics = [...new Set(all<{ article_id: string }>("SELECT article_id FROM kb_references WHERE session_id = ? AND article_id LIKE 'INFO-%'", [s.id]).map((r) => r.article_id.replace('INFO-', '')))];
+  tl(s, { type: 'summary.generated', stage: 'record', title: 'Call summary', detail: `${asked.length ? `The caller asked: ${asked.map((a) => `"${a.slice(0, 90)}"`).join('; ')}. ` : 'No questions were captured. '}${topics.length ? `Answered from bank information: ${topics.join(', ')}.` : 'No bank information was needed.'} No case was opened.`, status: 'ok', source: 'assistant' });
+}
+
 export async function endCall(s: Session, forced?: 'abandoned' | 'ended_unresolved' | 'fallback'): Promise<void> {
   const c = s.ctx;
   // Ending is idempotent: a repeated click or event must not create a second record or re-run post-call work.
@@ -1741,7 +1783,7 @@ export async function endCall(s: Session, forced?: 'abandoned' | 'ended_unresolv
     else if (handedOff) outcome = 'handed_off';
     else if (row.verification_status === 'failed') outcome = 'verification_failed';
     else if (row.resolution_status === 'resolved' || row.resolution_status === 'informational') outcome = 'resolved';
-    else if (!c.issue?.issueType) outcome = 'abandoned';
+    else if (!c.issue?.issueType) outcome = get("SELECT 1 FROM kb_references WHERE session_id = ? AND article_id LIKE 'INFO-%'", [s.id]) ? 'resolved' : 'abandoned';
     else outcome = 'ended_unresolved';
   }
   // An unresolved operation means the call cannot count as resolved.
@@ -1756,6 +1798,7 @@ export async function endCall(s: Session, forced?: 'abandoned' | 'ended_unresolv
     regenerateSummary(c.caseId);
   }
   event(s, 'call_ended', { outcome });
+  if (!c.caseId) writeCallSummary(s);
   if (c.caseId) tl(s, { type: 'summary.generated', stage: 'record', title: 'Final case summary generated', detail: 'Separates what the customer reported, what systems confirmed, and what actions actually completed.', status: 'ok', source: 'case management', ref: c.caseId });
   refreshTags(s, 'resolve');
   tl(s, { type: 'call.closed', stage: outcome === 'handed_off' || outcome === 'fallback' ? 'handoff' : 'resolve', title: `Call closed — ${String(outcome).replace(/_/g, ' ')}`, status: outcome === 'resolved' ? 'ok' : outcome === 'abandoned' ? 'info' : 'warn', source: 'conversation', ref: c.caseId ?? s.correlationId });

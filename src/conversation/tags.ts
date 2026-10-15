@@ -3,7 +3,8 @@
  * Urgency follows explicit demo rules. Sentiment is an INDICATIVE signal from the caller's own
  * words (keyword rules), never presented as a fact about the customer.
  */
-import { get, parseJson } from '../db/db.ts';
+import { INFO } from '../kb/bank-info.ts';
+import { all, get, parseJson } from '../db/db.ts';
 import { ISSUE_LABELS } from './format.ts';
 
 export interface CallTags {
@@ -42,6 +43,8 @@ export function sentimentFrom(text: string, prev: CallTags['sentiment'] | undefi
   return prev ? null : { sentiment: 'neutral', basis: 'no strong cue in the caller’s words' };
 }
 
+const INFO_TOPIC: Record<string, string> = Object.fromEntries(INFO.map((e) => [e.id, e.topic.toLowerCase()]));
+
 export function computeTags(sessionId: string, ctx: { issue?: { issueType: string | null; confidence: number } | null; sentiment?: { sentiment: CallTags['sentiment']; basis: string } | null; flags?: string[]; secondary?: string[] }): CallTags {
   const s = get<{ verification_status: string; outcome: string | null; ended_at: string | null; issue_type: string | null }>(
     'SELECT verification_status, outcome, ended_at, issue_type FROM call_sessions WHERE id = ?',
@@ -54,6 +57,7 @@ export function computeTags(sessionId: string, ctx: { issue?: { issueType: strin
   const fraudAlert = flags.includes('fraud_alert') || ctx.flags?.includes('fraud_alert');
   // The first captured topic is the primary intent; later topics are listed as secondary.
   const issue = s.issue_type ?? ctx.issue?.issueType ?? null;
+  const info = [...new Set(all<{ article_id: string }>("SELECT article_id FROM kb_references WHERE session_id = ? AND article_id LIKE 'INFO-%' ORDER BY id", [sessionId]).map((r) => INFO_TOPIC[r.article_id] ?? 'bank information'))];
   const secondary = [...new Set(ctx.secondary ?? [])].filter((x) => x !== issue).map((x) => ({ intent: x, label: ISSUE_LABELS[x] }));
 
   let urgency: CallTags['urgency'] = 'normal';
@@ -71,10 +75,10 @@ export function computeTags(sessionId: string, ctx: { issue?: { issueType: strin
 
   return {
     intent: issue,
-    intentLabel: issue ? ISSUE_LABELS[issue] : 'Not yet identified',
+    intentLabel: issue ? ISSUE_LABELS[issue] : info.length ? `General enquiry: ${info.join(', ')}` : 'Not yet identified',
     intentConfidence: ctx.issue?.confidence ?? null,
     secondaryIntents: secondary,
-    category: issue ? CATEGORY[issue] : '—',
+    category: issue ? CATEGORY[issue] : info.length ? 'General' : '—',
     urgency,
     urgencyReason,
     identity,

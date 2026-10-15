@@ -602,3 +602,12 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .langs small { color: var(--muted); font-size: 0.78rem; }
 .langnote { color: var(--muted); font-size: 0.86rem; margin: 0 0 16px; }
 .ch h1 .flag { margin-left: 10px; }
+
+/* Test guide panel */
+.td .how { display: grid; gap: 2px; }
+.td .how p { margin: 0; }
+.td .say { display: grid; gap: 2px; margin: 0; background: var(--white); border: 1px dashed var(--hair-2); border-radius: 12px; padding: 8px 12px; }
+.td .say span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.td .say q { font: 500 1rem var(--serif); color: var(--aub); quotes: none; }
+.td .dnote { grid-column: 1 / -1; color: var(--muted); font-size: 0.76rem; }
+.td details.more > summary { cursor: pointer; font-size: 0.84rem; color: var(--violet); min-height: 32px; display: flex; align-items: center; }

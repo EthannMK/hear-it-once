@@ -6,6 +6,7 @@
  */
 import { all, run } from '../db/db.ts';
 import { nowIso } from '../lib/clock.ts';
+import { INFO_ARTICLES, searchBankInfo, answerFromInfo } from './bank-info.ts';
 
 export interface KbArticle {
   id: string;
@@ -123,9 +124,17 @@ export const mockKnowledgeBase: KnowledgeBaseAdapter = {
       }
       return { article: a, score, reason: why.join('; ') };
     });
-    return scored.filter((s) => s.score >= 2).sort((a, b) => b.score - a.score).slice(0, 2);
+    const out = scored.filter((s) => s.score >= 2).sort((a, b) => b.score - a.score).slice(0, 2);
+    // General bank information (branches, deposits, rates, how-tos) when the question is not about the customer's own case.
+    const info = searchBankInfo(text);
+    if (info && !out.length) {
+      const art = INFO_ARTICLES.find((a) => a.id === info.id)!;
+      const full = answerFromInfo(text);
+      out.push({ article: full ? { ...art, excerpt: full.reply } : art, score: 3, reason: 'general bank information' });
+    }
+    return out;
   },
-  get: (id) => KB_ARTICLES.find((a) => a.id === id) ?? null,
+  get: (id) => KB_ARTICLES.find((a) => a.id === id) ?? INFO_ARTICLES.find((a) => a.id === id) ?? null,
 };
 
 let kb: KnowledgeBaseAdapter = mockKnowledgeBase;
@@ -147,7 +156,7 @@ export function kbReferencesFor(sessionId: string) {
     'SELECT * FROM kb_references WHERE session_id = ? ORDER BY score DESC, id',
     [sessionId],
   ).map((r) => {
-    const a = KB_ARTICLES.find((x) => x.id === r.article_id);
+    const a = KB_ARTICLES.find((x) => x.id === r.article_id) ?? INFO_ARTICLES.find((x) => x.id === r.article_id);
     return {
       id: r.article_id,
       title: a?.title ?? r.article_id,

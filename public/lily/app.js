@@ -116,25 +116,27 @@ function testPanel(locked) {
   const copy = (v, label) => h('button.copy', { type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(v); toast(`${label} copied`); } catch { toast('Copy is not available here.'); } } }, 'Copy');
   S.tdOpen ??= !!window.matchMedia?.('(min-width: 901px)').matches;
   const box = h('details.tdbox', { ...(S.tdOpen ? { open: '' } : {}), ontoggle: (e) => { S.tdOpen = e.currentTarget.open; } },
-    h('summary', icon('flask'), h('span.tt', h('b', 'Test customer'), c ? h('small', `${c.name} · card number and details`) : null)),
-    h('p.how', 'Fictional details for testing. Read the card number to Lily when she asks. Try a wrong one first to see her retry.'),
+    h('summary', icon('flask'), h('span.tt', h('b', 'Test guide'), h('small', c ? `Card scenarios use ${c.name}` : 'How to test'))),
+    h('div.how', h('b', 'Ask anything'), h('p', 'Chat freely, use your own name, ask about branches, deposits, rates or hours. If Lily does not have the answer she says so.')),
+    h('div.how', h('b', 'Test a card scenario'), h('p', 'Pick a test customer, say the line below, then read Lily the card number when she asks.')),
     h('div.ptabs', { role: 'radiogroup', 'aria-label': 'Choose a test customer' }, S.cards.map((x) =>
       h('button', { type: 'button', role: 'radio', 'aria-checked': String(x.id === S.selected), disabled: locked, onclick: () => { S.selected = x.id; drawHome(); } }, x.name.split(' ')[0]))),
     !c ? h('p.small.muted', S.loadError ?? 'No test customers are available.') : [
       h('div.who', h('b', c.name), h(`span.chip${c.cardStatus === 'active' ? '.ok' : '.warn'}`, `Card ${c.cardStatus}`)),
-      h('p.blurb', c.blurb),
+      h('p.say', h('span', 'Say'), h('q', c.tryPhrase ?? c.blurb)),
       h('dl',
-        h('div', h('dt', 'Card number to read out'), h('dd', h('span.pan', group4(c.cardNumber)), copy(c.cardNumber, 'Card number'))),
-        h('div', h('dt', 'Caller ID'), h('dd.mono', c.phone)),
-        h('div', h('dt', 'Account reference'), h('dd.mono', c.accountRef, ' ', copy(c.accountRef, 'Account reference')))),
+        h('div', h('dt', 'Card number'), h('dd', h('span.pan', group4(c.cardNumber)), copy(c.cardNumber, 'Card number'))),
+        c.nrcLast4 ? h('div', h('dt', 'NRC last 4 digits'), h('dd', h('span.pan', c.nrcLast4), copy(c.nrcLast4, 'NRC digits')), h('small.dnote', 'Asked only for address changes or reading out charges.')) : null),
       c.restrictions?.length ? h('div.lockn', c.restrictions.join(' · ')) : null,
-      h('details', h('summary', `What the bank's systems hold (${(c.recentTransactions?.length ?? 0) + (c.declines?.length ?? 0)} records)`),
+      h('details.more', h('summary', 'More about this customer'),
+        h('dl', h('div', h('dt', 'Caller ID'), h('dd.mono', c.phone)), h('div', h('dt', 'Account reference'), h('dd.mono', c.accountRef))),
+        h('p.small.muted', `What the bank's systems hold (${(c.recentTransactions?.length ?? 0) + (c.declines?.length ?? 0)} records)`),
         h('ul.tx', (c.recentTransactions ?? []).map((x) => h('li', h('span.m', x.merchant), h('span.mono', x.amount), h('span.s', `${x.at}${x.kind === 'fee' ? ' · fee' : ''}${x.status && x.status !== 'posted' ? ' · ' + x.status : ''}`))),
           (c.declines ?? []).map((d) => h('li', h('span.m', `Declined: ${d.merchant}`), h('span.mono', d.amount), h('span.s', `${d.at} · ${d.reason}`))))),
     ],
     locked ? h('p.lockn', 'The test customer is fixed during a call.') : null,
-    h('p.fine', `${S.bank} is a fictional bank. Never enter real card details.`));
-  return h('aside.td', { 'aria-label': 'Test customer' }, box);
+    h('p.fine', `${S.bank} is fictional. Never enter real card details.`));
+  return h('aside.td', { 'aria-label': 'Test guide' }, box);
 }
 
 function drawHome() {
@@ -160,7 +162,7 @@ function drawHome() {
           h('div.float.f1', icon('lock'), 'Verifies you before any account detail'),
           h('div.float.f2', icon('headset'), 'Human handover any time'))),
       !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
-      h('div.card.asks', h('span.cap', 'Things to try'), h('div.chips', [...(tList('ex') ?? []), 'How are you today?'].map((x) => h('span', `“${x}”`)))),
+      h('div.card.asks', h('span.cap', 'Things to try'), h('div.chips', [...(tList('ex') ?? []), 'Where is your nearest branch?', 'How do I make a deposit?'].map((x) => h('span', `“${x}”`)))),
       h('div.flow',
         h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. Lily verifies you with the test card number.')),
         h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each step as it happens: checks, decisions, actions and handover.')),
@@ -457,7 +459,6 @@ function callScreen(c) {
     const cc = v.cardCapture;
     if (cc) bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.cap', 'What Lily heard'), h('b.num', group4(String(cc.digits ?? '').replace(/ /g, '').padEnd(16, '•'))), h('p', cc.confirming ? 'All 16 digits heard. Say “yes” if this is right, or say the correct digits.' : `${cc.count ?? 0} of 16 digits. Keep reading the card number from the test-data panel.`)));
     if (v.demoDevice) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Test passcode: '), 'read this to Lily'), h('b.mono', v.demoDevice.code)));
-    if (v.testNrc) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Test NRC digits: '), 'read these to Lily'), h('b.mono', v.testNrc)));
     extras.replaceChildren(...bits);
     // Consent (buttons work in typing mode; in voice mode just say yes or no).
     if (v.proposal && v.pending?.kind === 'consent') {

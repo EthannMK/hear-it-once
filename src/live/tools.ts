@@ -147,8 +147,8 @@ async function dispatch(name: string, args: Record<string, unknown>, c: ToolCont
       const results = await knowledgeBase().search({ issueType: ctx.issue?.issueType ?? null, text: query, context: [] });
       for (const r of results) recordKbReference(c.sessionId, r, query, { supportsNextStep: false, agentReview: false });
       emitTimeline(c.sessionId, { type: 'kb.result', stage: 'investigate', title: results.length ? `Found ${results.length} guidance article${results.length > 1 ? 's' : ''}` : 'No relevant guidance found', detail: results.map((r) => r.article.title).join('; ') || null, status: results.length ? 'ok' : 'warn', source: 'knowledge base' });
-      if (!results.length) return { ok: true, found: false, instruction: 'There is no guidance on this. Say so plainly, do not guess, and offer a person.' };
-      return { ok: true, found: true, articles: results.map((r) => ({ title: r.article.title, summary: r.article.excerpt, steps: r.article.steps })), instruction: 'This is general guidance, not a decision about the customer\'s account and not permission to act. Explain it simply.' };
+      if (!results.length) return { ok: true, found: false, instruction: "The bank information does not cover this. Say so plainly and warmly, for example 'I don't have that in the information I'm given, and I'd rather not guess.' Never invent branches, rates, hours, fees or products. Offer to connect an agent, or to help with a card, charge, payment or fee." };
+      return { ok: true, found: true, articles: results.map((r) => ({ title: r.article.title, summary: r.article.excerpt, steps: r.article.steps })), instruction: 'Answer in your own natural words using only what these articles say; add nothing else about the bank. This is general information, not a decision about the customer\'s account and not permission to act. Explain it simply.' };
     }
     default:
       throw new AppError('VALIDATION_FAILED', 'Unknown tool.');

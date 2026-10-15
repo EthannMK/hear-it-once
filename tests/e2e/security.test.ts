@@ -174,3 +174,41 @@ describe('other sensitive situations', () => {
     expect(events(c).map((e) => e.type)).toContain('contact.change_submitted');
   });
 });
+
+describe('general questions and honest not-knowing', () => {
+  const ask = async (text: string) => {
+    const c = new Caller(app);
+    await c.start(undefined, { channel: 'voice_browser', profileId: 'alex-morgan' });
+    await c.say(text);
+    return c;
+  };
+
+  it('answers how to make a deposit from the bank information, with no transfer', async () => {
+    const c = await ask('I want to make a deposit');
+    expect(recent(c, 2)).toMatch(/branch counter|cash deposit machine/i);
+    await c.refresh();
+    expect(c.view.handoff?.status ?? 'none').toBe('none');
+  });
+
+  it('gives branch details for a named township', async () => {
+    const c = await ask('where is your branch in Kamayut');
+    expect(recent(c, 2)).toMatch(/48 Pyay Road/);
+  });
+
+  it('says it does not have information it was never given', async () => {
+    const c = await ask('Do you offer cryptocurrency trading for customers');
+    expect(recent(c, 2)).toMatch(/don't have that/i);
+    expect(recent(c, 2)).not.toMatch(/\bwe offer\b|yes, we/i);
+  });
+
+  it('a general call is tagged as a general enquiry and summarised, with no case', async () => {
+    const c = await ask('what are your opening hours on saturday');
+    await c.say('what is the interest on savings');
+    await c.input({ kind: 'hangup' });
+    const types = events(c).map((e) => e.type);
+    expect(types).toContain('kb.info');
+    const sum = events(c).find((e) => e.title === 'Call summary');
+    expect(sum?.detail).toMatch(/opening hours/i);
+    expect(get<{ outcome: string }>('SELECT outcome FROM call_sessions WHERE id = ?', [c.sessionId])!.outcome).toBe('resolved');
+  });
+});

@@ -2,7 +2,6 @@
  * Read models for the API. Caller views reveal protected data only after verification;
  * the demo OTP is shown only to the caller and only in DEMO_MODE.
  */
-import { nationalIdLast4 } from '../adapters/mock/identity.ts';
 import { env } from '../config/env.ts';
 import { all, get, parseJson } from '../db/db.ts';
 import { nowIso } from '../lib/clock.ts';
@@ -61,7 +60,6 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
     );
     if (otp?.demo_display && otp.expires_at > nowIso()) demoDevice = { label: 'SIMULATED registered phone — demo only', message: `Your Northstar Bank passcode is ${otp.demo_display}. Never share it with anyone who calls you.`, code: otp.demo_display, expiresAt: otp.expires_at };
   }
-  const testNrc = opts.audience === 'caller' && env().DEMO_MODE && ctx.stage === 'stepup' && ctx.verification.identifiedCustomerId ? nationalIdLast4(ctx.verification.identifiedCustomerId) : null;
   const choices = ctx.pending?.kind === 'choice' ? ctx.pending.options : ctx.pending?.kind === 'yes_no' ? [{ id: '__yes', label: 'Yes' }, { id: '__no', label: 'No' }] : [];
 
   const handedOff = !!h && h.status !== 'cancelled';
@@ -132,7 +130,6 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
       : null,
     handoff: h ? { id: h.id, status: h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[String(h.reason)] ?? h.reason, agentName: h.agent_name ?? null, requestedAt: h.requested_at, connectedAt: h.connected_at, fallback: h.fallback, simulated: true } : null,
     demoDevice,
-    testNrc,
     // What the caller's own words were heard as, so they can see whether the number was captured correctly. Caller view only; never stored.
     cardCapture: opts.audience === 'caller' ? cardCaptureFor(sessionId) : null,
   };

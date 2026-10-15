@@ -8,6 +8,7 @@
  */
 import { all, get } from '../db/db.ts';
 import { SCENARIOS } from '../db/scenarios.ts';
+import { nationalIdLast4 } from '../adapters/mock/identity.ts';
 import { formatMoney } from '../conversation/format.ts';
 
 export const BANK_NAME = 'Northstar Bank';
@@ -16,14 +17,16 @@ export interface ProfileDef {
   id: string;
   scenarioId: string;
   blurb: string;
+  /** A sentence a tester can say to start this customer's scenario. */
+  tryPhrase: string;
 }
 
 export const PROFILE_DEFS: ProfileDef[] = [
-  { id: 'alex-morgan', scenarioId: 'S01', blurb: 'Has a recent online charge that may look unfamiliar.' },
-  { id: 'jamie-tan', scenarioId: 'S19', blurb: 'Is travelling soon and had a card payment declined.' },
-  { id: 'tom-becker', scenarioId: 'S05', blurb: 'Was charged a late-payment fee.' },
-  { id: 'priya-shah', scenarioId: 'S02', blurb: 'Everyday cardholder in good standing.' },
-  { id: 'lena-fischer', scenarioId: 'S08', blurb: 'Everyday cardholder; may prefer to speak to a person.' },
+  { id: 'alex-morgan', scenarioId: 'S01', blurb: 'Has a recent online charge that may look unfamiliar.', tryPhrase: "There's a charge from Novaplay I don't recognise." },
+  { id: 'jamie-tan', scenarioId: 'S19', blurb: 'Is travelling soon and had a card payment declined.', tryPhrase: 'My card keeps getting declined.' },
+  { id: 'tom-becker', scenarioId: 'S05', blurb: 'Was charged a late-payment fee.', tryPhrase: 'Why was I charged a late fee?' },
+  { id: 'priya-shah', scenarioId: 'S02', blurb: 'Everyday cardholder in good standing.', tryPhrase: 'I lost my card.' },
+  { id: 'lena-fischer', scenarioId: 'S08', blurb: 'Everyday cardholder; may prefer to speak to a person.', tryPhrase: 'Is my card active, and what were my last charges?' },
 ];
 
 export const profileById = (id: string) => PROFILE_DEFS.find((p) => p.id === id);
@@ -73,6 +76,8 @@ export function profileCard(def: ProfileDef) {
     cardStatus: card?.status ?? 'unknown',
     accountStanding: cu?.account_standing ?? 'good',
     blurb: def.blurb,
+    tryPhrase: def.tryPhrase,
+    nrcLast4: nationalIdLast4(sc.customer.id),
     recentTransactions: txns,
     fees,
     declines,
