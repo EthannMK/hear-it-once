@@ -76,3 +76,15 @@ The fuzz run writes a table of rates: unnecessary authentication, premature esca
 4. Session expiry and cross call state in a long running deployment, beyond the isolation tests.
 5. Saying "never mind" after asking for a person does not cancel the handoff. The call stays queued. Cancelling would be a new feature and needs a decision first.
 6. A card number given before any request is met with a clarification menu. A friendlier flow would be to keep the card and ask what the caller needs. This also needs a decision.
+
+## Defects found in judge testing (15 October 2026)
+
+Reported by a tester working through the demo by voice and by typing, then fixed with the tests named here.
+
+| Defect | Fix | Test |
+|---|---|---|
+| Two agents speaking at once after a language change | A replaced provider session is given a new epoch, so frames still arriving from the closing socket are dropped, and the browser is told to stop playing what the outgoing agent had already streamed | `tests/e2e/live.test.ts` "only one agent is ever heard" |
+| The call stayed open after the caller said goodbye | A farewell at the closing question, or during the rating question, closes the call | `tests/e2e/closing.test.ts` "the call closes when the caller is finished" |
+| "None, thank you", "proceed", "oo", "yes right" were not understood | Yes/no reading now strips courtesy words and covers the ways callers say yes, no and "that is everything", including Tagalog and Burmese | `tests/e2e/closing.test.ts` "answers callers actually give" |
+| After blocking a stolen card, a bare question about unrecognised charges confused the caller | The question says why it is being asked, and is skipped when the card has no recent charges | `tests/e2e/closing.test.ts` "the stolen-card review question" |
+| The handover was not a visible moment | Lily says she has transferred the caller, and the screen moves to the agent's workspace for the same case | `tests/e2e/closing.test.ts` "the handover is spoken, not just shown" |

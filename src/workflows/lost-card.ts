@@ -35,9 +35,33 @@ function proposeReplacement(ctx: WorkflowCtx): WorkflowResult {
   };
 }
 
+/** Purchases on the blocked card in the last two weeks: what a caller could plausibly be asked about. */
+function recentPurchases(ctx: WorkflowCtx) {
+  const since = nowMs() - 14 * 86_400_000;
+  return (sourceData(ctx.snap, 'transactions') ?? []).filter((t) => t.kind === 'purchase' && t.cardRef === ctx.wf.selectedCardRef && Date.parse(t.transactedAt) >= since);
+}
+
+/**
+ * The card is blocked and replaced; the remaining risk is a charge the thief already made. The
+ * question says why it is being asked, and is skipped entirely when the card has no recent charges
+ * to ask about, so no one is sent into a list that cannot help them.
+ */
 function askSuspicious(ctx: WorkflowCtx): WorkflowResult {
+  if (!recentPurchases(ctx).length) {
+    return {
+      kind: 'inform',
+      message: 'There are no recent charges on that card to check, so you’re all set. If anything you don’t recognise appears later, call us back and we can dispute it.',
+      findings: [],
+      resolution: 'resolved',
+      nextSteps: 'Card blocked and replacement handled; no recent charges to review.',
+    };
+  }
   ctx.wf.step = 'suspicious_q';
-  return { kind: 'ask_yes_no', purpose: 'suspicious_review', message: 'Have you noticed any transactions on this card that you don’t recognise?' };
+  return {
+    kind: 'ask_yes_no',
+    purpose: 'suspicious_review',
+    message: 'One last thing, since the card was out of your hands: have you noticed any charges on it that you don’t recognise?',
+  };
 }
 
 export const lostCardWorkflow: Workflow = {
@@ -97,8 +121,15 @@ export const lostCardWorkflow: Workflow = {
   onYesNo(ctx, purpose, yes) {
     if (purpose === 'suspicious_review') {
       if (!yes) return { kind: 'inform', message: 'Good — then you’re all set.', findings: [], resolution: 'resolved', nextSteps: 'Card blocked and replacement handled; no suspicious transactions reported.' };
-      const since = nowMs() - 14 * 86_400_000;
-      const recent = (sourceData(ctx.snap, 'transactions') ?? []).filter((t) => t.kind === 'purchase' && t.cardRef === ctx.wf.selectedCardRef && Date.parse(t.transactedAt) >= since);
+      const recent = recentPurchases(ctx);
+      if (!recent.length)
+        return {
+          kind: 'inform',
+          message: 'I can’t see any recent charges on that card, so there is nothing for me to dispute today. If one appears on your statement, call us back and we can take it from there.',
+          findings: [],
+          resolution: 'resolved',
+          nextSteps: 'Card blocked and replaced; caller reported a concern but no recent charges were on the card.',
+        };
       ctx.wf.step = 'choose_txn';
       return { kind: 'clarify', purpose: 'choose_txn', message: 'Which of these recent charges don’t you recognise?', choices: txnChoices(recent) };
     }

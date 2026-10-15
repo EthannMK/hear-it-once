@@ -199,7 +199,11 @@ export function acceptHandoff(handoffId: string, agent: Actor & { id: string }):
   closeHold(h.session_id);
   run('UPDATE call_sessions SET agent_joined_at = COALESCE(agent_joined_at, ?), updated_at = ? WHERE id = ?', [nowIso(), nowIso(), h.session_id]);
   const name = get<{ display_name: string }>('SELECT display_name FROM staff_users WHERE id = ?', [agent.id])?.display_name ?? 'An agent';
-  addTurn(h.session_id, 'system', `${name.replace(/ \(demo agent\)$/, '')} from card services has joined the call and can see your case details.`);
+  const person = name.replace(/ \(demo agent\)$/, '');
+  addTurn(h.session_id, 'system', `${person} from card services has joined the call and can see your case details.`);
+  // Lily's own closing line, so the caller (and anyone watching the demo) hears the moment the call
+  // stops being hers and becomes the agent's.
+  addTurn(h.session_id, 'assistant', `I've transferred you to ${person}, who has everything we discussed — you won't need to repeat anything. Thanks for calling Northstar Bank.`);
   emitTimeline(h.session_id, { type: 'handoff.connected', stage: 'handoff', title: `Agent joined: ${name}`, detail: 'Warm handoff complete — the agent has the full brief; the customer does not need to repeat the issue.', status: 'ok', source: 'agent desk', ref: handoffId });
   if (h.case_id) {
     caseEvent(h.case_id, 'agent_joined', { handoffId, agentId: agent.id });

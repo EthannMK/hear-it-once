@@ -653,6 +653,30 @@ describe('virtual agents by language (Lily, Hnin, Maya)', () => {
     expect(out.backend_said.join(' ')).toMatch(/full new address/i);
   }, 20000);
 
+  it('only one agent is ever heard: the outgoing session cannot speak over the new one', async () => {
+    const { client, session } = await connect('S01');
+    session.audioOut('LILY');
+    await moveTo(session, 'fil');
+    const maya = ScriptedProvider.last;
+    // The browser is told to drop whatever Lily had already streamed.
+    const order = client.msgs.map((m) => m.type);
+    expect(order.lastIndexOf('interrupted')).toBeGreaterThan(order.lastIndexOf('audio'));
+    const sinceSwitch = client.msgs.length;
+    // Frames still buffered in the closing socket arrive late; none of them may reach the browser.
+    session.audioOut('STALE');
+    session.said('Lily talking over Maya');
+    session.turnComplete();
+    await sleep(80);
+    const late = client.msgs.slice(sinceSwitch);
+    expect(late.filter((m) => m.type === 'audio')).toHaveLength(0);
+    expect(JSON.stringify(late)).not.toContain('Lily talking over Maya');
+    // The new agent is unaffected.
+    const mark = client.msgs.length;
+    maya.audioOut('MAYA');
+    await sleep(80);
+    expect(client.msgs.slice(mark).filter((m) => m.type === 'audio').map((m) => m.data)).toEqual(['MAYA']);
+  });
+
   it('keeps the new agent through a dropped connection and a new browser tab', async () => {
     const { client, sessionId, token, session } = await connect('S01');
     await moveTo(session, 'fil');
