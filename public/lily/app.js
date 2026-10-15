@@ -1,12 +1,13 @@
 // Hear It Once × Lily (Northstar Bank) — the judge experience, two screens:
-//   1) #/            Talk to Lily: test-data panel, live call, "Behind the conversation"
-//   2) #/agent/:id   Agent view: what a human agent sees for that call (+ the customer's summary)
-// The call ends → the page flips to the agent view of that same call automatically.
+//   1) #/        Talk to Lily: test-data panel, live call, "Behind the conversation"
+//   2) #/crm…    Agent CRM: the human agent's case workspace (see crm.js)
+// The call ends → the page flips to the CRM case for that same call automatically.
 // Everything shown comes from the server: WebSocket messages, the call view, the timeline and
 // the agent workspace read model. Nothing is simulated in the browser.
 import { api, h } from '/js/lib.js';
 import { Mic, Player } from '/lily/audio.js';
 import { t, tList, LANGS, getLang, setLang } from '/lily/i18n.js';
+import { initCrm, crmRoute } from '/lily/crm.js';
 
 const root = document.getElementById('root');
 const srLive = document.getElementById('sr-live');
@@ -43,6 +44,7 @@ const P = {
   keyboard: ['M3 6h18v12H3z', 'M7 10h.01', 'M11 10h.01', 'M15 10h.01', 'M7 14h10'],
   retry: ['M4 12a8 8 0 1 0 2.4-5.7', 'M4 4v4h4'],
   copy: ['M9 9h11v11H9z', 'M5 15V4h11'],
+  search: ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z', 'M20 20l-4-4'],
 };
 function icon(name) {
   const s = document.createElementNS(NS, 'svg');
@@ -56,7 +58,6 @@ function icon(name) {
 /* ------------------------------------------------------------------ chrome */
 function header(active) {
   const callLive = S.call && !S.call.ended;
-  const agentHref = S.lastCall ? `#/agent/${encodeURIComponent(S.lastCall)}` : '#/';
   const lang = h('select', { 'aria-label': t('lang'), title: t('langHint'), disabled: !!callLive, onchange: (e) => setLang(e.target.value) },
     LANGS.map(([c, n]) => h('option', { value: c, lang: c === 'fil' ? 'fil' : c, ...(c === getLang() ? { selected: '' } : {}) }, n)));
   return h('header.top',
@@ -64,9 +65,9 @@ function header(active) {
     h('span.badge.lav', `${S.bank} · demo`),
     h('nav.tabs', { 'aria-label': 'Screens' },
       h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Talk to Lily'),
-      h('a', { href: agentHref, 'aria-current': active === 'agent' ? 'page' : null, 'aria-disabled': S.lastCall && !callLive ? null : 'true', title: S.lastCall ? 'What a human agent sees for your last call' : 'Available after your first call' }, '2 · Agent view')),
+      h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Agent CRM')),
     h('span.grow'),
-    h('label.langwrap', h('span.sr-only', t('lang')), lang),
+    active === 'crm' ? null : h('label.langwrap', h('span.sr-only', t('lang')), lang),
   );
 }
 function render(active, ...nodes) {
@@ -84,14 +85,18 @@ function toast(m) {
 /* ------------------------------------------------------------------ routing */
 window.addEventListener('hashchange', route);
 async function route() {
-  const m = location.hash.match(/^#\/agent\/([^/]+)(\/summary)?/);
-  if (m) {
+  const hash = location.hash;
+  // Old links to the agent view go to the CRM case for that call.
+  const old = hash.match(/^#\/agent\/([^/]+)/);
+  if (old) return location.replace(`#/crm/call/${old[1]}`);
+  if (hash.startsWith('#/crm')) {
     if (S.call && !S.call.ended) S.call.destroy();
-    return agentView(decodeURIComponent(m[1]), m[2] ? 'summary' : 'agent');
+    return crmRoute(hash);
   }
   if (S.call && !S.call.ended) return; // the call screen is already on the page
   return home();
 }
+initCrm({ render, icon, toast });
 
 /* ================================================================== SCREEN 1 · talk to Lily */
 async function home() {
@@ -149,19 +154,19 @@ function drawHome() {
           h('button.connect', { type: 'button', disabled: !c, onclick: () => startCall(c) },
             h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', c ? `As test customer ${c.name}` : 'Choose a test customer first')), icon('arrow')),
           h('div.subs',
-            h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? `Live voice ready · ${S.status.model ?? 'Gemini Live'}` : 'Live voice is not available right now — you can type to Lily'),
+            h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
             h('p', icon('info'), h('span', 'You are speaking with an AI, not a person. Your browser will ask for the microphone. No audio is stored.')),
             h('p', icon('keyboard'), h('span', 'No microphone? Start anyway and type — Lily still answers.')))),
         h('div.pod-wrap',
           h('div.pod', h('div', bars, h('div.mic', icon('wave')), h('h3', 'Lily'), h(`div.ready${ready ? '' : '.off'}`, ready ? 'Ready to listen' : 'Typing only'), h('div.prov', `Call language: ${LANGS.find(([k]) => k === getLang())?.[1] ?? 'English'}`))),
-          h('div.float.f1', icon('lock'), 'Voice keys stay on the server'),
+          h('div.float.f1', icon('lock'), 'Verifies you before any account detail'),
           h('div.float.f2', icon('headset'), 'Human handover any time'))),
       !ready && S.status?.reason ? h('p.banner.warn', S.status.reason) : null,
       h('div.card.asks', h('span.cap', 'Things to try'), h('div.chips', [...(tList('ex') ?? []), 'How are you today?'].map((x) => h('span', `“${x}”`)))),
       h('div.flow',
         h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. Lily verifies you with the test card number.')),
-        h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each real backend step: lookups, policy checks, actions, handover.')),
-        h('div.card', h('b', h('span', '3'), 'Agent view'), h('p', 'When you end the call, you see exactly what a human agent would see for it.'))))));
+        h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each step as it happens: checks, decisions, actions and handover.')),
+        h('div.card', h('b', h('span', '3'), 'Agent CRM'), h('p', 'When you end the call, you land in the agent’s case workspace: summary, verified facts, suggested next step and tickets.'))))));
 }
 
 /* ------------------------------------------------------------------ connecting */
@@ -170,7 +175,7 @@ function sheet(steps, extra = {}) {
   const ov = h('div.overlay', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'conn-t' },
     h('div.sheet',
       h('h2#conn-t', extra.title ?? 'Connecting with Lily'),
-      h('p.lead', extra.lead ?? 'Each step is a real check — nothing is skipped or faked.'),
+      h('p.lead', extra.lead ?? 'This takes a few seconds.'),
       h('ol.steps', steps.map((s) => h(`li.${s.state}`, h('span.s', s.state === 'ok' ? icon('check') : s.state === 'fail' ? icon('x') : null), h('div', h('b', s.label), h('span', s.detail ?? ''))))),
       extra.error ? h('p.banner.bad', { role: 'alert' }, extra.error) : null,
       extra.actions?.length ? h('div.acts', extra.actions) : null));
@@ -184,7 +189,7 @@ async function startCall(c) {
   const steps = [
     { k: 'mic', label: 'Microphone', detail: 'Your browser will ask for permission.', state: live ? 'run' : 'skip' },
     { k: 'call', label: 'Starting your call', detail: `Test customer ${c.name}`, state: 'todo' },
-    { k: 'lily', label: 'Connecting to Lily', detail: live ? (S.status.model ?? 'Gemini Live') : (S.status?.reason ?? 'Live voice unavailable'), state: 'todo' },
+    { k: 'lily', label: 'Connecting to Lily', detail: live ? 'Live voice' : 'Voice isn’t available right now', state: 'todo' },
   ];
   const set = (k, state, detail) => { const s = steps.find((x) => x.k === k); s.state = state; if (detail) s.detail = detail; };
   const call = new Call(c);
@@ -207,7 +212,7 @@ async function startCall(c) {
   if (!live) {
     set('lily', 'fail', S.status?.reason ?? 'Live voice is not configured.');
     call.textOnly = true;
-    sheet(steps, { error: 'Lily’s live voice is not available on this server. You can still have the whole conversation by typing — the same backend checks run.', actions: [h('button.btn.primary', { type: 'button', onclick: () => { closeSheet(); callScreen(call); } }, icon('keyboard'), 'Continue by typing'), cancelBtn()] });
+    sheet(steps, { error: 'Lily’s voice isn’t available right now. You can still have the whole conversation by typing; everything works the same way.', actions: [h('button.btn.primary', { type: 'button', onclick: () => { closeSheet(); callScreen(call); } }, icon('keyboard'), 'Continue by typing'), cancelBtn()] });
     return;
   }
   set('lily', 'run'); sheet(steps, { actions: [cancelBtn()] });
@@ -218,7 +223,7 @@ async function startCall(c) {
     sheet(steps, { error: `Lily’s voice could not connect: ${r.message}`, actions: [h('button.btn.primary', { type: 'button', onclick: () => { closeSheet(); callScreen(call); } }, icon('keyboard'), 'Continue by typing'), cancelBtn()] });
     return;
   }
-  set('lily', 'ok', `Connected · ${r.provider ?? 'live voice'}`);
+  set('lily', 'ok', 'Connected');
   sheet(steps, { actions: [] });
   setTimeout(() => { closeSheet(); callScreen(call); }, 400);
 }
@@ -334,8 +339,8 @@ class Call {
     if (this.ended) return;
     this.ended = true;
     this.destroy();
-    say('Call ended. Opening the agent view.');
-    location.hash = `#/agent/${encodeURIComponent(this.id)}`;
+    say('Call ended. Opening the agent’s case workspace.');
+    location.hash = `#/crm/call/${encodeURIComponent(this.id)}`;
   }
   destroy() {
     this.mic?.stop(); this.player?.close(); this.mic = this.player = null;
@@ -360,15 +365,15 @@ class Call {
 
 const STATE_TEXT = {
   speaking: ['Lily is speaking', 'Start talking to interrupt her.'],
-  processing: ['Checking', 'Lily is running a check with the bank systems.'],
+  processing: ['Checking', 'Lily is checking that for you.'],
   listening: ['Listening', 'Speak naturally — you can interrupt Lily at any time.'],
   hearing: ['Hearing you', 'Keep going — Lily answers when you pause.'],
   muted: ['Muted', 'Lily can’t hear you. Unmute to talk, or type below.'],
   typing: ['Typing mode', 'Type below — the conversation works the same way.'],
-  waiting: ['Waiting for a human agent', 'In-app handover · no person has joined yet.'],
+  waiting: ['Waiting for a human agent', 'Your case is with the agent team. No one has joined yet.'],
   agent: ['Agent connected', 'A human agent accepted the handover and has the full brief.'],
   reconnecting: ['Reconnecting…', 'The voice connection dropped; your conversation is saved.'],
-  ending: ['Ending call…', 'Saving the case — the agent view opens next.'],
+  ending: ['Ending call…', 'Saving the case. The agent’s workspace opens next.'],
 };
 const SEG = ['speaking', 'listening', 'processing', 'muted'];
 
@@ -396,13 +401,14 @@ function callScreen(c) {
     const verified = v.tags?.identity === 'verified';
     head.replaceChildren(
       h('div.av', icon('wave'), h(`i${c.voiceReady ? '' : '.off'}`)),
-      h('div', h('h1', 'Lily', h('span.badge.lav', 'AI assistant')), h('div.meta', h('span.t', fmtDur(secs)), h('span', '·'), h('span', c.voiceReady ? `Live voice · ${S.status?.model ?? 'Gemini Live'}` : 'Typing mode'))),
+      h('div', h('h1', 'Lily', h('span.badge.lav', 'AI assistant')), h('div.meta', h('span.t', fmtDur(secs)), h('span', '·'), h('span', c.voiceReady ? 'Live voice' : 'Typing mode'))),
       h('div.cust', h('span.mono2', c.card.name.split(' ').map((x) => x[0]).join('').slice(0, 2)), h('div', h('b', c.card.name, verified ? icon('check') : null), h('span', verified ? 'Identity verified · test customer' : v.tags?.identity === 'failed' ? 'Verification failed' : 'Not verified yet · test customer'))));
   }
   function drawTranscript() {
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
     const nodes = c.turns.map((tr) => {
       if (/^\[Pressed|^\[Asked|^\[Confirmed|^\[Declined/.test(tr.text)) return h('div.note', tr.text.replace(/^\[|\]$/g, ''));
+      if (tr.speaker === 'customer' && /^\[verification answer/.test(tr.text)) return h('div.b.cust', h('div.wl', h('b', 'You'), tr.at ? h('span', fmtTime(tr.at)) : null), h('div.txt', h('i', 'Security answer given · not stored')));
       if (tr.speaker === 'system' || !['customer', 'assistant', 'agent'].includes(tr.speaker)) return tr.text ? h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim()) : null;
       const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
       const who = cls === 'lily' ? [h('span.av', 'L'), h('b', 'Lily'), 'AI'] : cls === 'agent' ? [h('b', 'Human agent')] : [h('b', 'You')];
@@ -416,14 +422,14 @@ function callScreen(c) {
     const evs = c.events.filter((e) => !/^voice\.(muted|unmuted)/.test(e.type));
     const ok = evs.filter((e) => e.status === 'ok').length;
     const pend = evs.filter((e) => e.status === 'pending' || e.status === 'running').length;
-    tlSub.textContent = `${ok} steps completed · ${pend} pending · live from the backend`;
+    tlSub.textContent = `${ok} steps done · ${pend} in progress`;
     const seen = new Set(evs.map((e) => e.stage)); const last = evs[evs.length - 1]?.stage;
     stageBar.replaceChildren(...STAGES.map((k) => h(`span${k === last ? '.on' : seen.has(k) ? '.seen' : ''}`, STAGE_LABEL[k])));
     const badge = (e) => e.type.startsWith('verification') && e.status === 'ok' ? ['ok', 'Verified'] : e.type === 'actions.proposed' ? ['pending', 'Awaiting consent'] : e.type.startsWith('handoff.') && e.status !== 'failed' ? ['escalated', e.type === 'handoff.connected' ? 'Accepted' : 'Handover'] : [e.status, { ok: 'Done', warn: 'Attention', failed: 'Failed', blocked: 'Blocked', pending: 'Pending', running: 'Running', info: 'Info' }[e.status] ?? e.status];
     tl.replaceChildren(...(evs.length ? [...evs].reverse().map((e, i) => {
       const [cls, label] = badge(e);
       return h(`li${i === 0 ? '.fresh' : ''}`, h(`span.n.${cls === 'escalated' ? 'blocked' : cls}`), h('div', h('div.top2', h('b', e.title), h(`span.st.${cls}`, label)), h('div.when', `${fmtTime(e.at)} · ${STAGE_LABEL[e.stage] ?? e.stage}`), e.detail ? h('div.det', e.detail) : null));
-    }) : [h('li', h('span.n.info'), h('p.small.muted', 'Nothing yet. Each real backend step — verification, lookups, policy checks, actions — appears here as it happens.'))]));
+    }) : [h('li', h('span.n.info'), h('p.small.muted', 'Nothing yet. Each step (verification, checks, actions) appears here as it happens.'))]));
   }
   function drawSide() {
     const v = c.view ?? {};
@@ -436,14 +442,14 @@ function callScreen(c) {
     const bits = [];
     const cc = v.cardCapture;
     if (cc) bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.cap', 'What Lily heard'), h('b.num', group4(String(cc.digits ?? '').replace(/ /g, '').padEnd(16, '•'))), h('p', cc.confirming ? 'All 16 digits heard. Say “yes” if this is right, or say the correct digits.' : `${cc.count ?? 0} of 16 digits. Keep reading the card number from the test-data panel.`)));
-    if (v.demoDevice) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Simulated phone: '), 'read this passcode to Lily'), h('b.mono', v.demoDevice.code)));
+    if (v.demoDevice) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Test passcode: '), 'read this to Lily'), h('b.mono', v.demoDevice.code)));
     extras.replaceChildren(...bits);
     // Consent (buttons work in typing mode; in voice mode just say yes or no).
     if (v.proposal && v.pending?.kind === 'consent') {
       consentEl.replaceChildren(h('section.consent', { role: 'group', 'aria-label': 'Confirm the proposed actions' },
         h('span.badge.solid', 'Awaiting your consent'), h('h3', 'Lily is asking for your confirmation'),
         h('ol', v.proposal.actions.map((a) => h('li', a.label))),
-        h('p.small.muted', c.voiceReady ? 'Say “yes” or “no” to Lily. Nothing happens until you clearly confirm — the server checks your own words.' : 'Nothing happens until you confirm. The server re-checks policy when it runs.'),
+        h('p.small.muted', c.voiceReady ? 'Say “yes” or “no” to Lily. Nothing happens until you clearly confirm.' : 'Nothing happens until you confirm.'),
         c.voiceReady ? null : h('div.row', h('button.btn.mint', { type: 'button', onclick: () => c.consent('accept') }, icon('check'), 'Confirm'), h('button.btn.coral-o', { type: 'button', onclick: () => c.consent('decline') }, 'Decline'))));
     } else consentEl.replaceChildren();
     // Handover status: requested → waiting → accepted, never claimed early.
@@ -452,8 +458,8 @@ function callScreen(c) {
       const acc = hd.status === 'connected' || hd.status === 'completed';
       handEl.replaceChildren(h(`div.handover${acc ? '.ok' : ''}`, { role: 'status' }, h('span.ic', icon('headset')),
         h('div', h('b', acc ? `Agent connected${hd.agentName ? ' · ' + hd.agentName : ''}` : hd.status === 'no_agent' ? 'No agent available' : 'Waiting for a human agent'),
-          h('span', acc ? 'A person accepted the handover and can see everything so far.' : hd.status === 'no_agent' ? 'Your details are saved for a callback.' : 'In-app handover (not a phone transfer). A demo agent accepts it in the agent workspace.')),
-        !acc && hd.status !== 'no_agent' ? h('a.btn.sm', { href: `/agent.html?demo=1&session=${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null));
+          h('span', acc ? 'A person accepted the handover and can see everything so far.' : hd.status === 'no_agent' ? 'Your details are saved for a callback.' : 'Your case is with the agent team. Open the Agent CRM to accept it as the agent.')),
+        !acc && hd.status !== 'no_agent' ? h('a.btn.sm', { href: `/#/crm/call/${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null));
     } else handEl.replaceChildren();
     const banners = [];
     if (c.micDenied && c.voiceReady) banners.push(h('p.banner', 'Microphone blocked — type below. Lily will still answer out loud.'));
@@ -517,115 +523,11 @@ function callScreen(c) {
   render('talk', h('main.judge.in-call',
     testPanel(true),
     h('section.call-main', { 'aria-label': 'Live call with Lily' }, head, stage, bannerEl, extras, handEl, consentEl,
-      h('section.card.tx', h('div.tx-h', h('h2', 'Live transcript'), h('span.badge.lav', c.voiceReady ? 'From Lily’s speech recognition' : 'Typed')), list, form),
+      h('section.card.tx', h('div.tx-h', h('h2', 'Live transcript'), h('span.badge.lav', c.voiceReady ? 'Live captions' : 'Typed')), list, form),
       h('div.controls', { role: 'toolbar', 'aria-label': 'Call controls' }, muteBtn, ccBtn, h('span.sp'), humanBtn, endBtn)),
     btc));
   drawHead(); drawTranscript(); drawActivity(); refresh();
   if (!c.voiceReady) { c.loadTimeline(); input.focus({ preventScroll: true }); }
-}
-
-/* ================================================================== SCREEN 2 · agent view */
-async function agentView(id, tab) {
-  S.lastCall = id;
-  render('agent', h('main.av-wrap', h('p.muted', 'Loading the agent view…')));
-  let w; let an = null; let b = null;
-  try {
-    [w, an, b] = await Promise.all([api(`/api/calls/${id}/agent-view`), api(`/api/calls/${id}/analysis`).catch(() => null), api(`/api/calls/${id}/brief`).catch(() => null)]);
-  } catch (e) {
-    render('agent', h('main.av-wrap', h('div.card.sec', h('h2', 'Agent view unavailable'), h('p', `${e.message}. The agent view opens in the browser that made the call.`), h('a.btn.primary', { href: '#/' }, 'Start a new call'))));
-    return;
-  }
-  const hd = w.handoff;
-  const switcher = h('nav.tabs', { 'aria-label': 'View', style: 'display:inline-flex;gap:4px;padding:4px;border-radius:999px;background:#fff;border:1px solid var(--hair)' },
-    h('a', { href: `#/agent/${encodeURIComponent(id)}`, 'aria-current': tab === 'agent' ? 'page' : null, style: tabStyle(tab === 'agent') }, 'What the agent sees'),
-    h('a', { href: `#/agent/${encodeURIComponent(id)}/summary`, 'aria-current': tab === 'summary' ? 'page' : null, style: tabStyle(tab === 'summary') }, 'What the customer got'));
-  const head = h('section.card.av-head',
-    h('div', h('span.badge.dark', icon('headset'), 'Screen 2 · Human agent’s point of view'),
-      h('h1', { style: 'margin-top:10px' }, `${w.customer.name} — ${w.intents.primary.label}`),
-      h('p.lead', hd ? `This call was handed to a person (${hd.reasonLabel.toLowerCase()}). Below is exactly what the agent receives: the brief, Lily’s suggestion, what was verified and the whole conversation — so the customer never repeats themselves.` : 'Lily handled this call herself. If the customer calls back or a person picks the case up, this is the brief they would open — nothing to re-ask.'),
-      h('div', { style: 'margin-top:12px' }, switcher)),
-    h('div.acts', h('button.btn.dark', { type: 'button', onclick: () => { location.hash = '#/'; } }, icon('phone'), 'Start another call'),
-      h('a.btn', { href: `/agent.html?demo=1&session=${encodeURIComponent(id)}`, target: '_blank', rel: 'noopener' }, 'Open the live agent workspace ↗')));
-  if (tab === 'summary') return render('agent', h('main.av-wrap', head, customerSummary(b, an, w)));
-
-  const vTone = w.verification.status === 'verified' ? 'ok' : w.verification.status === 'failed' ? 'bad' : 'warn';
-  const tagsChips = (w.tags.effective ?? []).map((x) => h('span.chip', x));
-  const phase = hd ? { waiting: 'Waiting for an agent', accepted: 'Accepted by an agent', completed: 'Completed by an agent', no_agent: 'No agent available', cancelled: 'Ended before an agent joined' }[hd.phase] ?? hd.phase : 'Not needed';
-
-  const left = h('div.pane',
-    h('section.card.sec', h('h2', 'Customer', h('span.badge.amber', 'Fictional test data')),
-      h('p.cust-name', w.customer.name),
-      h('div.chips', h(`span.chip.${vTone}`, `Identity: ${w.verification.status.replace(/_/g, ' ')}`), h('span.chip', `Standing: ${w.customer.standing ?? '—'}`)),
-      h('dl.kv',
-        h('div', h('dt', 'Phone'), h('dd.mono', w.customer.phone ?? '—')),
-        h('div', h('dt', 'Account'), h('dd.mono', w.customer.accountRef ?? '—')),
-        h('div', h('dt', 'Card'), h('dd', w.customer.cardLast4 ? `•••• ${w.customer.cardLast4}` : '—')),
-        h('div', h('dt', 'Card status'), h('dd', w.customer.cardStatus ?? '—')))),
-    h('section.card.sec', h('h2', 'Call'),
-      h('dl.kv',
-        h('div', h('dt', 'Duration'), h('dd.mono', fmtDur(w.call.durationSeconds))),
-        h('div', h('dt', 'Status'), h('dd', w.call.status === 'ended' ? 'Ended' : 'Live')),
-        h('div.wide', h('dt', 'Handover'), h('dd', phase, hd ? h('span.muted.small', ` · ${hd.reasonLabel}`) : null)),
-        h('div.wide', h('dt', 'Intents'), h('dd', h('div.chips', h('span.chip.ai', w.intents.primary.label), (w.intents.secondary ?? []).map((s) => h('span.chip', `Also: ${s.label ?? s}`)))))),
-      h('div', h('span.cap', 'Call tags'), h('div.chips', { style: 'margin-top:6px' }, tagsChips))),
-    h('section.card.sec', h('h2', 'Verification attempts', h('span.badge.lav', 'Server-checked')),
-      w.verification.attempts.length
-        ? h('table.vtable', h('thead', h('tr', h('th', 'Time'), h('th', 'Step'), h('th', 'Result'))), h('tbody', w.verification.attempts.map((a) => h('tr', h('td.mono', fmtTime(a.at)), h('td', `${a.step} · ${a.method}`), h('td', h(`span.chip.${a.outcome === 'passed' ? 'ok' : a.outcome === 'issued' ? '' : 'bad'}`, a.outcome))))))
-        : h('p.small.muted', 'No verification was attempted on this call.'),
-      w.verification.failedCardAttempts ? h('p.small.muted', `${w.verification.failedCardAttempts} failed card-number attempt(s). The expected number is never shown to Lily or the caller.`) : null));
-
-  const sg = w.suggestion;
-  const middle = h('div.pane',
-    h('section.card.sec', h('h2', 'Brief from Lily', h('span.badge.violet', 'Built from recorded facts')), h('p.prose', w.aiSummary),
-      an?.status === 'ready' ? h('div.box', h('h3', 'Post-call analysis'), h('p', { style: 'color:var(--aub)' }, an.summary), h('p', `Reason: ${an.reason?.label ?? '—'} · Resolution: ${String(an.resolution ?? '—').replace(/_/g, ' ')}`)) : an?.status === 'failed' ? h('p.banner.warn', 'The post-call analysis did not finish; the transcript and case are saved.') : null),
-    h('section.card.sec', h('h2', 'Suggested next step', h('span.chip.ai', 'AI recommendation'), h('span.chip.warn', 'Not a confirmed action')),
-      h('p.sugg', sg.effective ?? sg.text),
-      h('div.two',
-        h('div.box', h('h3', 'Why'), sg.reasoning.length ? h('ul', sg.reasoning.map((r) => h('li', r))) : h('p', '—')),
-        h('div.box', h('h3', 'Facts it relies on'), sg.supportingFacts.length ? h('ul', sg.supportingFacts.map((r) => h('li', r))) : h('p', 'No account facts were confirmed.'))),
-      h('div.two',
-        h('div.box.okb', h('h3', 'Confirmed by bank systems'), sg.confirmedActions.length ? h('ul', sg.confirmedActions.map((a) => h('li', `${a.label}${a.reference ? ` · ref ${a.reference}` : ''}`))) : h('p', 'No account changes were made.')),
-        h('div.box.badb', h('h3', 'Not done — don’t tell the customer it happened'), sg.notConfirmed.length ? h('ul', sg.notConfirmed.map((a) => h('li', `${a.label}: ${a.status}`))) : h('p', 'Nothing pending.')))),
-    h('section.card.sec', h('h2', `Conversation (${w.transcript.length})`),
-      h('div.convo', w.transcript.map((tr) => {
-        if (tr.speaker === 'system') return h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim());
-        const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
-        return h(`div.b.${cls}`, h('div.wl', h('b', cls === 'cust' ? 'Customer' : cls === 'lily' ? 'Lily (AI)' : 'Agent'), h('span', fmtTime(tr.at))), h('div.txt', tr.hidden ? 'Sensitive answer given — not stored' : tr.text));
-      }))));
-
-  const evs = w.activity ?? [];
-  const right = h('div.pane',
-    h('section.card.sec', h('h2', 'Case'),
-      h('dl.kv',
-        h('div', h('dt', 'Outcome'), h('dd', b?.headline ?? '—')),
-        h('div', h('dt', 'Case'), h('dd.mono', b?.case?.id ?? '—'))),
-      w.unresolved?.length ? h('div.box.badb', h('h3', 'Still open'), h('ul', w.unresolved.map((u) => h('li', typeof u === 'string' ? u : u.text)))) : h('p.small.muted', 'Nothing left open.'),
-      h('p.ro', 'Read-only demo view. A real agent accepts the handover, edits tags, notes and the resolution in the ', h('a', { href: `/agent.html?demo=1&session=${encodeURIComponent(id)}`, target: '_blank', rel: 'noopener' }, 'agent workspace ↗'), '.')),
-    h('section.card.sec', h('h2', 'Relevant knowledge', h('span.badge.amber', 'Demo policy')),
-      w.knowledge.length ? w.knowledge.map((k) => h('div.kb', h('h4', `${k.id} · ${k.title}`), h('p', k.excerpt), k.reason ? h('p.small.muted', `Why: ${k.reason}`) : null)) : h('p.small.muted', 'No article matched this call.')),
-    h('section.card.sec', h('h2', `Backend activity (${evs.length})`),
-      h('ol.did', evs.map((e) => h('li', h('details', h('summary', h('span.t', fmtTime(e.at)), h(`span.d.${e.status}`), h('span', e.title)), h('div.body', e.detail ?? 'No further detail.')))))));
-
-  render('agent', h('main.av-wrap', head, h('div.av-grid', left, middle, right)));
-}
-const tabStyle = (on) => `text-decoration:none;padding:7px 14px;border-radius:999px;font-weight:600;font-size:.88rem;${on ? 'background:var(--lav);color:var(--violet-d)' : 'color:var(--text-2)'}`;
-
-/** What the customer got: outcome, confirmed vs not done, next steps, and the steps Lily took. */
-function customerSummary(b, an, w) {
-  if (!b) return h('section.card.sec', h('p', 'The customer summary is not available.'));
-  const done = b.actions.filter((a) => a.bucket === 'completed');
-  const notDone = [...b.actions.filter((a) => a.bucket !== 'completed').map((a) => ({ text: `${a.label} — ${a.statusLabel}` })), ...b.unresolved.map((u) => ({ text: typeof u === 'string' ? u : u.text }))];
-  const tl = (b.timeline ?? []).filter((e) => !/^voice\.(muted|unmuted)/.test(e.type));
-  return h('div.sum',
-    h('section.card.sum-h', h('span.cap', 'Outcome for the customer'), h('h2', b.headline),
-      h('div.facts', [['Duration', fmtDur(w.call.durationSeconds)], ['Main issue', w.intents.primary.label], ['Case', b.case?.id ?? '—'], ['Handover', b.escalation ? b.escalation.status.replace(/_/g, ' ') : 'Not needed']].map(([k, v]) => h('div', h('span', k), h('b', v)))),
-      b.case?.summary ? h('p.prose', { style: 'white-space:pre-wrap;margin-top:8px' }, b.case.summary) : null),
-    h('div.sum-grid',
-      h('section.card.sec', h('h2', 'Confirmed'), done.length || b.verifiedFacts.length ? h('ul.list.ok', [...done.map((a) => h('li', icon('check'), h('span', a.label, h('small', a.reference ? `Confirmed by the bank system · ref ${a.reference}` : 'Confirmed by the bank system')))), ...b.verifiedFacts.slice(0, 4).map((f) => h('li', icon('check'), h('span', f)))]) : h('p.small.muted', 'Nothing was confirmed on this call.')),
-      h('section.card.sec', h('h2', 'Not done or still open'), notDone.length ? h('ul.list.bad', notDone.map((n) => h('li', icon('alert'), h('span', n.text)))) : h('p.small.muted', 'Nothing outstanding.')),
-      h('section.card.sec', h('h2', 'Next steps'), h('ul.list.next', [...new Set([b.nextStep, ...(an?.suggestedSolutions ?? []).slice(0, 2)].filter(Boolean))].map((x) => h('li', icon('arrow'), h('span', x, h('small', 'Recommendation, not a completed action'))))))),
-    h('section.card.sec', h('h2', `What Lily did (${tl.length} recorded steps)`),
-      h('ol.did', tl.map((e) => h('li', h('details', h('summary', h('span.t', fmtTime(e.at)), h(`span.d.${e.status}`), h('span', e.title)), h('div.body', e.detail ?? 'No further detail.')))))));
 }
 
 route();

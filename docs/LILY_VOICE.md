@@ -4,12 +4,12 @@ Lily is the voice of Hear It Once: a two-way, interruptible conversation in the 
 
 ## Journey (Northstar Bank)
 
-One page, two interfaces. The judge page (`/`) shows **Demo customers and test data** beside the live call. Pick who you are calling as, press **Call as ...**, then talk about anything: a charge, a decline, a fee, or a new topic half way through. Nothing is scripted and no scenario is chosen. Lily asks for the **full 16-digit demo card number** (shown on screen, fictional), the server checks it, and wrong numbers are retried (three failures prepare a human handover). The agent page (`/agent.html`) is the call-centre workspace: queue, customer and call, AI summary, suggested solution, knowledge, prefilled CRM search and case management. See [NORTHSTAR.md](NORTHSTAR.md).
+One page, two interfaces. The judge page (`/`) shows **Demo customers and test data** beside the live call. Pick who you are calling as, press **Call as ...**, then talk about anything: a charge, a decline, a fee, or a new topic half way through. Nothing is scripted and no scenario is chosen. Lily asks for the **full 16-digit demo card number** (shown on screen, fictional), the server checks it, and wrong numbers are retried (three failures prepare a human handover). The agent page is the Agent CRM (`/#/crm`): customer search and profile, the case summary, verified vs. customer-said facts, suggested next step, tags, tickets and timeline (see [CRM.md](CRM.md)). See [NORTHSTAR.md](NORTHSTAR.md).
 
 | Screen | Where | Notes |
 |---|---|---|
 | Judge: demo customers + call + summary | `/` (`public/lily/*`) | Stitch light design system, no build step |
-| Agent workspace | `/agent.html` | Live over SSE (`/api/handoffs/stream`), no refresh |
+| Agent CRM | `/#/crm` | Refreshes while a call is live or a customer is waiting |
 
 There are only these two screens. Older pages redirect to `/`.
 
@@ -70,11 +70,11 @@ Lily answers any banking or personal-finance question from general knowledge. Fa
 ## Card collection, ending a call and post-call analysis
 Card collection reads back only the last four digits, waits for a yes, and uses the corrected number if the caller changes it. The full number is held in memory until confirmed and is never stored. The check has a time limit (`cardCheckTimeoutMs`, 4 s), retries once, drops duplicate checks for the same call, and reports `verified`, `not_verified`, `temporarily_unavailable` or `invalid_input`. A timeout uses no attempt. Timing and outcome counts come from `cardCheckMetrics()`.
 End Call and Transfer are separate. Ending is idempotent, saves the transcript, then runs analysis, which has its own status (`pending`, `ready`, `failed`) and can be retried with `POST /api/calls/:id/analysis/retry`. A transfer marks the call `transferring` until an agent accepts. Lifecycle comes from `lifecycle()`: active, transferring, connected_to_agent, completed, failed.
-`GET /api/calls/:id/transcript` returns every segment in order with a count. `GET /api/calls/:id/analysis` returns summary, reason, resolution, suggested solutions and knowledge. Agents see ended calls under "Ended calls" in `/agent.html`.
+`GET /api/calls/:id/transcript` returns every segment in order with a count. `GET /api/calls/:id/analysis` returns summary, reason, resolution, suggested solutions and knowledge. Agents see every case, including ended calls, in the Agent CRM.
 Resolution values: resolved, partially_resolved, unresolved, escalated, informational.
 
 ## Call script, card capture, agent desk
 Lily follows a call-centre script (in `lily.ts`): opening, active listening, verification reason, hold protocol (ask permission, say why and how long, thank on return, check in if long), transfer, empathy and closing. The bank name is Northstar Bank.
 Card digits are collected across turns and kept in memory only. Each turn says what was heard. When all 16 are heard the last four are read back and the caller confirms or corrects (a four digit reply replaces the last four). The call screen shows "What Lily heard". The live session uses a longer end-of-speech window so a pause between digit groups does not cut the caller off.
-When a handover starts, the customer page embeds the agent desk (`/agent.html?embed=1&session=ID`), signed in as the demo agent and focused on that call. Pages are framed same-origin only.
+When a handover starts, the customer page links to the Agent CRM case for that call (`/#/crm/call/ID`), where the demo agent accepts it.
 From Google ADK we use the same ideas the Live toolkit documents: session resumption, context window compression, tool calls with blocking behaviour, transcription of both sides and input guardrails. ADK has no built-in call-centre script or hold features, so those are written here.

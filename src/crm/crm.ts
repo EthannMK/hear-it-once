@@ -280,7 +280,7 @@ function computeMeta(c: CaseRow, s: SessionRow | undefined) {
   else if (waitingOnBank) status = 'awaiting_bank';
   else if (pendingConsent || (live && ctx.pending)) status = 'awaiting_customer';
   else if (live || ops.length || get('SELECT 1 FROM case_events WHERE case_id = ? AND event_type LIKE ? LIMIT 1', [c.id, 'fact_%'])) status = 'in_progress';
-  else status = c.data_origin === 'seeded_illustrative' && s?.ended_at ? 'in_progress' : 'new';
+  else status = s?.ended_at || (s && s.verification_status !== 'not_started') ? 'in_progress' : 'new';
   if (status === 'in_progress' && s?.ended_at && (s.outcome === 'resolved' || c.resolution_status === 'resolved' || c.resolution_status === 'informational')) status = 'resolved';
 
   // Resolution type
@@ -337,7 +337,7 @@ export function caseWorkspace(caseId: string, actor: Actor) {
 
   // Key information: one line each, from records only.
   const keyInfo = [
-    { key: 'identity', label: 'Identity verified', state: identity === 'verified' ? 'ok' : identity === 'failed' ? 'bad' : 'unknown', detail: identity === 'verified' ? facts.identity?.value ?? 'Verified during the call' : identity === 'failed' ? 'Did not pass the security check' : 'Not verified' },
+    { key: 'identity', label: identity === 'verified' ? 'Identity verified' : identity === 'failed' ? 'Identity check failed' : 'Identity not verified yet', state: identity === 'verified' ? 'ok' : identity === 'failed' ? 'bad' : 'unknown', detail: identity === 'verified' ? facts.identity?.value ?? 'Verified during the call' : identity === 'failed' ? 'Did not pass the security check' : 'Not verified' },
     { key: 'card', label: 'Card details found', state: cardFact?.status === 'verified' || (customer?.cards.length && identity === 'verified') ? 'ok' : cardFact ? 'warn' : 'unknown', detail: cardFact ? `${cardFact.value}${cardFact.status === 'verified' ? '' : ' (customer said, not checked)'}` : customer?.cards[0] ? `${customer.cards[0].masked} · ${customer.cards[0].status}` : 'No card identified' },
     ...(isTxnIssue || txnFact
       ? [{ key: 'charge', label: 'Charge details matched', state: txnFact?.status === 'confirmed' ? 'ok' : txnFact?.status === 'conflicting' ? 'warn' : 'unknown', detail: txnFact ? txnFact.status === 'conflicting' ? `Bank: ${txnFact.value}; customer: ${txnFact.customerValue}` : txnFact.value : 'Not matched yet' }]
@@ -384,7 +384,7 @@ export function caseWorkspace(caseId: string, actor: Actor) {
     nextSteps: recommendations.filter((r) => r.status !== 'rejected').slice(0, 3).map((r) => r.editedText ?? r.title),
   };
   const summaryText = [
-    `${customer?.name ?? 'The caller'} ${reported ? `reported: “${redactText(reported).slice(0, 200)}”` : 'called; their words were not captured'}.`,
+    `${customer?.name ?? 'The caller'} ${reported ? `reported: “${redactText(reported).slice(0, 200).replace(/[.!?\s]+$/, '')}”` : 'called; their words were not captured'}.`,
     `Identity: ${summary.verification.toLowerCase()}.`,
     transactionLine ? `Transaction: ${transactionLine}.` : null,
     confirmed.length ? `Confirmed by bank systems: ${confirmed.slice(0, 3).join(' ')}` : 'Nothing confirmed by bank systems yet.',
@@ -499,6 +499,10 @@ function buildRecommendations(c: CaseRow, s: SessionRow | undefined, meta: Retur
   const complaint = all<{ type: string }>("SELECT type FROM case_tickets WHERE case_id = ? AND status IN ('open','in_progress')", [c.id]).some((t) => t.type === 'complaint');
   if (!complaint && (ctx.sentiment?.sentiment === 'frustrated' || c.recurring_issue)) add('offer_complaint', 'Offer to log a formal complaint', c.recurring_issue ? 'The customer has called before about the same unresolved issue.' : 'The customer sounded frustrated (indicative only).', c.recurring_issue ? 'confirmed' : 'customer');
   if (meta.handoff && ['queued', 'requested'].includes(meta.handoff.status)) add('accept_handover', 'Accept the handover and greet the customer by name', `Reason: ${HANDOFF_REASON_LABELS[meta.handoff.reason] ?? meta.handoff.reason}. The customer has not been asked to repeat anything.`, 'confirmed');
+  if (meta.handoff?.status === 'connected') {
+    if (x.identity !== 'verified') add('verify_then_help', 'Verify the customer, then ask how you can help', c.issue_type ? 'Identity was not verified on the call. Everything the customer said is in the summary, so don’t ask them to repeat it.' : 'The customer asked for a person before explaining the problem.', 'confirmed');
+    else add('continue_from_brief', 'Pick up from the summary; don’t ask the customer to repeat anything', 'The customer is verified and the case holds what was said and checked.', 'confirmed');
+  }
   if (!out.length) {
     const next = c.next_steps ?? (s?.ended_at ? 'No follow-up needed unless the customer calls back.' : 'Wait for the call to reach a decision.');
     add('next_step', next, 'From the recorded case outcome.', 'confirmed');
@@ -712,9 +716,11 @@ export function updateTicket(ticketId: string, actor: StaffActor, raw: unknown) 
 
 /** Call events that matter to an agent, plus CRM events. Internal plumbing (tool calls, voice link, KB hits) is left out. */
 const HIDDEN = /^(tool\.|voice\.|kb\.|input\.|account\.read|verification\.(readback|timing|started|card_noted)|tags\.updated|call\.tagged|analysis\.|summary\.generated|disclosure\.|demo\.)/;
+/** Only these events carry a detail line an agent needs; the rest show their title alone. */
+const DETAIL_OK = /^(verification\.(failed|retry)|facts\.|eligibility\.|actions?\.|consent\.|handoff\.(prepared|queued|no_agent|completed)|ticket\.|safety\.|case\.|systems\.conflict|source\.completed)/;
 function buildTimeline(c: CaseRow, s: SessionRow | undefined) {
   const call = s
-    ? listTimeline(s.id).filter((e) => !HIDDEN.test(e.type)).map((e) => ({ at: e.at, kind: e.type.split('.')[0], title: e.title, detail: e.detail, status: e.status }))
+    ? listTimeline(s.id).filter((e) => !HIDDEN.test(e.type) && !(e.type === 'source.completed' && e.status === 'ok')).map((e) => ({ at: e.at, kind: e.type.split('.')[0], title: e.title, detail: DETAIL_OK.test(e.type) ? e.detail : null, status: e.status }))
     : [];
   const caseEv = all<{ event_type: string; detail_json: string; created_at: string }>("SELECT event_type, detail_json, created_at FROM case_events WHERE case_id = ? AND (event_type LIKE 'recommendation_%' OR event_type = 'ticket_updated')", [c.id]).map((e) => {
     const d = parseJson<Record<string, string>>(e.detail_json, {});

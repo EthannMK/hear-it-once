@@ -16,7 +16,7 @@ Lily only handles language and turn-taking. A deterministic orchestrator holds a
 * Lookups (card status, transactions, fees, declines) run through the mock bank adapters. Lily states a result only when the backend returned it, and an action only when the backend confirmed it.
 * Every attempt is a timeline event (`verification.retry`, `verification.passed`, `verification.failed`) shown in "Behind the conversation". Card numbers never reach audit, logs or the transcript.
 
-## Agent workspace (`/agent.html`)
+## Agent workspace (now the Agent CRM, `/#/crm`; see CRM.md)
 Sign in as a demo agent. The queue has Waiting, Accepted and Completed groups and updates over SSE.
 * **Customer and call:** name, phone, account ref, full demo card number, duration, status, primary and secondary intents.
 * **Suggested solution:** boxed and labelled AI recommendation, not a confirmed action. Reasoning, supporting facts, confirmed versus not confirmed, and a revise box.

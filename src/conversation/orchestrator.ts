@@ -299,7 +299,7 @@ export async function startCall(input: StartCallInput): Promise<string> {
       ctx.verification.identifiedBy = 'ani';
     }
   }
-  tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: `Channel: ${input.channel === 'voice_browser' ? 'browser voice' : 'text simulator'}${profile ? `; active demo customer ${sc!.customer.name} (caller ID matched — identification only)` : sc ? `; demo scenario ${sc.id}` : ctx.freeMode ? '; free-talk demo' : ''}.`, status: 'ok', source: 'phone line', ref: correlationId });
+  tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: profile ? `Caller ID matched ${sc!.customer.name}. That identifies the caller but doesn’t prove who they are.` : null, status: 'ok', source: 'phone line', ref: correlationId });
   say(s, M.GREETING_NOTICE, 'system');
   // On a live voice call Lily speaks her own greeting; the AI disclosure is recorded when she has
   // actually said it (see the voice bridge), not assumed here.
@@ -603,7 +603,8 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
     type: 'intent.identified',
     stage: 'understand',
     title: cls.issueType ? `Intent identified: ${ISSUE_LABELS[cls.issueType]}` : cls.unsupportedTopic ? `Request outside supported scope (${cls.unsupportedTopic.replace(/_/g, ' ')})` : 'Intent not clear yet',
-    detail: `Confidence ${cls.confidence.toFixed(2)} (${cls.model}); threshold ${min}. ${slotSummary(c.issue.slots)}`,
+    detail: slotSummary(c.issue.slots),
+    data: { confidence: cls.confidence, model: cls.model, threshold: min },
     status: cls.issueType && cls.confidence >= min ? 'ok' : 'warn',
     source: `intent model: ${cls.model}`,
   });

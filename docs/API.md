@@ -85,6 +85,22 @@ List endpoints take `limit` (≤100, audit ≤200) and an opaque `cursor`; respo
 | `GET /api/policy` | `policy.read` | Active policy and BRD targets |
 | `POST /api/qa/reviews` | `qa.review` | `{sessionId, actionCorrect, safetyIncident, customerRepeatedIssue, score, notes}` |
 
+## Agent CRM endpoints (staff)
+
+Reads need `case.read`; writes need `case.update` (agent role). All are audited. Card numbers are refused as search terms.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/crm/customers?q=` | Search by name, account reference, phone last four or case/ticket reference. Empty `q` lists demo and recently active customers. |
+| GET | `/api/crm/customers/:id` | Profile (masked contact details and cards), recent transactions, cases (verified and identified-only), tickets. |
+| GET | `/api/crm/cases?view=attention\|open\|resolved\|all&q=` | Case list; live calls and waiting customers first, then priority. |
+| GET | `/api/crm/calls/:sessionId` | `{ caseId }` for a call, 404 if no case was opened. |
+| GET | `/api/crm/cases/:id` | Case workspace: customer, key information, summary, facts with status, tags (rule-based, overrides, effective), suggestions, actions, handoff, tickets, timeline, transcript, earlier cases, taxonomy. |
+| PATCH | `/api/crm/cases/:id` | `{ version, overrides?: { category, issueType, priority, status, resolutionType, escalationReason } (null = back to automatic), notes? }`. 409 when `version` is stale. |
+| POST | `/api/crm/cases/:id/recommendations/:kind` | `{ decision: accept\|reject\|edit, text? }`. Records the agent's decision only; it never runs an account action. 409 when the suggestion no longer applies. |
+| POST | `/api/crm/cases/:id/tickets` | `{ type: complaint\|escalation, reason, team?, priority?, requestKey }`. 201 new; 200 `{ duplicate: true }` for a repeated key or when an open ticket of that type already exists. |
+| PATCH | `/api/crm/tickets/:id` | `{ status, note? }`, forward moves only (open → in_progress → resolved → closed); 409 otherwise. |
+
 ## Admin endpoints (synthetic data only)
 
 | Method & path | Permission | Purpose |
