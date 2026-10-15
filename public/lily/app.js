@@ -1,386 +1,631 @@
-// Hear It Once × Lily (Northstar Bank) — one page: demo customers and test data beside the live call, then a summary.
+// Hear It Once × Lily (Northstar Bank) — the judge experience, two screens:
+//   1) #/            Talk to Lily: test-data panel, live call, "Behind the conversation"
+//   2) #/agent/:id   Agent view: what a human agent sees for that call (+ the customer's summary)
+// The call ends → the page flips to the agent view of that same call automatically.
+// Everything shown comes from the server: WebSocket messages, the call view, the timeline and
+// the agent workspace read model. Nothing is simulated in the browser.
 import { api, h } from '/js/lib.js';
 import { Mic, Player } from '/lily/audio.js';
 import { t, tList, LANGS, getLang, setLang } from '/lily/i18n.js';
 
 const root = document.getElementById('root');
-const live = document.getElementById('sr-live');
-const say = (m) => { live.textContent = m; };
-const S = { cards: [], demoData: true, status: null, selected: null, call: null };
+const srLive = document.getElementById('sr-live');
+const say = (m) => { srLive.textContent = m; };
+const S = { cards: [], selected: null, status: null, bank: 'Northstar Bank', call: null, lastCall: null };
+try { S.lastCall = sessionStorage.getItem('hio.lastCall'); } catch { /* storage blocked */ }
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; } };
+const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
+const group4 = (d) => String(d ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/g, '$1 ');
+const STAGES = ['understand', 'verify', 'investigate', 'explain', 'confirm', 'act', 'record', 'resolve', 'handoff'];
+const STAGE_LABEL = { understand: 'Understand', verify: 'Verify', investigate: 'Investigate', explain: 'Explain', confirm: 'Confirm', act: 'Act', record: 'Record', resolve: 'Resolve', handoff: 'Handover' };
 
+/* ------------------------------------------------------------------ icons */
 const NS = 'http://www.w3.org/2000/svg';
-function svg(path, { fill = false, vb = '0 0 24 24' } = {}) {
+const P = {
+  wave: ['M4 10v4', 'M8 7v10', 'M12 4v16', 'M16 7v10', 'M20 10v4'],
+  mic: ['M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z', 'M19 11a7 7 0 0 1-14 0', 'M12 18v3'],
+  micOff: ['M3 3l18 18', 'M9 9v3a3 3 0 0 0 5 2.2', 'M15 10V6a3 3 0 0 0-5.7-1.3', 'M5 11a7 7 0 0 0 11 5.7', 'M12 18v3'],
+  phone: ['M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z'],
+  arrow: ['M5 12h14', 'M13 6l6 6-6 6'],
+  end: ['M5 15c4-4 10-4 14 0l-2 3-3-1v-2a10 10 0 0 0-4 0v2l-3 1z'],
+  person: ['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M4 21a8 8 0 0 1 16 0'],
+  headset: ['M4 14v-2a8 8 0 0 1 16 0v2', 'M4 14h3v6H4z', 'M17 14h3v6h-3z'],
+  cc: ['M3 6h18v12H3z', 'M10 10.5a2 2 0 1 0 0 3', 'M17 10.5a2 2 0 1 0 0 3'],
+  send: ['M4 12l16-8-6 16-2-7z'],
+  check: ['M5 12l5 5 9-10'],
+  x: ['M6 6l12 12', 'M18 6L6 18'],
+  alert: ['M12 3l10 18H2z', 'M12 10v4', 'M12 17v.5'],
+  info: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 11v5', 'M12 8v.5'],
+  lock: ['M6 11h12v9H6z', 'M8 11V8a4 4 0 0 1 8 0v3'],
+  flask: ['M9 3h6', 'M10 3v6L4 19a1.5 1.5 0 0 0 1.3 2h13.4A1.5 1.5 0 0 0 20 19l-6-10V3'],
+  activity: ['M3 12h4l3-8 4 16 3-8h4'],
+  volume: ['M4 9h4l5-4v14l-5-4H4z', 'M17 9a4 4 0 0 1 0 6'],
+  keyboard: ['M3 6h18v12H3z', 'M7 10h.01', 'M11 10h.01', 'M15 10h.01', 'M7 14h10'],
+  retry: ['M4 12a8 8 0 1 0 2.4-5.7', 'M4 4v4h4'],
+  copy: ['M9 9h11v11H9z', 'M5 15V4h11'],
+};
+function icon(name) {
   const s = document.createElementNS(NS, 'svg');
-  s.setAttribute('viewBox', vb); s.setAttribute('aria-hidden', 'true');
-  s.setAttribute('fill', fill ? 'currentColor' : 'none'); s.setAttribute('stroke', fill ? 'none' : 'currentColor');
-  s.setAttribute('stroke-width', '1.8'); s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round');
-  for (const d of [].concat(path)) { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); s.append(p); }
+  s.setAttribute('viewBox', '0 0 24 24');
+  s.setAttribute('class', 'i');
+  s.setAttribute('aria-hidden', 'true');
+  for (const d of P[name] ?? []) { const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); s.append(p); }
   return s;
 }
-const ICON = {
-  mic: () => svg(['M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z', 'M5 11a7 7 0 0 0 14 0', 'M12 18v3']),
-  micOff: () => svg(['M3 3l18 18', 'M9 9v3a3 3 0 0 0 5 2.2', 'M15 10V6a3 3 0 0 0-5.7-1.3', 'M5 11a7 7 0 0 0 11 5.7', 'M12 18v3']),
-  end: () => svg(['M4 15c5-4 11-4 16 0l-2 3-3-1.5v-2.5c-2-.7-4-.7-6 0V16.5L6 18z']),
-  person: () => svg(['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M4 21a8 8 0 0 1 16 0']),
-  cc: () => svg(['M4 6h16v12H4z', 'M9 10.5a2 2 0 1 0 0 3', 'M16 10.5a2 2 0 1 0 0 3']),
-  wave: () => svg(['M3 12h2', 'M7 8v8', 'M11 5v14', 'M15 8v8', 'M19 12h2'], { vb: '0 0 24 24' }),
-};
-const brandSvg = () => svg(['M4 12h2', 'M8 7v10', 'M12 4v16', 'M16 8v8', 'M20 12h0']);
 
-function langPicker() {
-  const sel = h('select.langsel', { 'aria-label': t('lang'), disabled: !!(S.call && !S.call.ended), title: t('langHint'), onchange: (e) => setLang(e.target.value) },
-    LANGS.map(([c, n]) => h('option', { value: c, ...(c === getLang() ? { selected: '' } : {}), lang: c === 'fil' ? 'fil' : c }, n)));
-  return h('label.langwrap', h('span.sr-only', t('lang')), sel);
+/* ------------------------------------------------------------------ chrome */
+function header(active) {
+  const callLive = S.call && !S.call.ended;
+  const agentHref = S.lastCall ? `#/agent/${encodeURIComponent(S.lastCall)}` : '#/';
+  const lang = h('select', { 'aria-label': t('lang'), title: t('langHint'), disabled: !!callLive, onchange: (e) => setLang(e.target.value) },
+    LANGS.map(([c, n]) => h('option', { value: c, lang: c === 'fil' ? 'fil' : c, ...(c === getLang() ? { selected: '' } : {}) }, n)));
+  return h('header.top',
+    h('a.brand', { href: '#/' }, h('span.mk', icon('wave')), h('b', 'Hear It Once')),
+    h('span.badge.lav', `${S.bank} · demo`),
+    h('nav.tabs', { 'aria-label': 'Screens' },
+      h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Talk to Lily'),
+      h('a', { href: agentHref, 'aria-current': active === 'agent' ? 'page' : null, 'aria-disabled': S.lastCall && !callLive ? null : 'true', title: S.lastCall ? 'What a human agent sees for your last call' : 'Available after your first call' }, '2 · Agent view')),
+    h('span.grow'),
+    h('label.langwrap', h('span.sr-only', t('lang')), lang),
+  );
 }
-function top(extra) {
-  return h('header.top', h('a.brand', { href: '/' }, brandSvg(), 'Hear It Once'), h('span.grow'), extra ?? null, langPicker(),
-    h('a.link', { href: '/agent.html', target: '_blank', rel: 'noopener' }, t('openAgent')));
+function render(active, ...nodes) {
+  root.replaceChildren(header(active), ...nodes.flat().filter(Boolean));
 }
-function render(...n) { root.replaceChildren(...n.flat().filter(Boolean)); window.scrollTo(0, 0); }
+let toastT = 0;
+function toast(m) {
+  document.querySelector('.toast')?.remove();
+  const el = h('div.toast', { role: 'status' }, m);
+  document.body.append(el);
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.remove(), 3800);
+}
 
+/* ------------------------------------------------------------------ routing */
+window.addEventListener('hashchange', route);
+async function route() {
+  const m = location.hash.match(/^#\/agent\/([^/]+)(\/summary)?/);
+  if (m) {
+    if (S.call && !S.call.ended) S.call.destroy();
+    return agentView(decodeURIComponent(m[1]), m[2] ? 'summary' : 'agent');
+  }
+  if (S.call && !S.call.ended) return; // the call screen is already on the page
+  return home();
+}
 
-/* ------------------------------------------------------------------ single page: demo customers + live call */
-const groupPan = (n) => String(n ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/g, '$1 ');
-const standing = (k) => ({ good: t('good'), watch: t('watch'), restricted: t('restricted') }[k] ?? k);
-
+/* ================================================================== SCREEN 1 · talk to Lily */
 async function home() {
-  S.call?.destroy?.(); S.call = null; S.desk = null; S.deskFor = null;
-  render(top(), h('main.single', h('div.skeleton', { role: 'status', 'aria-label': t('loading') }, h('span.sk.w60'), h('span.sk.w90'), h('span.sk.w75'), h('span.sk.w90'))));
+  S.call = null;
+  render('talk', h('main.judge', h('div.card.td', h('p.muted', t('loading'))), h('div')));
   try {
     const [j, st] = await Promise.all([api('/api/demo/customers'), api('/api/live/status')]);
-    S.cards = j.items; S.demoData = true; S.disclaimer = j.disclaimer; S.bank = j.bank; S.status = st;
-  } catch (e) { S.cards = []; S.status = { available: false, reason: e.message }; S.loadError = e.message; }
-  if (!S.selected || !S.cards.find((c) => c.id === S.selected)) S.selected = S.cards[0]?.id ?? null;
+    S.cards = j.items; S.bank = j.bank ?? S.bank; S.status = st;
+  } catch (e) {
+    S.cards = []; S.status = { available: false, reason: e.message }; S.loadError = e.message;
+  }
+  if (!S.selected || !S.cards.some((c) => c.id === S.selected)) S.selected = S.cards[0]?.id ?? null;
   drawHome();
 }
+const card = () => S.cards.find((c) => c.id === S.selected);
 
-function profilePanel(locked) {
-  const sel = S.cards.find((c) => c.id === S.selected);
-  const tabs = h('div.ptabs', { role: 'radiogroup', 'aria-label': t('pickIdentity') }, S.cards.map((c) =>
-    h('button.ptab', { type: 'button', role: 'radio', 'aria-checked': String(c.id === S.selected), disabled: locked, onclick: () => { S.selected = c.id; drawHome(); } }, c.name.split(' ')[0])));
-  const body = !sel ? h('p.muted', S.loadError ?? t('noProfiles')) : h('div.pbody',
-    h('div.pname', h('h3', sel.name), h('span.chip' + (sel.cardStatus === 'active' ? '.ok' : '.warn'), t('cardStatus', { s: sel.cardStatus === 'active' ? t('active') : sel.cardStatus }))),
-    h('p.small.muted', sel.blurb),
-    h('dl.facts',
-      h('div', h('dt', t('phone')), h('dd.mono', sel.phone)),
-      h('div', h('dt', t('account')), h('dd.mono', sel.accountRef)),
-      h('div', h('dt', t('standing')), h('dd', standing(sel.accountStanding)))),
-    h('div.pan', h('span.label', `${sel.cardNetwork ?? ''} ${sel.cardProduct ?? ''} · ${t('panLabel')}`.trim()), h('b.mono.pannum', groupPan(sel.cardNumber)), h('span.small', t('panHelp'))),
-    sel.restrictions.length ? h('div', h('span.label', t('restrictions')), h('ul.plain', sel.restrictions.map((r) => h('li', r)))) : null,
-    h('div', h('span.label', t('recent')), sel.recentTransactions.length ? h('ul.tx', sel.recentTransactions.map((x) => h('li', h('span', x.merchant), h('span.mono', x.amount), h('span.small.muted', `${x.at}${x.kind === 'fee' ? ' · fee' : ''}${x.status && x.status !== 'posted' ? ' · ' + x.status : ''}`)))) : h('p.small.muted', t('none'))),
-    sel.declines.length ? h('div', h('span.label', t('declined')), h('ul.tx', sel.declines.map((d) => h('li', h('span', d.merchant), h('span.mono', d.amount), h('span.small.muted', `${d.at} · ${d.reason}`))))) : null);
-  return h('aside.panel.demo', { 'aria-label': t('panelTitle') },
-    h('header', h('h3', t('panelTitle')), h('span.grow'), h('span.chip.demo', S.bank ?? 'Northstar Bank')),
-    h('p.disc', t('disclaimer')),
-    tabs, body,
-    h('p.small.muted', locked ? t('lockedNote') : t('hintNote')));
+/** Test data for judges: compact, clearly framed as dummy data to type or read to Lily. */
+function testPanel(locked) {
+  const c = card();
+  const copy = (v, label) => h('button.copy', { type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(v); toast(`${label} copied`); } catch { toast('Copy is not available here.'); } } }, 'Copy');
+  return h('aside.td', { 'aria-label': 'Test data for judges' },
+    h('h2', icon('flask'), 'Test data for judges'),
+    h('div.how', h('b', 'These are fictional test details, not your own.'), ' Pick a test customer before you start. During the call:',
+      h('ol', h('li', 'Ask Lily anything about cards or banking.'), h('li', 'When she asks to verify you, read out the ', h('b', 'card number'), ' below.'), h('li', 'Try a wrong number first to see her retry safely.'))),
+    h('div.ptabs', { role: 'radiogroup', 'aria-label': 'Choose a test customer' }, S.cards.map((x) =>
+      h('button', { type: 'button', role: 'radio', 'aria-checked': String(x.id === S.selected), disabled: locked, onclick: () => { S.selected = x.id; drawHome(); } }, x.name.split(' ')[0]))),
+    !c ? h('p.small.muted', S.loadError ?? 'No test customers are available.') : [
+      h('div.who', h('b', c.name), h(`span.chip${c.cardStatus === 'active' ? '.ok' : '.warn'}`, `Card ${c.cardStatus}`)),
+      h('p.blurb', c.blurb),
+      h('dl',
+        h('div', h('dt', 'Card number to read out (dummy)'), h('dd', h('span.pan', group4(c.cardNumber)), copy(c.cardNumber, 'Card number'))),
+        h('div', h('dt', 'Calling from (caller ID, dummy)'), h('dd.mono', c.phone)),
+        h('div', h('dt', 'Account reference'), h('dd.mono', c.accountRef, ' ', copy(c.accountRef, 'Account reference')))),
+      c.restrictions?.length ? h('div.lockn', c.restrictions.join(' · ')) : null,
+      h('details', h('summary', `What the bank's systems hold (${(c.recentTransactions?.length ?? 0) + (c.declines?.length ?? 0)} records)`),
+        h('ul.tx', (c.recentTransactions ?? []).map((x) => h('li', h('span.m', x.merchant), h('span.mono', x.amount), h('span.s', `${x.at}${x.kind === 'fee' ? ' · fee' : ''}${x.status && x.status !== 'posted' ? ' · ' + x.status : ''}`))),
+          (c.declines ?? []).map((d) => h('li', h('span.m', `Declined: ${d.merchant}`), h('span.mono', d.amount), h('span.s', `${d.at} · ${d.reason}`))))),
+    ],
+    locked ? h('p.lockn', 'The test customer is fixed during a call.') : null,
+    h('p.fine', `${S.bank} is fictional. Every name, number and record here is invented for this demo. Never enter real card details.`));
 }
 
 function drawHome() {
-  const st = S.status ?? {};
-  const voiceOk = !!st.available;
-  const host = h('section.callhost', { 'aria-label': 'Call with Lily' });
-  S.host = host;
-  const sel = S.cards.find((c) => c.id === S.selected);
-  host.append(
-    h('div.panel.idle',
-      h('div.aurora', { 'aria-hidden': 'true' }, h('span.blob.b1'), h('span.blob.b2'), h('span.blob.b3')),
-      h('div.hero-orb', heroOrb().el),
-      h('div.status-row', h('span.chip', [h('span.dot' + (voiceOk ? '.ok' : '.warn')), ' ' + (voiceOk ? t('voiceOk') : t('voiceOff'))]), h('span.chip.demo', t('ai'))),
-      h('h1', t('heroTitle')),
-      h('p.lead', t('heroLead')),
-      sel ? h('div.cta', h('button.btn.primary.lg', { type: 'button', onclick: () => startCall(sel) }, t('start')),
-        h('p.small.muted', t('startNote'))) : null,
-      h('div.tries', h('span.label', t('tryTitle')), h('ul.plain.tryl', tList('ex').map((x) => h('li', x)))),
-      !voiceOk ? h('p.banner', st.reason ?? 'Live voice is not configured on this server. You can still type to Lily.') : null));
-  render(top(), h('main.single', profilePanel(false), host));
+  const ready = !!S.status?.available;
+  const bars = h('div.bars', { 'aria-hidden': 'true' }, [14, 26, 38, 48, 34, 44, 24, 16].map((n) => h('i', { style: `height:${n}px` })));
+  const c = card();
+  render('talk', h('main.judge',
+    testPanel(false),
+    h('section', { 'aria-label': 'Talk to Lily' },
+      h('div.hero',
+        h('div',
+          h('span.badge.mint', icon('lock'), 'AI assistant · dummy data'),
+          h('h1', 'Meet Lily.', h('br'), h('em', 'Your banking questions,'), ' heard.'),
+          h('p.lede', `Talk to Lily, ${S.bank}'s AI assistant, the way you'd talk to a person. She verifies who you are, checks the bank's systems while you talk, does what she's allowed to — and hands you to a human with the full story whenever you ask.`),
+          h('button.connect', { type: 'button', disabled: !c, onclick: () => startCall(c) },
+            h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', c ? `As test customer ${c.name}` : 'Choose a test customer first')), icon('arrow')),
+          h('div.subs',
+            h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? `Live voice ready · ${S.status.model ?? 'Gemini Live'}` : 'Live voice is not available right now — you can type to Lily'),
+            h('p', icon('info'), h('span', 'You are speaking with an AI, not a person. Your browser will ask for the microphone. No audio is stored.')),
+            h('p', icon('keyboard'), h('span', 'No microphone? Start anyway and type — Lily still answers.')))),
+        h('div.pod-wrap',
+          h('div.pod', h('div', bars, h('div.mic', icon('wave')), h('h3', 'Lily'), h(`div.ready${ready ? '' : '.off'}`, ready ? 'Ready to listen' : 'Typing only'), h('div.prov', `Call language: ${LANGS.find(([k]) => k === getLang())?.[1] ?? 'English'}`))),
+          h('div.float.f1', icon('lock'), 'Voice keys stay on the server'),
+          h('div.float.f2', icon('headset'), 'Human handover any time'))),
+      !ready && S.status?.reason ? h('p.banner.warn', S.status.reason) : null,
+      h('div.card.asks', h('span.cap', 'Things to try'), h('div.chips', [...(tList('ex') ?? []), 'How are you today?'].map((x) => h('span', `“${x}”`)))),
+      h('div.flow',
+        h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. Lily verifies you with the test card number.')),
+        h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each real backend step: lookups, policy checks, actions, handover.')),
+        h('div.card', h('b', h('span', '3'), 'Agent view'), h('p', 'When you end the call, you see exactly what a human agent would see for it.'))))));
 }
 
-/** Idle hero orb: a slow breathing ring so the page feels alive before the call starts. */
-function heroOrb() {
-  S.heroOrb?.destroy?.();
-  const orb = orbEl('listening');
-  orb.attach(() => 0.16 + 0.1 * Math.sin(performance.now() / 900) + 0.04 * Math.sin(performance.now() / 310));
-  S.heroOrb = orb;
-  return orb;
+/* ------------------------------------------------------------------ connecting */
+function sheet(steps, extra = {}) {
+  document.querySelector('.overlay')?.remove();
+  const ov = h('div.overlay', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'conn-t' },
+    h('div.sheet',
+      h('h2#conn-t', extra.title ?? 'Connecting with Lily'),
+      h('p.lead', extra.lead ?? 'Each step is a real check — nothing is skipped or faked.'),
+      h('ol.steps', steps.map((s) => h(`li.${s.state}`, h('span.s', s.state === 'ok' ? icon('check') : s.state === 'fail' ? icon('x') : null), h('div', h('b', s.label), h('span', s.detail ?? ''))))),
+      extra.error ? h('p.banner.bad', { role: 'alert' }, extra.error) : null,
+      extra.actions?.length ? h('div.acts', extra.actions) : null));
+  document.body.append(ov);
+  ov.querySelector('button')?.focus();
 }
+const closeSheet = () => document.querySelector('.overlay')?.remove();
 
-async function startCall(card) {
-  S.heroOrb?.destroy?.(); S.heroOrb = null;
-  const orb = orbEl('connecting');
-  const labels = [t('c1'), t('c2'), t('connecting')];
-  const list = h('ol.steps', labels.map((l) => h('li', h('span.ic'), l)));
-  S.host.replaceChildren(h('div.panel.connect', orb.el, h('h2', t('connecting')), list));
-  const mark = (i) => [...list.children].forEach((li, k) => { li.className = k < i ? 'done' : k === i ? 'now' : ''; li.firstChild.textContent = k < i ? '✓' : ''; });
-  mark(0);
-  // The microphone prompt must come from the click that started the call.
-  const call = new CallController(card);
-  S.call = call;
-  orb.stop = orb.attach(() => 0.15 + Math.random() * 0.08);
-  try {
-    await new Promise((r) => setTimeout(r, 350)); mark(1);
-    await call.create(); mark(2);
-    await call.openVoice();
-    orb.stop?.();
-    callScreen(call);
-  } catch (e) {
-    orb.stop?.();
-    S.host.replaceChildren(h('div.panel.connect', h('h2', t('failed')), h('p.banner.bad', e.message || 'Connection failed.'), h('div.cta', h('button.btn.primary', { onclick: home }, t('retry')))));
+async function startCall(c) {
+  const live = !!S.status?.available;
+  const steps = [
+    { k: 'mic', label: 'Microphone', detail: 'Your browser will ask for permission.', state: live ? 'run' : 'skip' },
+    { k: 'call', label: 'Starting your call', detail: `Test customer ${c.name}`, state: 'todo' },
+    { k: 'lily', label: 'Connecting to Lily', detail: live ? (S.status.model ?? 'Gemini Live') : (S.status?.reason ?? 'Live voice unavailable'), state: 'todo' },
+  ];
+  const set = (k, state, detail) => { const s = steps.find((x) => x.k === k); s.state = state; if (detail) s.detail = detail; };
+  const call = new Call(c);
+  let cancelled = false;
+  const cancelBtn = () => h('button.btn', { type: 'button', onclick: () => { cancelled = true; call.destroy(); closeSheet(); } }, 'Cancel');
+  sheet(steps, { actions: [cancelBtn()] });
+
+  // 1. Microphone (inside the click, so the permission prompt is allowed). Lily still talks if it's refused.
+  if (live) {
+    try { await call.startAudio(); set('mic', 'ok', 'Microphone ready.'); }
+    catch (e) { call.micDenied = true; set('mic', 'fail', e.name === 'NotAllowedError' ? 'Blocked — you can type instead; Lily will still speak.' : 'Not available — you can type instead.'); }
   }
-}
-
-/* ------------------------------------------------------------------ orb */
-function orbEl(state) {
-  const el = h('div.orb', { 'data-state': state, role: 'img', 'aria-label': 'Lily voice indicator' });
-  const cv = document.createElement('canvas'); cv.width = 600; cv.height = 600;
-  const av = h('div.avatar', brandSvgWhite());
-  el.append(cv, av);
-  const ctx = cv.getContext('2d');
-  const BARS = 64; const vals = new Array(BARS).fill(0);
-  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-  let raf = 0; let getLevel = () => 0; let color = '#5846c9';
-  function frame(t) {
-    const lv = getLevel(); ctx.clearRect(0, 0, 600, 600); ctx.lineCap = 'round'; ctx.lineWidth = 6; ctx.strokeStyle = color;
-    for (let i = 0; i < BARS; i++) {
-      const a = (i / BARS) * Math.PI * 2 - Math.PI / 2;
-      const target = reduced ? lv * 0.5 : lv * (0.45 + 0.55 * Math.abs(Math.sin(i * 1.7 + t / 140))) ;
-      vals[i] += (target - vals[i]) * 0.35;
-      const r1 = 150; const r2 = r1 + 8 + vals[i] * 120;
-      ctx.globalAlpha = 0.25 + vals[i] * 0.75;
-      ctx.beginPath(); ctx.moveTo(300 + Math.cos(a) * r1, 300 + Math.sin(a) * r1); ctx.lineTo(300 + Math.cos(a) * r2, 300 + Math.sin(a) * r2); ctx.stroke();
-    }
-    raf = requestAnimationFrame(frame);
+  if (cancelled) return;
+  // 2. Create the call.
+  set('call', 'run'); sheet(steps, { actions: [cancelBtn()] });
+  try { await call.create(); set('call', 'ok', `Call ${call.id}`); }
+  catch (e) { set('call', 'fail', e.message); sheet(steps, { error: `The call could not start: ${e.message}`, actions: [h('button.btn.primary', { type: 'button', onclick: () => { closeSheet(); startCall(c); } }, icon('retry'), 'Try again'), cancelBtn()] }); call.destroy(); return; }
+  if (cancelled) return;
+  // 3. Live voice.
+  if (!live) {
+    set('lily', 'fail', S.status?.reason ?? 'Live voice is not configured.');
+    call.textOnly = true;
+    sheet(steps, { error: 'Lily’s live voice is not available on this server. You can still have the whole conversation by typing — the same backend checks run.', actions: [h('button.btn.primary', { type: 'button', onclick: () => { closeSheet(); callScreen(call); } }, icon('keyboard'), 'Continue by typing'), cancelBtn()] });
+    return;
   }
-  return {
-    el,
-    setState(s, c) { el.dataset.state = s; if (c) color = c; },
-    attach(fn) { getLevel = fn; cancelAnimationFrame(raf); raf = requestAnimationFrame(frame); return () => cancelAnimationFrame(raf); },
-    destroy() { cancelAnimationFrame(raf); },
-  };
+  set('lily', 'run'); sheet(steps, { actions: [cancelBtn()] });
+  const r = await call.openVoice();
+  if (cancelled) return;
+  if (!r.ok) {
+    set('lily', 'fail', r.message);
+    sheet(steps, { error: `Lily’s voice could not connect: ${r.message}`, actions: [h('button.btn.primary', { type: 'button', onclick: () => { closeSheet(); callScreen(call); } }, icon('keyboard'), 'Continue by typing'), cancelBtn()] });
+    return;
+  }
+  set('lily', 'ok', `Connected · ${r.provider ?? 'live voice'}`);
+  sheet(steps, { actions: [] });
+  setTimeout(() => { closeSheet(); callScreen(call); }, 400);
 }
-const brandSvgWhite = () => { const s = svg(['M4 12h2', 'M8 7v10', 'M12 4v16', 'M16 8v8', 'M20 12h0']); s.setAttribute('stroke-width', '2.4'); s.style.color = '#fff'; return s; };
 
 /* ------------------------------------------------------------------ call controller */
-const spLabel = (k) => ({ customer: t('you'), assistant: t('lily'), agent: t('agent') }[k] ?? '');
-class CallController {
-  constructor(card) {
-    this.card = card; this.id = null; this.ws = null; this.mic = null; this.player = null;
-    this.muted = false; this.phase = 'idle'; this.reconnecting = false; this.ended = false; this.micDenied = false;
-    this.events = []; this.turns = []; this.partial = {}; this.view = null; this.voiceReady = false; this.handoff = null;
-    this.ui = {};
+class Call {
+  constructor(c) {
+    this.card = c; this.id = null; this.ws = null; this.mic = null; this.player = null;
+    this.muted = false; this.phase = 'idle'; this.reconnecting = false; this.ended = false; this.ending = false;
+    this.voiceReady = false; this.textOnly = false; this.micDenied = false;
+    this.turns = []; this.partial = {}; this.events = []; this.view = null; this.banner = null; this.ui = {}; this.latency = null;
+    S.call = this;
+  }
+  async startAudio() {
+    this.player = new Player();
+    await this.player.resume().catch(() => {});
+    this.mic = new Mic((b64) => { if (this.ws?.readyState === 1 && !this.muted) this.ws.send(JSON.stringify({ type: 'audio', data: b64 })); });
+    try { await this.mic.start(); } catch (e) { this.mic = null; throw e; }
   }
   async create() {
     const r = await api('/api/calls', { method: 'POST', body: { channel: 'voice_browser', profileId: this.card.id } });
     this.id = r.sessionId; this.view = r.view;
+    this.turns = (r.view?.transcript ?? []).map((x) => ({ speaker: x.speaker, kind: x.kind ?? '', text: x.text, at: x.at }));
+    S.lastCall = this.id;
+    try { sessionStorage.setItem('hio.lastCall', this.id); } catch { /* ignore */ }
   }
-  async openVoice() {
-    this.player = new Player(); await this.player.resume().catch(() => {});
-    this.mic = new Mic((b64) => this.ws?.readyState === 1 && !this.muted && this.ws.send(JSON.stringify({ type: 'audio', data: b64 })));
-    try { await this.mic.start(); } catch { this.micDenied = true; this.mic = null; }
-    await new Promise((resolve, reject) => {
+  openVoice() {
+    if (!this.player) { this.player = new Player(); this.player.resume().catch(() => {}); }
+    return new Promise((resolve) => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(`${proto}://${location.host}/api/calls/${this.id}/live?lang=${getLang()}`);
-      this.ws = ws; let settled = false;
+      this.ws = ws;
+      let settled = false;
+      const done = (r) => { if (!settled) { settled = true; clearTimeout(timer); resolve(r); } };
+      const timer = setTimeout(() => done({ ok: false, message: 'The voice service did not answer in time.' }), 20000);
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
-        if (m.type === 'ready') { settled = true; this.voiceReady = true; resolve(); }
-        else if (m.type === 'error' && !settled) { settled = true; this.textOnly = true; this.voiceError = m.message; resolve(); }
+        if (m.type === 'ready') { this.voiceReady = true; done({ ok: true, provider: m.model ?? m.provider }); }
+        else if (m.type === 'error' && !settled) { this.textOnly = true; done({ ok: false, message: m.message }); }
         this.onMessage(m);
       };
-      ws.onerror = () => { if (!settled) { settled = true; this.textOnly = true; this.voiceError = 'Live voice could not connect.'; resolve(); } };
-      ws.onclose = () => { if (!settled) { settled = true; reject(new Error('The voice connection closed before it started.')); } else if (!this.ended) this.onDrop(); };
+      ws.onerror = () => { this.textOnly = !this.voiceReady; done({ ok: false, message: 'The voice connection failed.' }); };
+      ws.onclose = () => {
+        done({ ok: false, message: 'The voice connection closed before it was ready.' });
+        if (this.voiceReady && !this.ended && !this.ending) { this.reconnecting = true; this.banner = { kind: 'warn', text: 'Voice connection lost. Your conversation is saved — keep typing, or end the call.' }; this.voiceReady = false; this.ui.refresh?.(); }
+      };
     });
-    if (this.textOnly) { this.mic?.stop(); this.mic = null; }
   }
-  onDrop() { if (this.ended) return; this.reconnecting = true; this.banner = { kind: 'warn', text: t('bLost') }; this.ui.refresh?.(); }
   onMessage(m) {
     switch (m.type) {
       case 'audio': this.player?.push(m.data); break;
-      case 'interrupted': this.player?.flush(); this.partial.assistant = ''; break;
-      case 'partial': this.partial[m.speaker] = m.text; this.ui.transcript?.(); break;
-      case 'turns': this.turns = m.turns.filter((t) => t.speaker !== 'system' || t.text); this.partial = {}; this.ui.transcript?.(); break;
+      case 'interrupted': this.player?.flush(); this.partial.assistant = ''; this.ui.transcript?.(); break;
+      case 'partial': this.partial[m.speaker] = m.text; if (m.speaker === 'customer') this.lastHeard = performance.now(); this.ui.transcript?.(); break;
+      case 'turns': this.turns = m.turns; this.partial = {}; this.ui.transcript?.(); break;
       case 'phase': this.phase = m.phase; this.ui.refresh?.(); break;
       case 'timeline': this.events.push(m.event); this.ui.activity?.(); break;
       case 'view': this.view = m.view; this.ui.refresh?.(); break;
-      case 'voice': this.reconnecting = m.status === 'reconnecting'; this.banner = m.status === 'lost' ? { kind: 'bad', text: m.message } : m.status === 'restored' ? { kind: 'ok', text: m.message } : { kind: 'warn', text: m.message }; if (m.status === 'restored') setTimeout(() => { if (this.banner?.kind === 'ok') { this.banner = null; this.ui.refresh?.(); } }, 3500); this.ui.refresh?.(); break;
+      case 'voice':
+        this.reconnecting = m.status === 'reconnecting';
+        this.banner = { kind: m.status === 'lost' ? 'bad' : m.status === 'restored' ? 'ok' : 'warn', text: m.message };
+        if (m.status === 'restored') setTimeout(() => { if (this.banner?.kind === 'ok') { this.banner = null; this.ui.refresh?.(); } }, 3500);
+        if (m.status === 'lost') this.voiceReady = false;
+        this.ui.refresh?.();
+        break;
       case 'ended': this.view = m.view; this.finish(); break;
       case 'error': if (this.voiceReady) { this.banner = { kind: 'bad', text: m.message }; this.ui.refresh?.(); } break;
+      default: break;
     }
   }
-  setMuted(v) { this.muted = v; this.mic?.setMuted(v); this.ws?.readyState === 1 && this.ws.send(JSON.stringify({ type: 'mute', muted: v })); this.ui.refresh?.(); say(v ? t('micMuted') : t('micOn')); }
-  sendText(text) {
+  setMuted(v) { this.muted = v; this.mic?.setMuted(v); if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ type: 'mute', muted: v })); this.ui.refresh?.(); say(v ? 'Microphone muted' : 'Microphone on'); }
+  async sendText(text) {
     if (!text.trim()) return;
-    if (this.ws?.readyState === 1 && this.voiceReady) this.ws.send(JSON.stringify({ type: 'text', text }));
-    else api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'utterance', text } }).then((v) => { this.view = v; this.turns = (v.transcript ?? []).map((t, i) => ({ seq: i, speaker: t.speaker, kind: t.kind ?? '', text: t.text })); this.ui.transcript?.(); this.ui.refresh?.(); this.loadTimeline(); }).catch((e) => { this.banner = { kind: 'bad', text: e.message }; this.ui.refresh?.(); });
-  }
-  /** Confirmed state from the server. Used while a handover is open and whenever the live socket is not healthy, so "agent joined" can never be missed. */
-  async poll() {
+    if (this.ws?.readyState === 1 && this.voiceReady) { this.player?.flush(); this.ws.send(JSON.stringify({ type: 'text', text })); return; }
+    this.partial.customer = text; this.phase = 'processing'; this.ui.transcript?.(); this.ui.refresh?.();
     try {
-      const v = await api(`/api/calls/${this.id}`);
-      this.view = v; this.handoff = v.handoff;
-      if (!this.voiceReady || this.reconnecting) { this.turns = (v.transcript ?? []).map((t, i) => ({ seq: i, speaker: t.speaker, kind: t.kind ?? '', text: t.text })); this.ui.transcript?.(); await this.loadTimeline(); }
-      this.ui.refresh?.();
-    } catch { /* try again on the next tick */ }
+      const v = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'utterance', text } });
+      this.absorb(v);
+      await this.loadTimeline();
+    } catch (e) { this.banner = { kind: 'bad', text: e.message }; }
+    this.partial = {}; this.phase = 'idle'; this.ui.transcript?.(); this.ui.refresh?.();
   }
-  /** Typing-only mode has no live socket, so read the recorded backend events instead. */
-  async loadTimeline() { try { const r = await api(`/api/calls/${this.id}/timeline`); this.events = r.items ?? []; this.ui.activity?.(); } catch { /* the transcript still works */ } }
+  async consent(decision) {
+    if (!this.view?.proposal) return;
+    try { this.absorb(await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'consent', proposalId: this.view.proposal.id, decision } })); await this.loadTimeline(); }
+    catch (e) { this.banner = { kind: 'bad', text: e.message }; this.ui.refresh?.(); }
+  }
+  absorb(v) {
+    if (!v) return;
+    this.view = v;
+    if (!this.voiceReady) this.turns = (v.transcript ?? []).map((x) => ({ speaker: x.speaker, kind: x.kind ?? '', text: x.text, at: x.at }));
+    this.ui.transcript?.(); this.ui.refresh?.();
+    if (v.session?.stage === 'ended' && !this.ended) this.finish();
+  }
+  async poll() {
+    try { this.absorb(await api(`/api/calls/${this.id}`)); if (!this.voiceReady) await this.loadTimeline(); } catch { /* next tick */ }
+  }
+  async loadTimeline() {
+    try { const r = await api(`/api/calls/${this.id}/timeline`); this.events = r.items ?? []; this.ui.activity?.(); } catch { /* the transcript still works */ }
+  }
   async requestHuman() {
-    try { this.view = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'request_human' } }); this.handoff = this.view.handoff; this.ui.refresh?.(); say(t('hRequested')); }
+    try { this.absorb(await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'request_human' } })); await this.loadTimeline(); say('Handover requested'); }
     catch (e) { this.banner = { kind: 'bad', text: e.message }; this.ui.refresh?.(); }
   }
   async end() {
-    if (this.ended) return;
-    this.ending = true; this.ui.refresh?.();
+    if (this.ended || this.ending) return;
+    this.ending = true; this.player?.flush(); this.ui.refresh?.();
     if (this.ws?.readyState === 1 && this.voiceReady) this.ws.send(JSON.stringify({ type: 'end' }));
-    else { try { this.view = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'hangup' } }); } catch { /* summary will still load */ } this.finish(); }
-    setTimeout(() => !this.ended && this.finish(), 4000);
+    else { try { this.view = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'hangup' } }); } catch { /* the agent view still loads */ } this.finish(); }
+    setTimeout(() => { if (!this.ended) this.finish(); }, 4000);
   }
-  async finish() { if (this.ended) return; this.ended = true; this.destroy(false); summary(this); }
-  destroy(closeWs = true) { this.mic?.stop(); this.player?.close(); this.mic = this.player = null; if (closeWs) { this.ended = true; this.ws?.close(); } this.ui.stopOrb?.(); }
-  get displayState() {
-    if (this.ending) return 'ending'; if (this.reconnecting) return 'reconnecting'; if (this.muted) return 'muted';
-    if (this.player?.speaking) return 'speaking'; if (this.phase === 'processing') return 'processing';
-    if (this.mic && this.mic.level > 0.12) return 'listening-you'; return 'listening';
+  /** The call is over: flip to screen 2 — the human agent's view of this call. */
+  finish() {
+    if (this.ended) return;
+    this.ended = true;
+    this.destroy();
+    say('Call ended. Opening the agent view.');
+    location.hash = `#/agent/${encodeURIComponent(this.id)}`;
+  }
+  destroy() {
+    this.mic?.stop(); this.player?.close(); this.mic = this.player = null;
+    this.ended = true;
+    try { this.ws?.close(); } catch { /* already closed */ }
+    this.ui.stop?.();
+  }
+  get state() {
+    if (this.ending) return 'ending';
+    if (this.reconnecting) return 'reconnecting';
+    const hs = this.view?.handoff?.status;
+    if (hs === 'connected') return 'agent';
+    if (this.player?.speaking) return 'speaking';
+    if (this.phase === 'processing') return 'processing';
+    if (hs === 'queued' || hs === 'requested') return 'waiting';
+    if (!this.voiceReady) return 'typing';
+    if (this.muted) return 'muted';
+    if (this.mic && this.mic.level > 0.12) return 'hearing';
+    return this.mic ? 'listening' : 'typing';
   }
 }
 
-/* ------------------------------------------------------------------ human agent desk (embedded) */
-const group4 = (d) => String(d).replace(/(.{4})(?=.)/g, '$1 ');
-/** Shows the human agent's workspace beside the call as soon as a handover exists, already signed in and focused on this call. */
-function ensureDesk(c) {
-  if (S.desk && S.deskFor === c.id) return;
-  const main = document.querySelector('main.single');
-  if (!main) return;
-  S.desk?.remove();
-  S.desk = h('section.desk', { 'aria-label': 'Human agent desk' },
-    h('header', h('h3', 'Human agent desk'), h('span.chip.demo', 'What the agent sees'), h('span.grow'),
-      h('a.link', { href: `/agent.html?session=${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Open full screen ↗')),
-    h('p.small.muted.pad', 'Lily has prepared this case for a person: the call reason, what was verified, the transcript and a suggested solution. Accept the handover to take over the conversation.'),
-    h('iframe.deskframe', { src: `/agent.html?embed=1&session=${encodeURIComponent(c.id)}`, title: 'Human agent workspace for this call', loading: 'lazy' }));
-  S.deskFor = c.id;
-  main.append(S.desk);
-}
+const STATE_TEXT = {
+  speaking: ['Lily is speaking', 'Start talking to interrupt her.'],
+  processing: ['Checking', 'Lily is running a check with the bank systems.'],
+  listening: ['Listening', 'Speak naturally — you can interrupt Lily at any time.'],
+  hearing: ['Hearing you', 'Keep going — Lily answers when you pause.'],
+  muted: ['Muted', 'Lily can’t hear you. Unmute to talk, or type below.'],
+  typing: ['Typing mode', 'Type below — the conversation works the same way.'],
+  waiting: ['Waiting for a human agent', 'In-app handover · no person has joined yet.'],
+  agent: ['Agent connected', 'A human agent accepted the handover and has the full brief.'],
+  reconnecting: ['Reconnecting…', 'The voice connection dropped; your conversation is saved.'],
+  ending: ['Ending call…', 'Saving the case — the agent view opens next.'],
+};
+const SEG = ['speaking', 'listening', 'processing', 'muted'];
 
 /* ------------------------------------------------------------------ call screen */
-const STAGE_KEYS = ['understand', 'verify', 'investigate', 'explain', 'confirm', 'act', 'record', 'resolve', 'handoff'];
 function callScreen(c) {
-  let captions = true; let lastStage = null;
-  const orb = orbEl('listening');
-  const stateEl = h('span.state', { 'aria-live': 'off' }); const subEl = h('span.small.muted');
-  const bannerEl = h('div'); const transcriptEl = h('div.transcript', { role: 'log', 'aria-label': t('captions') });
-  const actEl = h('ul.activity', { 'aria-label': t('behind') }); const stageEl = h('div.stagebar');
-  const sideEl = h('div'); const textIn = h('input', { type: 'text', placeholder: c.textOnly ? t('typeOnly') : t('typeHere'), 'aria-label': t('typeOnly'), maxlength: '500', autocomplete: 'off' });
-  const compose = h('form.compose', { onsubmit: (e) => { e.preventDefault(); const m = textIn.value.trim(); if (m) { c.sendText(m); textIn.value = ''; } } }, textIn, h('button.btn.primary', { type: 'submit' }, t('send')));
-  const ctl = (icn, label, onclick, extra = {}) => h('div.ctl-wrap', h('button.ctl', { type: 'button', 'aria-label': label, onclick, ...extra }, icn), label);
-  const muteBtn = h('button.ctl', { type: 'button', 'aria-label': t('muteMic'), 'aria-pressed': 'false', onclick: () => c.setMuted(!c.muted) }, ICON.mic());
-  const ccBtn = h('button.ctl', { type: 'button', 'aria-label': t('captions'), 'aria-pressed': 'true', onclick: () => { captions = !captions; transcriptEl.classList.toggle('hidden', !captions); ccBtn.setAttribute('aria-pressed', String(captions)); } }, ICON.cc());
-  const humanBtn = h('button.ctl', { type: 'button', 'aria-label': t('talkHuman'), onclick: () => c.requestHuman() }, ICON.person());
-  const endBtn = h('button.ctl.end', { type: 'button', 'aria-label': t('endCall'), onclick: () => c.end() }, ICON.end());
-  const wrapC = (b, t) => h('div.ctl-wrap', b, t);
+  let captions = true;
+  const canvas = h('canvas', { role: 'img', 'aria-label': 'Voice activity' });
+  const pill = h('span.pill'); const sub = h('p.sub'); const lat = h('span.lat');
+  const seg = Object.fromEntries(SEG.map((k) => [k, h('span', { 'aria-current': 'false' }, k[0].toUpperCase() + k.slice(1))]));
+  const stage = h('div.stage', { 'aria-live': 'polite' }, lat, canvas, pill, sub, h('div.seg', { 'aria-label': 'Current voice state' }, Object.values(seg)));
+  const head = h('div.card.ch'); const extras = h('div'); const consentEl = h('div'); const handEl = h('div'); const bannerEl = h('div');
+  const list = h('div.tx-list', { role: 'log', 'aria-label': 'Live transcript' });
+  const input = h('input', { type: 'text', placeholder: 'Type to Lily…', 'aria-label': 'Type a message to Lily', maxlength: '500', autocomplete: 'off' });
+  const form = h('form.compose', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (v) { c.sendText(v); input.value = ''; } } }, input, h('button.btn.primary', { type: 'submit' }, icon('send'), 'Send'));
+  const muteBtn = h('button.mute', { type: 'button', 'aria-pressed': 'false', onclick: () => c.setMuted(!c.muted) }, icon('mic'), 'Mute');
+  const ccBtn = h('button.cc', { type: 'button', 'aria-pressed': 'true', onclick: () => { captions = !captions; ccBtn.setAttribute('aria-pressed', String(captions)); list.hidden = !captions; } }, icon('cc'), 'Captions');
+  const humanBtn = h('button.human', { type: 'button', onclick: () => c.requestHuman() }, icon('headset'), 'Transfer to a human');
+  const endBtn = h('button.endc', { type: 'button', onclick: () => c.end() }, icon('end'), 'End call');
+  const tagsEl = h('dl.tags2'); const stageBar = h('div.stagebar'); const tl = h('ol.tl'); const tlSub = h('p.subt');
+  const btc = h('aside.card.btc', { 'aria-label': 'Behind the conversation' }, h('h2', icon('activity'), 'Behind the conversation'), tlSub, stageBar, tagsEl, tl);
 
+  function drawHead() {
+    const v = c.view ?? {};
+    const secs = v.session?.answeredAt ? Math.round((Date.now() - Date.parse(v.session.answeredAt)) / 1000) : 0;
+    const verified = v.tags?.identity === 'verified';
+    head.replaceChildren(
+      h('div.av', icon('wave'), h(`i${c.voiceReady ? '' : '.off'}`)),
+      h('div', h('h1', 'Lily', h('span.badge.lav', 'AI assistant')), h('div.meta', h('span.t', fmtDur(secs)), h('span', '·'), h('span', c.voiceReady ? `Live voice · ${S.status?.model ?? 'Gemini Live'}` : 'Typing mode'))),
+      h('div.cust', h('span.mono2', c.card.name.split(' ').map((x) => x[0]).join('').slice(0, 2)), h('div', h('b', c.card.name, verified ? icon('check') : null), h('span', verified ? 'Identity verified · test customer' : v.tags?.identity === 'failed' ? 'Verification failed' : 'Not verified yet · test customer'))));
+  }
   function drawTranscript() {
-    const nodes = c.turns.map((tr) => { const btn = /^\[Pressed/.test(tr.text); const sp = btn ? 'system' : ['customer', 'assistant', 'agent'].includes(tr.speaker) ? tr.speaker : 'system'; return h('div.msg.' + sp, spLabel(sp) ? h('span.who-l', spLabel(sp)) : null, btn ? t('askedPerson') : tr.text); });
-    for (const sp of ['customer', 'assistant']) if (c.partial[sp]) nodes.push(h('div.msg.partial.' + sp, h('span.who-l', spLabel(sp)), c.partial[sp]));
-    transcriptEl.replaceChildren(...nodes);
-    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+    const nodes = c.turns.map((tr) => {
+      if (/^\[Pressed|^\[Asked|^\[Confirmed|^\[Declined/.test(tr.text)) return h('div.note', tr.text.replace(/^\[|\]$/g, ''));
+      if (tr.speaker === 'system' || !['customer', 'assistant', 'agent'].includes(tr.speaker)) return tr.text ? h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim()) : null;
+      const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
+      const who = cls === 'lily' ? [h('span.av', 'L'), h('b', 'Lily'), 'AI'] : cls === 'agent' ? [h('b', 'Human agent')] : [h('b', 'You')];
+      return h(`div.b.${cls}`, h('div.wl', who, tr.at ? h('span', fmtTime(tr.at)) : null), h('div.txt', tr.text));
+    });
+    for (const sp of ['customer', 'assistant']) if (c.partial[sp]) nodes.push(h(`div.b.partial.${sp === 'customer' ? 'cust' : 'lily'}`, h('div.wl', sp === 'customer' ? h('b', 'You') : [h('span.av', 'L'), h('b', 'Lily')], h('span', sp === 'customer' ? 'hearing…' : 'speaking…')), h('div.txt', c.partial[sp])));
+    list.replaceChildren(...nodes.filter(Boolean));
+    if (atBottom || c.partial.customer || c.partial.assistant) list.scrollTop = list.scrollHeight;
   }
   function drawActivity() {
-    if (!c.events.length) { actEl.replaceChildren(h('li', h('span.empty', t('nothingYet')))); return; }
-    actEl.replaceChildren(...c.events.filter((e) => !/^voice\.(muted|unmuted)/.test(e.type)).map((e) => {
-      const cls = { ok: 'ok', running: 'run', failed: 'bad', blocked: 'bad', warn: 'warn', pending: 'warn' }[e.status] ?? '';
-      return h('li', h('span.dot' + (cls ? '.' + cls : '')), h('div', h('div.t', e.title), e.detail ? h('div.d', e.detail) : null), h('span.at', fmtTime(e.at)));
-    }).reverse());
-    const seen = new Set(c.events.map((e) => e.stage)); const last = c.events[c.events.length - 1]?.stage;
-    stageEl.replaceChildren(...STAGE_KEYS.map((k, i) => h('span.sg' + (k === last ? '.on' : seen.has(k) ? '.seen' : ''), tList('stages')[i])));
+    const evs = c.events.filter((e) => !/^voice\.(muted|unmuted)/.test(e.type));
+    const ok = evs.filter((e) => e.status === 'ok').length;
+    const pend = evs.filter((e) => e.status === 'pending' || e.status === 'running').length;
+    tlSub.textContent = `${ok} steps completed · ${pend} pending · live from the backend`;
+    const seen = new Set(evs.map((e) => e.stage)); const last = evs[evs.length - 1]?.stage;
+    stageBar.replaceChildren(...STAGES.map((k) => h(`span${k === last ? '.on' : seen.has(k) ? '.seen' : ''}`, STAGE_LABEL[k])));
+    const badge = (e) => e.type.startsWith('verification') && e.status === 'ok' ? ['ok', 'Verified'] : e.type === 'actions.proposed' ? ['pending', 'Awaiting consent'] : e.type.startsWith('handoff.') && e.status !== 'failed' ? ['escalated', e.type === 'handoff.connected' ? 'Accepted' : 'Handover'] : [e.status, { ok: 'Done', warn: 'Attention', failed: 'Failed', blocked: 'Blocked', pending: 'Pending', running: 'Running', info: 'Info' }[e.status] ?? e.status];
+    tl.replaceChildren(...(evs.length ? [...evs].reverse().map((e, i) => {
+      const [cls, label] = badge(e);
+      return h(`li${i === 0 ? '.fresh' : ''}`, h(`span.n.${cls === 'escalated' ? 'blocked' : cls}`), h('div', h('div.top2', h('b', e.title), h(`span.st.${cls}`, label)), h('div.when', `${fmtTime(e.at)} · ${STAGE_LABEL[e.stage] ?? e.stage}`), e.detail ? h('div.det', e.detail) : null));
+    }) : [h('li', h('span.n.info'), h('p.small.muted', 'Nothing yet. Each real backend step — verification, lookups, policy checks, actions — appears here as it happens.'))]));
   }
   function drawSide() {
-    const v = c.view ?? {}; const hd = v.handoff; const bits = [];
-    if (v.demoDevice) bits.push(h('div.demo-box', h('div.label', v.demoDevice.label), h('p.small', t('passcode')), h('b.mono', v.demoDevice.code)));
+    const v = c.view ?? {};
+    const tg = v.tags;
+    if (tg) {
+      const sec = (tg.secondaryIntents ?? []).map((x) => x.label).join(', ') || 'None';
+      tagsEl.replaceChildren(...[['Primary intent', tg.intentLabel], ['Also', sec], ['Identity', tg.identity], ['Urgency', tg.urgency], ['Sentiment (indicative)', tg.sentiment], ['Case', `${tg.caseStatus}${v.case ? ' · ' + v.case.id : ''}`]].map(([k, val]) => h('div', h('dt', k), h('dd', String(val ?? '—').replace(/_/g, ' ')))));
+    }
+    // What Lily heard (card number capture) and simulated passcode.
+    const bits = [];
     const cc = v.cardCapture;
-    if (cc) {
-      const shown = group4(cc.digits.replace(/ /g, '').padEnd(16, '•'));
-      bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.label', 'What Lily heard'), h('b.mono.heardnum', shown),
-        h('p.small', cc.confirming ? 'All 16 digits heard. Say yes if this is right, or say the correct digits.' : `${cc.count} of 16 digits. Keep reading the rest.`)));
-    }
+    if (cc) bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.cap', 'What Lily heard'), h('b.num', group4(String(cc.digits ?? '').replace(/ /g, '').padEnd(16, '•'))), h('p', cc.confirming ? 'All 16 digits heard. Say “yes” if this is right, or say the correct digits.' : `${cc.count ?? 0} of 16 digits. Keep reading the card number from the test-data panel.`)));
+    if (v.demoDevice) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Simulated phone: '), 'read this passcode to Lily'), h('b.mono', v.demoDevice.code)));
+    extras.replaceChildren(...bits);
+    // Consent (buttons work in typing mode; in voice mode just say yes or no).
+    if (v.proposal && v.pending?.kind === 'consent') {
+      consentEl.replaceChildren(h('section.consent', { role: 'group', 'aria-label': 'Confirm the proposed actions' },
+        h('span.badge.solid', 'Awaiting your consent'), h('h3', 'Lily is asking for your confirmation'),
+        h('ol', v.proposal.actions.map((a) => h('li', a.label))),
+        h('p.small.muted', c.voiceReady ? 'Say “yes” or “no” to Lily. Nothing happens until you clearly confirm — the server checks your own words.' : 'Nothing happens until you confirm. The server re-checks policy when it runs.'),
+        c.voiceReady ? null : h('div.row', h('button.btn.mint', { type: 'button', onclick: () => c.consent('accept') }, icon('check'), 'Confirm'), h('button.btn.coral-o', { type: 'button', onclick: () => c.consent('decline') }, 'Decline'))));
+    } else consentEl.replaceChildren();
+    // Handover status: requested → waiting → accepted, never claimed early.
+    const hd = v.handoff;
     if (hd && hd.status !== 'cancelled') {
-      ensureDesk(c);
       const acc = hd.status === 'connected' || hd.status === 'completed';
-      const txt = acc ? t('hJoined', { n: hd.agentName ?? t('anAgent') }) : hd.status === 'no_agent' ? t('hNone') : hd.status === 'failed' ? t('hFailed') : t('hSent');
-      bits.push(h('div.handover' + (acc ? '.accepted' : ''), { role: 'status' }, h('span.label', acc ? t('hConnected') : hd.status === 'requested' ? t('hRequested') : t('hWaiting')), h('p', txt), h('p.small.muted', t('hDemo'))));
-    }
-    sideEl.replaceChildren(...bits);
+      handEl.replaceChildren(h(`div.handover${acc ? '.ok' : ''}`, { role: 'status' }, h('span.ic', icon('headset')),
+        h('div', h('b', acc ? `Agent connected${hd.agentName ? ' · ' + hd.agentName : ''}` : hd.status === 'no_agent' ? 'No agent available' : 'Waiting for a human agent'),
+          h('span', acc ? 'A person accepted the handover and can see everything so far.' : hd.status === 'no_agent' ? 'Your details are saved for a callback.' : 'In-app handover (not a phone transfer). A demo agent accepts it in the agent workspace.')),
+        !acc && hd.status !== 'no_agent' ? h('a.btn.sm', { href: `/agent.html?demo=1&session=${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null));
+    } else handEl.replaceChildren();
+    const banners = [];
+    if (c.micDenied && c.voiceReady) banners.push(h('p.banner', 'Microphone blocked — type below. Lily will still answer out loud.'));
+    if (c.banner) banners.push(h(`p.banner.${c.banner.kind}`, c.banner.text));
+    bannerEl.replaceChildren(...banners);
   }
   function refresh() {
-    const ds = c.displayState; stateEl.textContent = t('s_' + ds);
-    orb.setState(ds === 'speaking' ? 'speaking' : ds === 'processing' ? 'processing' : 'listening', ds === 'speaking' ? '#7161e4' : ds === 'muted' ? '#a9a5b8' : ds === 'processing' ? '#3e6354' : '#5846c9');
-    subEl.textContent = c.textOnly ? t('typingMode') : c.micDenied ? t('micDenied') : '';
-    muteBtn.setAttribute('aria-pressed', String(c.muted)); muteBtn.replaceChildren(c.muted ? ICON.micOff() : ICON.mic()); muteBtn.disabled = !c.mic;
+    const st = c.state;
+    const [label, subText] = STATE_TEXT[st] ?? [st, ''];
+    stage.dataset.state = st;
+    pill.replaceChildren(icon(st === 'speaking' ? 'volume' : st === 'muted' ? 'micOff' : st === 'processing' ? 'activity' : st === 'waiting' || st === 'agent' ? 'headset' : st === 'typing' ? 'keyboard' : 'mic'), label);
+    sub.textContent = subText;
+    const segKey = st === 'hearing' ? 'listening' : st;
+    for (const [k, el] of Object.entries(seg)) el.setAttribute('aria-current', String(k === segKey));
+    muteBtn.disabled = !c.mic || !c.voiceReady;
+    muteBtn.setAttribute('aria-pressed', String(c.muted));
+    muteBtn.replaceChildren(icon(c.muted ? 'micOff' : 'mic'), c.muted ? 'Unmute' : 'Mute');
     humanBtn.disabled = !!(c.view?.handoff && c.view.handoff.status !== 'cancelled');
-    bannerEl.replaceChildren(...(c.textOnly || c.micDenied ? [h('p.banner.info', c.textOnly ? t('bTextOnly') : t('bMic'))] : []), ...(c.banner ? [h('p.banner' + (c.banner.kind === 'warn' ? '' : '.' + c.banner.kind), c.banner.text)] : []));
+    endBtn.disabled = c.ending;
     drawSide();
   }
-  c.ui = { refresh, transcript: drawTranscript, activity: drawActivity, stopOrb: () => orb.destroy() };
-  orb.attach(() => { const ds = c.displayState; return ds === 'speaking' ? c.player?.level ?? 0 : ds === 'muted' || ds === 'reconnecting' ? 0.03 : ds === 'processing' ? 0.12 + 0.06 * Math.sin(performance.now() / 180) : (c.mic?.level ?? 0.05); });
+
+  /* visualizer: driven by the real mic / playback level */
+  const ctx = canvas.getContext('2d');
+  let raf = 0; const BARS = 56; const vals = new Float32Array(BARS);
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  function frame(now) {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = canvas.clientWidth; const hh = canvas.clientHeight;
+    if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = hh * dpr; }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, hh);
+    const st = c.state; const cx = w / 2; const cy = hh / 2; const R = Math.min(w, hh) * 0.3;
+    const level = st === 'speaking' ? c.player?.level ?? 0 : st === 'hearing' || st === 'listening' ? c.mic?.level ?? 0 : 0;
+    const col = st === 'speaking' || st === 'processing' ? [117, 101, 232] : st === 'hearing' || st === 'listening' || st === 'agent' ? [191, 232, 213] : st === 'reconnecting' ? [241, 138, 114] : [170, 166, 190];
+    const g = ctx.createRadialGradient(cx, cy, R * 0.6, cx, cy, R * 1.9);
+    g.addColorStop(0, `rgba(${col},${0.08 + level * 0.5})`); g.addColorStop(1, `rgba(${col},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 1.9, 0, Math.PI * 2); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = `rgba(${col},0.9)`; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+    if (st === 'processing' && !reduced) { const a = (now / 450) % (Math.PI * 2); ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.beginPath(); ctx.arc(cx, cy, R, a, a + 0.9); ctx.stroke(); }
+    ctx.lineCap = 'round'; ctx.lineWidth = 3; ctx.strokeStyle = `rgba(${col},0.95)`;
+    for (let i = 0; i < BARS; i++) {
+      const target = level * (reduced ? 0.6 : 0.45 + 0.55 * Math.abs(Math.sin(i * 1.7 + now / 140)));
+      vals[i] += (target - vals[i]) * 0.35;
+      if (vals[i] < 0.02) continue;
+      const a = (i / BARS) * Math.PI * 2 - Math.PI / 2; const len = 4 + vals[i] * R * 0.6;
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * (R + 6), cy + Math.sin(a) * (R + 6)); ctx.lineTo(cx + Math.cos(a) * (R + 6 + len), cy + Math.sin(a) * (R + 6 + len)); ctx.stroke();
+    }
+    raf = requestAnimationFrame(frame);
+  }
+  raf = requestAnimationFrame(frame);
   let n = 0;
   const tick = setInterval(() => {
     if (c.ended) return clearInterval(tick);
-    refresh();
+    refresh(); if (++n % 4 === 0) drawHead();
     const hs = c.view?.handoff?.status;
-    if (++n % 8 === 0 && (['requested', 'queued', 'connected'].includes(hs) || !c.voiceReady || c.reconnecting)) c.poll();
+    if (n % 8 === 0 && (['requested', 'queued', 'connected'].includes(hs) || !c.voiceReady)) c.poll();
   }, 250);
+  c.ui = { refresh, transcript: drawTranscript, activity: drawActivity, stop: () => { cancelAnimationFrame(raf); clearInterval(tick); } };
 
-  const wasPanel = document.querySelector('aside.panel.demo');
-  wasPanel?.replaceWith(profilePanel(true));
-  S.host.replaceChildren(
-    h('section.panel', { 'aria-label': t('liveCall') },
-      h('header', h('span.dot.run'), h('h3', t('liveCall')), h('span.grow'), h('span.chip', t('ai'))),
-      h('div.stage', orb.el, stateEl, subEl),
-      h('div.controls', wrapC(muteBtn, t('mute')), wrapC(ccBtn, t('captions')), wrapC(humanBtn, t('human')), wrapC(endBtn, t('end'))),
-      bannerEl, sideEl, transcriptEl, compose),
-    h('section.panel', { 'aria-label': 'Behind the conversation' },
-      h('header', h('h3', t('behind')), h('span.grow'), h('span.small.muted', t('behindSub'))), stageEl, actEl));
-  drawTranscript(); drawActivity(); refresh();
-  if (c.view?.transcript?.length && !c.turns.length) { c.turns = c.view.transcript.map((t, i) => ({ seq: i, speaker: t.speaker, kind: t.kind ?? '', text: t.text })); drawTranscript(); }
-  textIn.focus({ preventScroll: true });
+  render('talk', h('main.judge.in-call',
+    testPanel(true),
+    h('section.call-main', { 'aria-label': 'Live call with Lily' }, head, stage, bannerEl, extras, handEl, consentEl,
+      h('section.card.tx', h('div.tx-h', h('h2', 'Live transcript'), h('span.badge.lav', c.voiceReady ? 'From Lily’s speech recognition' : 'Typed')), list, form),
+      h('div.controls', { role: 'toolbar', 'aria-label': 'Call controls' }, muteBtn, ccBtn, h('span.sp'), humanBtn, endBtn)),
+    btc));
+  drawHead(); drawTranscript(); drawActivity(); refresh();
+  if (!c.voiceReady) { c.loadTimeline(); input.focus({ preventScroll: true }); }
 }
 
-/* ------------------------------------------------------------------ summary */
-/** Post-call analysis has its own status. A failed one says so and offers a retry; the call itself is already saved. */
-function analysisBox(an, c) {
-  if (!an || an.status === 'not_started') return null;
-  if (an.status === 'failed') return h('div.box', h('h3', 'Call analysis'), h('p.banner.bad', 'The analysis did not finish. Your call and transcript are saved.'), h('button.btn', { type: 'button', onclick: async () => { try { await api(`/api/calls/${c.id}/analysis/retry`, { method: 'POST', body: {} }); } catch { /* shown again below */ } summary(c); } }, 'Retry analysis'));
-  if (an.status !== 'ready') return h('div.box', h('h3', 'Call analysis'), h('p.small.muted', 'Still being prepared.'));
-  return h('div.box', h('h3', 'Call analysis'), h('p', an.summary),
-    h('p.small', h('b', 'Reason: '), `${an.reason?.label ?? 'Unknown'}${an.reason?.secondary?.length ? ' (also ' + an.reason.secondary.join(', ') + ')' : ''}`, ' · ', h('b', 'Resolution: '), String(an.resolution ?? '').replace('_', ' ')),
-    an.tags?.length ? h('p', an.tags.map((x) => h('span.chip', x))) : null);
+/* ================================================================== SCREEN 2 · agent view */
+async function agentView(id, tab) {
+  S.lastCall = id;
+  render('agent', h('main.av-wrap', h('p.muted', 'Loading the agent view…')));
+  let w; let an = null; let b = null;
+  try {
+    [w, an, b] = await Promise.all([api(`/api/calls/${id}/agent-view`), api(`/api/calls/${id}/analysis`).catch(() => null), api(`/api/calls/${id}/brief`).catch(() => null)]);
+  } catch (e) {
+    render('agent', h('main.av-wrap', h('div.card.sec', h('h2', 'Agent view unavailable'), h('p', `${e.message}. The agent view opens in the browser that made the call.`), h('a.btn.primary', { href: '#/' }, 'Start a new call'))));
+    return;
+  }
+  const hd = w.handoff;
+  const switcher = h('nav.tabs', { 'aria-label': 'View', style: 'display:inline-flex;gap:4px;padding:4px;border-radius:999px;background:#fff;border:1px solid var(--hair)' },
+    h('a', { href: `#/agent/${encodeURIComponent(id)}`, 'aria-current': tab === 'agent' ? 'page' : null, style: tabStyle(tab === 'agent') }, 'What the agent sees'),
+    h('a', { href: `#/agent/${encodeURIComponent(id)}/summary`, 'aria-current': tab === 'summary' ? 'page' : null, style: tabStyle(tab === 'summary') }, 'What the customer got'));
+  const head = h('section.card.av-head',
+    h('div', h('span.badge.dark', icon('headset'), 'Screen 2 · Human agent’s point of view'),
+      h('h1', { style: 'margin-top:10px' }, `${w.customer.name} — ${w.intents.primary.label}`),
+      h('p.lead', hd ? `This call was handed to a person (${hd.reasonLabel.toLowerCase()}). Below is exactly what the agent receives: the brief, Lily’s suggestion, what was verified and the whole conversation — so the customer never repeats themselves.` : 'Lily handled this call herself. If the customer calls back or a person picks the case up, this is the brief they would open — nothing to re-ask.'),
+      h('div', { style: 'margin-top:12px' }, switcher)),
+    h('div.acts', h('button.btn.dark', { type: 'button', onclick: () => { location.hash = '#/'; } }, icon('phone'), 'Start another call'),
+      h('a.btn', { href: `/agent.html?demo=1&session=${encodeURIComponent(id)}`, target: '_blank', rel: 'noopener' }, 'Open the live agent workspace ↗')));
+  if (tab === 'summary') return render('agent', h('main.av-wrap', head, customerSummary(b, an, w)));
+
+  const vTone = w.verification.status === 'verified' ? 'ok' : w.verification.status === 'failed' ? 'bad' : 'warn';
+  const tagsChips = (w.tags.effective ?? []).map((x) => h('span.chip', x));
+  const phase = hd ? { waiting: 'Waiting for an agent', accepted: 'Accepted by an agent', completed: 'Completed by an agent', no_agent: 'No agent available', cancelled: 'Ended before an agent joined' }[hd.phase] ?? hd.phase : 'Not needed';
+
+  const left = h('div.pane',
+    h('section.card.sec', h('h2', 'Customer', h('span.badge.amber', 'Fictional test data')),
+      h('p.cust-name', w.customer.name),
+      h('div.chips', h(`span.chip.${vTone}`, `Identity: ${w.verification.status.replace(/_/g, ' ')}`), h('span.chip', `Standing: ${w.customer.standing ?? '—'}`)),
+      h('dl.kv',
+        h('div', h('dt', 'Phone'), h('dd.mono', w.customer.phone ?? '—')),
+        h('div', h('dt', 'Account'), h('dd.mono', w.customer.accountRef ?? '—')),
+        h('div', h('dt', 'Card'), h('dd', w.customer.cardLast4 ? `•••• ${w.customer.cardLast4}` : '—')),
+        h('div', h('dt', 'Card status'), h('dd', w.customer.cardStatus ?? '—')))),
+    h('section.card.sec', h('h2', 'Call'),
+      h('dl.kv',
+        h('div', h('dt', 'Duration'), h('dd.mono', fmtDur(w.call.durationSeconds))),
+        h('div', h('dt', 'Status'), h('dd', w.call.status === 'ended' ? 'Ended' : 'Live')),
+        h('div.wide', h('dt', 'Handover'), h('dd', phase, hd ? h('span.muted.small', ` · ${hd.reasonLabel}`) : null)),
+        h('div.wide', h('dt', 'Intents'), h('dd', h('div.chips', h('span.chip.ai', w.intents.primary.label), (w.intents.secondary ?? []).map((s) => h('span.chip', `Also: ${s.label ?? s}`)))))),
+      h('div', h('span.cap', 'Call tags'), h('div.chips', { style: 'margin-top:6px' }, tagsChips))),
+    h('section.card.sec', h('h2', 'Verification attempts', h('span.badge.lav', 'Server-checked')),
+      w.verification.attempts.length
+        ? h('table.vtable', h('thead', h('tr', h('th', 'Time'), h('th', 'Step'), h('th', 'Result'))), h('tbody', w.verification.attempts.map((a) => h('tr', h('td.mono', fmtTime(a.at)), h('td', `${a.step} · ${a.method}`), h('td', h(`span.chip.${a.outcome === 'passed' ? 'ok' : a.outcome === 'issued' ? '' : 'bad'}`, a.outcome))))))
+        : h('p.small.muted', 'No verification was attempted on this call.'),
+      w.verification.failedCardAttempts ? h('p.small.muted', `${w.verification.failedCardAttempts} failed card-number attempt(s). The expected number is never shown to Lily or the caller.`) : null));
+
+  const sg = w.suggestion;
+  const middle = h('div.pane',
+    h('section.card.sec', h('h2', 'Brief from Lily', h('span.badge.violet', 'Built from recorded facts')), h('p.prose', w.aiSummary),
+      an?.status === 'ready' ? h('div.box', h('h3', 'Post-call analysis'), h('p', { style: 'color:var(--aub)' }, an.summary), h('p', `Reason: ${an.reason?.label ?? '—'} · Resolution: ${String(an.resolution ?? '—').replace(/_/g, ' ')}`)) : an?.status === 'failed' ? h('p.banner.warn', 'The post-call analysis did not finish; the transcript and case are saved.') : null),
+    h('section.card.sec', h('h2', 'Suggested next step', h('span.chip.ai', 'AI recommendation'), h('span.chip.warn', 'Not a confirmed action')),
+      h('p.sugg', sg.effective ?? sg.text),
+      h('div.two',
+        h('div.box', h('h3', 'Why'), sg.reasoning.length ? h('ul', sg.reasoning.map((r) => h('li', r))) : h('p', '—')),
+        h('div.box', h('h3', 'Facts it relies on'), sg.supportingFacts.length ? h('ul', sg.supportingFacts.map((r) => h('li', r))) : h('p', 'No account facts were confirmed.'))),
+      h('div.two',
+        h('div.box.okb', h('h3', 'Confirmed by bank systems'), sg.confirmedActions.length ? h('ul', sg.confirmedActions.map((a) => h('li', `${a.label}${a.reference ? ` · ref ${a.reference}` : ''}`))) : h('p', 'No account changes were made.')),
+        h('div.box.badb', h('h3', 'Not done — don’t tell the customer it happened'), sg.notConfirmed.length ? h('ul', sg.notConfirmed.map((a) => h('li', `${a.label}: ${a.status}`))) : h('p', 'Nothing pending.')))),
+    h('section.card.sec', h('h2', `Conversation (${w.transcript.length})`),
+      h('div.convo', w.transcript.map((tr) => {
+        if (tr.speaker === 'system') return h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim());
+        const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
+        return h(`div.b.${cls}`, h('div.wl', h('b', cls === 'cust' ? 'Customer' : cls === 'lily' ? 'Lily (AI)' : 'Agent'), h('span', fmtTime(tr.at))), h('div.txt', tr.hidden ? 'Sensitive answer given — not stored' : tr.text));
+      }))));
+
+  const evs = w.activity ?? [];
+  const right = h('div.pane',
+    h('section.card.sec', h('h2', 'Case'),
+      h('dl.kv',
+        h('div', h('dt', 'Outcome'), h('dd', b?.headline ?? '—')),
+        h('div', h('dt', 'Case'), h('dd.mono', b?.case?.id ?? '—'))),
+      w.unresolved?.length ? h('div.box.badb', h('h3', 'Still open'), h('ul', w.unresolved.map((u) => h('li', typeof u === 'string' ? u : u.text)))) : h('p.small.muted', 'Nothing left open.'),
+      h('p.ro', 'Read-only demo view. A real agent accepts the handover, edits tags, notes and the resolution in the ', h('a', { href: `/agent.html?demo=1&session=${encodeURIComponent(id)}`, target: '_blank', rel: 'noopener' }, 'agent workspace ↗'), '.')),
+    h('section.card.sec', h('h2', 'Relevant knowledge', h('span.badge.amber', 'Demo policy')),
+      w.knowledge.length ? w.knowledge.map((k) => h('div.kb', h('h4', `${k.id} · ${k.title}`), h('p', k.excerpt), k.reason ? h('p.small.muted', `Why: ${k.reason}`) : null)) : h('p.small.muted', 'No article matched this call.')),
+    h('section.card.sec', h('h2', `Backend activity (${evs.length})`),
+      h('ol.did', evs.map((e) => h('li', h('details', h('summary', h('span.t', fmtTime(e.at)), h(`span.d.${e.status}`), h('span', e.title)), h('div.body', e.detail ?? 'No further detail.')))))));
+
+  render('agent', h('main.av-wrap', head, h('div.av-grid', left, middle, right)));
+}
+const tabStyle = (on) => `text-decoration:none;padding:7px 14px;border-radius:999px;font-weight:600;font-size:.88rem;${on ? 'background:var(--lav);color:var(--violet-d)' : 'color:var(--text-2)'}`;
+
+/** What the customer got: outcome, confirmed vs not done, next steps, and the steps Lily took. */
+function customerSummary(b, an, w) {
+  if (!b) return h('section.card.sec', h('p', 'The customer summary is not available.'));
+  const done = b.actions.filter((a) => a.bucket === 'completed');
+  const notDone = [...b.actions.filter((a) => a.bucket !== 'completed').map((a) => ({ text: `${a.label} — ${a.statusLabel}` })), ...b.unresolved.map((u) => ({ text: typeof u === 'string' ? u : u.text }))];
+  const tl = (b.timeline ?? []).filter((e) => !/^voice\.(muted|unmuted)/.test(e.type));
+  return h('div.sum',
+    h('section.card.sum-h', h('span.cap', 'Outcome for the customer'), h('h2', b.headline),
+      h('div.facts', [['Duration', fmtDur(w.call.durationSeconds)], ['Main issue', w.intents.primary.label], ['Case', b.case?.id ?? '—'], ['Handover', b.escalation ? b.escalation.status.replace(/_/g, ' ') : 'Not needed']].map(([k, v]) => h('div', h('span', k), h('b', v)))),
+      b.case?.summary ? h('p.prose', { style: 'white-space:pre-wrap;margin-top:8px' }, b.case.summary) : null),
+    h('div.sum-grid',
+      h('section.card.sec', h('h2', 'Confirmed'), done.length || b.verifiedFacts.length ? h('ul.list.ok', [...done.map((a) => h('li', icon('check'), h('span', a.label, h('small', a.reference ? `Confirmed by the bank system · ref ${a.reference}` : 'Confirmed by the bank system')))), ...b.verifiedFacts.slice(0, 4).map((f) => h('li', icon('check'), h('span', f)))]) : h('p.small.muted', 'Nothing was confirmed on this call.')),
+      h('section.card.sec', h('h2', 'Not done or still open'), notDone.length ? h('ul.list.bad', notDone.map((n) => h('li', icon('alert'), h('span', n.text)))) : h('p.small.muted', 'Nothing outstanding.')),
+      h('section.card.sec', h('h2', 'Next steps'), h('ul.list.next', [...new Set([b.nextStep, ...(an?.suggestedSolutions ?? []).slice(0, 2)].filter(Boolean))].map((x) => h('li', icon('arrow'), h('span', x, h('small', 'Recommendation, not a completed action'))))))),
+    h('section.card.sec', h('h2', `What Lily did (${tl.length} recorded steps)`),
+      h('ol.did', tl.map((e) => h('li', h('details', h('summary', h('span.t', fmtTime(e.at)), h(`span.d.${e.status}`), h('span', e.title)), h('div.body', e.detail ?? 'No further detail.')))))));
 }
 
-async function summary(c) {
-  let r = null;
-  let an = null;
-  try { r = await api(`/api/calls/${c.id}/brief`); } catch { /* fall back to what we have */ }
-  try { an = await api(`/api/calls/${c.id}/analysis`); } catch { /* analysis is shown only when available */ }
-  const actions = r?.actions ?? []; const tl = (r?.timeline ?? c.events).filter((e) => !/^voice\./.test(e.type) || /lost|session_limit/.test(e.type));
-  const esc = r?.escalation;
-  const bucketCls = { completed: 'ok', blocked: 'bad', failed: 'bad', pending: 'warn', awaiting_confirmation: 'warn' };
-  const list = (items, empty) => items?.length ? h('ul', items.map((i) => h('li', typeof i === 'string' ? i : i.text))) : h('p.small.muted', empty);
-  render(top(),
-    h('main.summary',
-      h('div', h('span.chip.demo', t('demoCall')), h('h1', t('summary'))),
-      h('div.box', h('span.label', t('outcome')), h('h2', r?.headline ?? t('ended')), h('p.muted', r?.nextStep ?? ''), esc ? h('p', h('span.chip' + (esc.status === 'connected' || esc.status === 'completed' ? '.ok' : '.warn'), `Handover: ${esc.status}`), ` ${esc.reasonLabel}`) : null),
-      analysisBox(an, c),
-      h('div.grid2',
-        h('div.box', h('h3', t('told')), list(r?.customerSaid, t('noDetails'))),
-        h('div.box', h('h3', t('confirmed')), list(r?.verifiedFacts, t('nothingConfirmed')))),
-      h('div.box', h('h3', t('actions')),
-        actions.length ? h('ul', actions.map((a) => h('li', [a.label, ' ', h('span.chip' + (bucketCls[a.bucket] ? '.' + bucketCls[a.bucket] : ''), a.statusLabel), a.reference ? h('span.small.muted.mono', ` ref ${a.reference}`) : null]))) : h('p.small.muted', t('noChanges'))),
-      r?.unresolved?.length ? h('div.box', h('h3', t('stillOpen')), list(r.unresolved)) : null,
-      h('div.box', h('h3', t('whatLily')),
-        h('details.fold', { open: '' }, h('summary', t('steps', { n: tl.length })),
-          h('ol.tl', { style: 'margin-top:.8rem' }, tl.map((e) => h('li' + (e.status ? '.' + e.status : ''), h('div.t', { style: 'font-weight:600' }, e.title), e.detail ? h('div.small.muted', e.detail) : null, h('div.small.muted.mono', fmtTime(e.at))))))),
-      h('div.cta', h('button.btn.primary.lg', { onclick: () => home() }, t('again')), null)));
-  say(t('summaryReady'));
-}
-
-home();
+route();

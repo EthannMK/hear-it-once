@@ -3,6 +3,7 @@
  * holds the caller token for that session. Agents may also act through these routes with
  * the appropriate permission.
  */
+import { buildSessionWorkspace } from '../../workspace/workspace.ts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { randomBytes } from 'node:crypto';
@@ -197,6 +198,21 @@ export function registerCallRoutes(app: FastifyInstance): void {
     if (!b) throw new AppError('NOT_FOUND', 'Call not found.');
     if (actor.type !== 'customer_session') audit({ actor, event: 'brief.viewed', status: 'ok', resourceType: 'session', resourceId: id, sessionId: id });
     return b;
+  });
+
+  /**
+   * The human agent's view of this call (what a person taking over would see). In demo mode the
+   * caller who made the call may open it read-only, so judges can see the agent's point of view
+   * right after the call; staff need call.read. Viewing by staff is audited.
+   */
+  app.get<{ Params: { id: string } }>('/api/calls/:id/agent-view', async (req) => {
+    const { id } = req.params;
+    const actor = actorFor(req, id, 'call.read');
+    if (actor.type === 'customer_session' && !env().DEMO_MODE) throw new AppError('FORBIDDEN', 'The agent view is only shared with callers in demo mode.');
+    const w = buildSessionWorkspace(id);
+    if (!w) throw new AppError('NOT_FOUND', 'Call not found.');
+    if (actor.type !== 'customer_session') audit({ actor, event: 'call.agent_view_viewed', status: 'ok', resourceType: 'session', resourceId: id, sessionId: id });
+    return { ...w, readOnly: actor.type === 'customer_session', viewer: actor.type === 'customer_session' ? 'demo_judge' : 'staff' };
   });
 
   /** Full transcript as ordered segments. Not paginated, so nothing is silently hidden. */

@@ -246,3 +246,36 @@ describe('understanding natural phrasing', () => {
     expect((await broken.classify('what is this thing on my statement')).issueType).toBeNull();
   });
 });
+
+describe('agent view for judges (screen 2)', () => {
+  it('the caller who made the call can open the agent view read-only; another caller cannot; staff can', async () => {
+    const { setup: s2, Caller: C2, staffLogin: sl } = await import('./harness.ts');
+    const app2 = await s2();
+    const a = new C2(app2);
+    await a.start(undefined, { profileId: 'alex-morgan', channel: 'voice_browser' });
+    await a.say('I want to speak to a person');
+    await a.input({ kind: 'hangup' });
+    const own = await app2.inject({ method: 'GET', url: `/api/calls/${a.sessionId}/agent-view`, headers: { 'x-call-token': a.token } });
+    expect(own.statusCode).toBe(200);
+    const w = own.json();
+    expect(w.readOnly).toBe(true);
+    expect(w.customer.name).toBe('Alex Morgan');
+    expect(w.suggestion.status).toBe('ai_recommendation');
+    expect(w.handoff.reason).toBe('customer_requested');
+    expect(w.transcript.length).toBeGreaterThan(2);
+    const b = new C2(app2);
+    await b.start(undefined, { profileId: 'alex-morgan' });
+    expect((await app2.inject({ method: 'GET', url: `/api/calls/${a.sessionId}/agent-view`, headers: { 'x-call-token': b.token } })).statusCode).toBe(401);
+    const cookie = await sl(app2, 'STF-AGENT-1');
+    const staff = await app2.inject({ method: 'GET', url: `/api/calls/${a.sessionId}/agent-view`, headers: { cookie } });
+    expect(staff.json().readOnly).toBe(false);
+    // A call Lily handled without any handover still has an agent view.
+    const c = new C2(app2);
+    await c.start(undefined, { profileId: 'alex-morgan' });
+    await c.input({ kind: 'hangup' });
+    const v = (await app2.inject({ method: 'GET', url: `/api/calls/${c.sessionId}/agent-view`, headers: { 'x-call-token': c.token } })).json();
+    expect(v.handoff).toBeNull();
+    expect(v.aiSummary).toMatch(/without a handover/);
+    await app2.close();
+  });
+});

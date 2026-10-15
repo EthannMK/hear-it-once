@@ -7,6 +7,8 @@ const app = document.getElementById('app');
 const params = new URLSearchParams(location.search);
 const EMBED = params.get('embed') === '1';
 const FOCUS = params.get('session');
+// Opened from the judge page: sign in as the demo agent automatically, keep the full workspace chrome.
+const AUTO = EMBED || params.get('demo') === '1';
 if (EMBED) document.body.classList.add('embed');
 
 const state = { me: null, items: [], selected: null, ws: null, form: null, crm: null, es: null, live: false, timer: null, flash: null };
@@ -22,7 +24,7 @@ const TONE = { ok: 'ok', passed: 'ok', failed: 'bad', locked: 'bad', warn: 'warn
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 async function start() {
-  if (EMBED) {
+  if (AUTO) {
     try {
       const me = await api('/api/auth/me');
       if (!me.authenticated) await api('/api/auth/demo-login', { method: 'POST', body: { userId: 'STF-AGENT-1' } });
@@ -72,7 +74,11 @@ function setLive() { liveEl.textContent = state.live ? '● Live — new cases a
 async function loadQueue() {
   try { state.items = (await api('/api/handoffs')).items; state.done = (await api('/api/completed-calls')).items; renderQueue();
     // Embedded view: open the handover for the call on the customer's page as soon as it exists.
-    if (FOCUS && !state.selected && !state.selectedCall) { const hit = state.items.find((i) => i.sessionId === FOCUS && i.status !== 'cancelled'); if (hit) select(hit.id); }
+    if (FOCUS && !state.selected && !state.selectedCall) {
+      const hit = state.items.find((i) => i.sessionId === FOCUS && i.status !== 'cancelled') ?? state.items.find((i) => i.sessionId === FOCUS);
+      if (hit) select(hit.id);
+      else if ((state.done ?? []).some((d) => d.sessionId === FOCUS)) selectCall(FOCUS);
+    }
   }
   catch (e) { mount(queueEl, h('div.wx-empty', e.message)); }
 }
