@@ -17,7 +17,7 @@ import { log } from '../lib/logger.ts';
 import { redactText } from '../lib/redact.ts';
 import { audit, ASSISTANT } from '../audit/audit.ts';
 import { emitTimeline, subscribe, type TimelineEvent } from '../events/timeline.ts';
-import { getContext, handleInput } from '../conversation/orchestrator.ts';
+import { getContext, handleInput, observeSpeech } from '../conversation/orchestrator.ts';
 import { addTurn } from '../handoff/handoff-service.ts';
 import { buildCallView } from '../api/views.ts';
 import type { LiveConnectOptions, LiveProvider, LiveSession, LiveToolCall } from './provider.ts';
@@ -25,6 +25,7 @@ import { LILY_TOOLS, lilySystemInstruction } from './lily.ts';
 import type { LangCode } from './languages.ts';
 import { runTool } from './tools.ts';
 import { normaliseSpoken } from './speech.ts';
+import { knownForAssistant } from '../conversation/facts.ts';
 
 export type ServerMessage =
   | { type: 'ready'; provider: string; model: string; resumed: boolean }
@@ -64,6 +65,7 @@ export class LiveBridge {
   private toolSpeechPending = false;
   private toolSpeechStarted = false;
   private toolQueue: Promise<void> = Promise.resolve();
+  private pendingTools = 0;
   private lastSentSeq = 0;
   private unsubscribe: (() => void) | null = null;
   private goAwayTimer: NodeJS.Timeout | null = null;
@@ -209,10 +211,19 @@ export class LiveBridge {
    */
   private closeUserTurn(): void {
     const text = this.userText.trim();
+    // A tool call is waiting to run: it takes these words itself.
+    if (text && !this.userConsumed && this.pendingTools > 0) return;
     if (text && !this.userConsumed) {
-      addTurn(this.sessionId, 'customer', normaliseSpoken(text), { kind: 'voice' });
+      // Not taken by a tool: still part of what the customer told us. The back end records it,
+      // captures its details into the call facts and keeps it for the next step, so the customer
+      // is never asked for it again. Tool calls are queued behind this, so ordering is kept.
       this.userConsumed = true;
-      this.syncTurns();
+      const said = normaliseSpoken(text);
+      this.toolQueue = this.toolQueue.then(() =>
+        observeSpeech(this.sessionId, said)
+          .catch((e) => log.warn('could not record customer speech', { sessionId: this.sessionId, error: (e as Error).message }))
+          .then(() => this.syncTurns()),
+      );
     }
     this.send({ type: 'partial', speaker: 'customer', text: '' });
   }
@@ -255,7 +266,8 @@ export class LiveBridge {
 
   private onToolCalls(calls: LiveToolCall[]): void {
     // Serialise: tool calls are handled strictly in order, and each one is fully validated server-side.
-    for (const call of calls) this.toolQueue = this.toolQueue.then(() => this.runOne(call));
+    this.pendingTools += calls.length;
+    for (const call of calls) this.toolQueue = this.toolQueue.then(() => this.runOne(call)).finally(() => { this.pendingTools--; });
   }
 
   private async runOne(call: LiveToolCall): Promise<void> {
@@ -387,10 +399,12 @@ export class LiveBridge {
     return all<{ speaker: string; text: string }>('SELECT speaker, text FROM conversation_turns WHERE session_id = ? ORDER BY seq', [this.sessionId]);
   }
   private recap(): string {
-    return this.turnsSoFar()
+    const known = knownForAssistant(getContext(this.sessionId).facts);
+    const lines = this.turnsSoFar()
       .slice(-12)
-      .map((t) => `${t.speaker === 'customer' ? 'Customer' : 'Lily/system'}: ${t.text}`)
-      .join('\n');
+      .map((t) => `${t.speaker === 'customer' ? 'Customer' : 'Lily/system'}: ${t.text}`);
+    const facts = Object.entries(known).map(([k, v]) => `- ${k}: ${v}`);
+    return [...lines, ...(facts.length ? ['', 'Already known (do not ask again):', ...facts] : [])].join('\n');
   }
 }
 

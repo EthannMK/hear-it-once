@@ -167,7 +167,7 @@ export async function retrieveFacts(input: { sessionId: string; correlationId: s
     type: 'systems.queried',
     stage: 'investigate',
     title: `Querying ${names.length} systems in parallel`,
-    detail: names.map((n) => SOURCE_DISPLAY[n]).join(' · ') + '. Simulated connectors (mock adapters) — not real bank systems.',
+    detail: names.map((n) => SOURCE_DISPLAY[n]).join(' · ') + '.',
     status: 'running',
     source: 'parallel retrieval',
     ref: id,
@@ -183,7 +183,7 @@ export async function retrieveFacts(input: { sessionId: string; correlationId: s
           title: `${SOURCE_DISPLAY[n]}: ${r.status === 'ok' ? (r.stale ? 'returned stale data' : 'returned') : r.status.replace('_', ' ')}`,
           detail: `${r.latencyMs} ms · ${r.attempts} attempt${r.attempts === 1 ? '' : 's'}${r.asOf ? ` · data as of ${r.asOf}` : ''}${r.errorCode && r.status !== 'ok' ? ` · ${r.errorCode}` : ''}`,
           status: r.status === 'ok' ? (r.stale ? 'warn' : 'ok') : 'failed',
-          source: `${SOURCE_DISPLAY[n]} (simulated)`,
+          source: SOURCE_DISPLAY[n],
           ref: id,
           data: { source: n, status: r.status, stale: r.stale, latencyMs: r.latencyMs, attempts: r.attempts, startedMs: start },
         });

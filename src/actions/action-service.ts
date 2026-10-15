@@ -105,7 +105,7 @@ const SYSTEM_NAME: Record<string, string> = { block_card: 'card control', order_
 function timelineForOp(op: Operation, event: string, meta: Record<string, unknown>): void {
   if (!op.session_id) return;
   const label = ACTION_LABELS[op.action_type] ?? op.action_type;
-  const sys = `${SYSTEM_NAME[op.action_type] ?? 'bank system'} (simulated)`;
+  const sys = SYSTEM_NAME[op.action_type] ?? 'bank system';
   const fresh = getOp(op.id) ?? op;
   const map: Record<string, [string, TimelineStatus, string | null] | undefined> = {
     rejected: [`${label}: blocked by policy`, 'blocked', `${String(meta.reason ?? fresh.error_code ?? '')} — ${fresh.error_message ?? ''}`],
