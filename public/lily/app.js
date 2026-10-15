@@ -521,7 +521,7 @@ function callScreen(c) {
       const handParts = [h(`div.handover${acc ? '.ok' : ''}`, { role: 'status' }, h('span.ic', icon('headset')),
         h('div', h('b', acc ? `Agent connected${hd.agentName ? ' · ' + hd.agentName : ''}` : hd.status === 'no_agent' ? 'No agent available' : 'Waiting for a human agent'),
           h('span', acc ? 'A person accepted the handover and can see everything so far.' : hd.status === 'no_agent' ? 'Your details are saved for a callback.' : 'Your case is with the agent team. Open the Agent CRM to accept it as the agent.')),
-        !acc && hd.status !== 'no_agent' ? h('a.btn.sm', { href: `/#/crm/call/${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null),
+        !acc && hd.status !== 'no_agent' ? h('a.btn.sm.primary.cta', { href: `/#/crm/call/${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null),
         acc && c.agentJump && !c.jumpCancelled
           ? h('div.jump', { role: 'status' },
               h('p', h('b', 'Switching to the agent’s screen'), h('span', `You are about to see this same call from the agent’s side — in ${Math.max(0, Math.ceil((c.agentJump.at - Date.now()) / 1000))}s.`)),
