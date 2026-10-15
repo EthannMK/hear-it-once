@@ -2,7 +2,7 @@
 import { sourceData } from '../retrieval/retrieval.ts';
 import { cardConfirmedBlocked } from '../policy/engine.ts';
 import type { Finding } from '../cases/case-service.ts';
-import { cardsOf, offerAgent, opByType, txnChoices } from './common.ts';
+import { askWhichCharge, cardsOf, offerAgent, opByType } from './common.ts';
 import { evaluateUnrecognised } from './unrecognised.ts';
 import { nowMs } from '../lib/clock.ts';
 import type { Workflow, WorkflowCtx, WorkflowResult } from './types.ts';
@@ -130,8 +130,9 @@ export const lostCardWorkflow: Workflow = {
           resolution: 'resolved',
           nextSteps: 'Card blocked and replaced; caller reported a concern but no recent charges were on the card.',
         };
-      ctx.wf.step = 'choose_txn';
-      return { kind: 'clarify', purpose: 'choose_txn', message: 'Which of these recent charges don’t you recognise?', choices: txnChoices(recent) };
+      // FP-01: the caller says which charge; the card's recent activity is not read out to them.
+      ctx.wf.step = 'describe_txn';
+      return askWhichCharge(recent);
     }
     return this.start(ctx);
   },

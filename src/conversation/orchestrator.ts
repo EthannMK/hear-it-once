@@ -576,6 +576,29 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     audit({ actor: ASSISTANT, event: 'safety.prompt_injection_flagged', status: 'info', sessionId: s.id, correlationId: s.correlationId });
     if (c.caseId) addRiskFlag(c.caseId, 'prompt_injection_attempt');
   }
+  // FP-04: a caller being walked through the "safe account" scam by someone posing as the bank. The
+  // warning has to come before anything else, because the loss happens while the call is going on.
+  if (sig.scamCoaching && !c.flags.includes('scam_coaching_suspected')) {
+    c.flags.push('scam_coaching_suspected');
+    event(s, 'scam_pattern_detected', { pattern: 'FP-04' });
+    tl(s, {
+      type: 'safety.scam_warning',
+      stage: 'understand',
+      title: 'Caller may be mid-scam: bank impersonation warning given',
+      detail: 'The caller described being told to move money or share a passcode. Northstar never asks for either. The call is going to a person as urgent and nothing will be changed meanwhile.',
+      status: 'warn',
+      source: 'fraud patterns FP-04',
+    });
+    audit({ actor: ASSISTANT, event: 'safety.scam_pattern_detected', status: 'info', sessionId: s.id, correlationId: s.correlationId });
+    if (c.caseId) addRiskFlag(c.caseId, 'scam_coaching_suspected');
+    return handoff(
+      s,
+      'social_engineering_suspected',
+      'caller appears to be coached by someone impersonating the bank (FP-04)',
+      'Please stop and listen for a moment, because this matters. Northstar will never ask you to move money to a safe account, and we will never ask you to read out a passcode, a PIN or a password. If someone has asked you to do either, they are not from the bank. Please do not do it, and end that call. I am putting you through to our fraud team now as a priority — stay on this line with me.',
+      { priority: 'urgent' },
+    );
+  }
   if (COMPLAINT.test(text)) return handoff(s, 'complaint', 'customer asked to make a formal complaint', "I'm sorry it's come to this. I've logged your complaint and I'm passing you to a colleague who'll take it from here. They'll have everything we've discussed, so you won't need to repeat it.");
   if (sig.humanRequested) return handoff(s, 'customer_requested', 'customer asked for a person', 'Of course. I’ll connect you with a member of our team.');
   if (sig.thirdPartyCaller) {
@@ -747,6 +770,15 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
     if (yn && WEAK_YES.test(text.trim())) return say(s, 'Just to be sure, would you like me to connect you with a person? Please say yes or no.');
     if (yn) return onYesNoAnswer(s, p, yn === 'yes');
     c.pending = null;
+  }
+  // The caller is answering the menu we just read them, by position ("the second one") or by name
+  // ("the lost card one"). On a voice call that is the only way to pick an option.
+  // Only a positional answer is taken here. Matching the menu's wording would turn an ordinary
+  // sentence that happens to contain "card" or "charge" into a chosen option, so that is left to
+  // the classifier, which weighs the whole sentence.
+  if (c.pending?.kind === 'choice' && c.pending.scope === 'issue') {
+    const byOrdinal = parseOrdinalChoice(text, c.pending.options.length);
+    if (byOrdinal != null) return onChoice(s, c.pending.options[byOrdinal].id);
   }
   const combined = c.issue && c.stage === 'clarifying_issue' ? `${c.issue.statement} ${redactText(text)}` : redactText(text);
   const cls = await classify(s, combined);

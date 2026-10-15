@@ -116,6 +116,24 @@ export function txnChoices(txns: Transaction[], max = 4): Choice[] {
   return [...txns.slice(0, max).map((t) => ({ id: t.transactionId, label: txnChoiceLabel(t) })), { id: 'none', label: 'None of these' }];
 }
 
+/**
+ * FP-01, minimum disclosure. A caller who has named nothing is never shown what is on the account:
+ * a list of merchants and amounts is exactly what someone calling to harvest data is after, and it
+ * is worth as much to them as a stolen statement. The caller states the charge, the bank confirms
+ * it. All the caller is told is how much there is to look through, which identifies nothing.
+ */
+export function askWhichCharge(txns: Transaction[], again = false): WorkflowResult {
+  const n = txns.length;
+  const scale = n === 0 ? 'I can’t see any recent card purchases to check.' : n === 1 ? 'I can see one recent card purchase.' : `I can see ${n} recent card purchases.`;
+  return {
+    kind: 'clarify',
+    purpose: 'describe_txn',
+    message: again
+      ? 'Sorry, I couldn’t match that. Could you give me the amount, or the name on the statement, or roughly what day it was?'
+      : `${scale} So I check the right one, could you tell me the amount, the merchant, or roughly when it happened?`,
+  };
+}
+
 export function cardsOf(snap: Snapshot): CardSummary[] {
   return sourceData(snap, 'card_status') ?? [];
 }

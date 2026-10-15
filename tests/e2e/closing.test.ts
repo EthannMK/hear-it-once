@@ -80,7 +80,7 @@ describe('the stolen-card review question (D-05)', () => {
       // The question must carry its reason, never arrive bare after a replacement.
       expect(asked).toMatch(/since the card was out of your hands/i);
       await c.say('yes');
-      expect(c.lastAssistant()).toMatch(/which of these recent charges|can’t see any recent charges|can't see any recent charges/i);
+      expect(c.lastAssistant()).toMatch(/could you tell me the amount|can’t see any recent charges|can't see any recent charges/i);
     } else {
       expect(asked).toMatch(/no recent charges on that card/i);
     }

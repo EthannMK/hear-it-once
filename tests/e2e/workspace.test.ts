@@ -107,8 +107,11 @@ describe('intent, lookups, KB and tags', () => {
     expect(first).toBeTruthy();
     const tx = profile.recentTransactions?.[0];
     expect(tx).toBeTruthy();
-    // The choices offered come from the real ledger of the active customer, not a script.
-    expect(JSON.stringify(c.view.choices)).toMatch(new RegExp(String(tx.merchant).slice(0, 5), 'i'));
+    // Nothing is read out to a caller who described nothing (FP-01); naming the merchant themselves
+    // finds it in the real ledger of the active customer, not in a script.
+    expect(c.lastAssistant()).not.toMatch(new RegExp(String(tx.merchant).slice(0, 5), 'i'));
+    await c.say(`it was the one from ${tx.merchant}`);
+    expect(c.transcriptText()).toMatch(new RegExp(String(tx.merchant).slice(0, 5), 'i'));
     expect(c.view.tags.secondaryIntents).toHaveLength(0);
     await c.say('Actually I also want to ask about a late fee on my account');
     await c.refresh();

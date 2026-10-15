@@ -36,6 +36,8 @@ export interface SafetySignals {
   thirdPartyCaller: boolean;
   promptInjection: boolean;
   distress: boolean;
+  /** FP-04: the caller is being coached by someone impersonating the bank (the "safe account" scam). */
+  scamCoaching: boolean;
 }
 
 export interface IntentModel {
@@ -133,6 +135,14 @@ export class RulesIntentModel implements IntentModel {
   }
 }
 
+/**
+ * FP-04. The shape of a caller who is mid-scam: another "bank" is on the line telling them to move
+ * money to a safe account, or to read out the passcode we just sent. These are the words such a
+ * caller uses when they ring the real bank to check, and they are the last chance to stop the loss.
+ */
+const SCAM_COACHING =
+  /\b(safe|secure|holding|protected|temporary) account\b|\bmove (my |the )?(money|funds|savings)\b.{0,40}\b(safe|secure|another|new|different) account\b|\b(transfer|send) (my |the )?(money|funds|savings)\b.{0,30}\bto (keep|make) (it|them) safe\b|\b(someone|a man|a woman|somebody|he|she|they) (from|at|claiming to be from) (the )?(bank|your (bank|fraud|security) team|northstar)\b.{0,60}\b(told|asked|said|instructed|wants?|is telling)\b|\b(told|asked|instructed) me to (move|transfer|send|withdraw|read out|share|give)\b|\bi was (told|asked|instructed) to (move|transfer|send|withdraw|read out|share|give)\b|\bon the other (line|phone)\b.{0,40}\b(bank|fraud)\b|\bshould i (give|read|share) (him|her|them) the (code|passcode|otp|pin)\b/i;
+
 /** Deterministic safety signals. Never delegated to a model. */
 export function detectSignals(text: string): SafetySignals {
   const t = text.toLowerCase();
@@ -141,6 +151,7 @@ export function detectSignals(text: string): SafetySignals {
     thirdPartyCaller: /\b(on behalf of|for my (wife|husband|mother|mom|mum|father|dad|son|daughter|friend|partner|boss|client|grandmother|grandfather))\b|\bmy (wife|husband|mother|mom|mum|father|dad|son|daughter|friend|partner|boss|client|grandmother|grandfather)'?s (card|account)\b/.test(t),
     promptInjection: /\b(ignore (all |any |the )?(previous|prior|above|earlier) (instructions|rules|prompts?)|disregard (your|the) (rules|instructions|policy)|system prompt|you are now|developer mode|jailbreak|override (the )?(policy|rules|limits?)|act as (an? )?(admin|administrator|supervisor)|approve (it|this|the \w+) without)\b/.test(t),
     distress: /\b(panic|panicking|scared|terrified|furious|desperate|crying|i can'?t cope|this is ridiculous|useless)\b/.test(t),
+    scamCoaching: SCAM_COACHING.test(t),
   };
 }
 
