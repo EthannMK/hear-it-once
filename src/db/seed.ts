@@ -11,6 +11,7 @@ import { hashDob, hashPhone } from '../adapters/mock/identity.ts';
 import { seedRoles, createStaffUser } from '../auth/rbac.ts';
 import { SCENARIOS, type ScenarioDef } from './scenarios.ts';
 import { seedIllustrativeHistory } from './seed-history.ts';
+import { seedCrmHistory } from './seed-crm.ts';
 
 const iso = (daysAgo: number, hour = 12, minute = 0) => {
   const d = new Date(nowMs() - daysAgo * 86_400_000);
@@ -271,6 +272,7 @@ export function seedAll(opts: { history?: boolean } = {}): void {
     for (const s of STAFF) createStaffUser(s.id, s.name, s.role);
     seedReferenceData();
     seedScenarioCustomers();
+    seedCrmHistory();
     run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('seeded_at', ?)", [nowIso()]);
     d.exec('COMMIT');
   } catch (e) {
@@ -281,7 +283,7 @@ export function seedAll(opts: { history?: boolean } = {}): void {
 }
 
 const DATA_TABLES = [
-  'qa_reviews', 'session_events', 'hold_intervals', 'handoffs', 'disputes', 'action_status_history', 'action_operations', 'consents', 'proposals',
+  'ticket_events', 'case_tickets', 'case_recommendations', 'qa_reviews', 'session_events', 'hold_intervals', 'handoffs', 'disputes', 'action_status_history', 'action_operations', 'consents', 'proposals',
   'case_events', 'cases', 'integration_calls', 'retrieval_snapshots', 'otp_challenges', 'verification_attempts', 'conversation_turns', 'call_sessions',
   'audit_events', 'bank_operations', 'bank_declines', 'bank_fees', 'bank_payments', 'bank_fraud_alerts', 'bank_transactions', 'bank_cards', 'bank_customers',
   'bank_dispute_rules', 'bank_fee_policies', 'mock_faults', 'staff_users', 'role_permissions', 'roles', 'app_settings',

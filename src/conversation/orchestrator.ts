@@ -39,7 +39,8 @@ import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
 import { profileById } from '../live/profiles.ts';
 import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
 import { maskPhone } from '../lib/redact.ts';
-import { ISSUE_LABELS, formatDate, formatMoney } from './format.ts';
+import { HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate, formatMoney } from './format.ts';
+import { createTicket } from '../crm/crm.ts';
 import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
 
 export type Stage =
@@ -427,6 +428,8 @@ function absorbCardDigits(s: Session, text: string): boolean {
 
 /* ------------------------------------------------------------------------- dispatch */
 
+const COMPLAINT = /\b(formal complaint|make a complaint|file a complaint|lodge a complaint|raise a complaint|log a complaint|want to complain|i'?m complaining|i am complaining)\b/i;
+
 const SENSITIVE_STAGES: Stage[] = ['identifying', 'awaiting_dob', 'awaiting_otp', 'awaiting_card'];
 
 async function dispatch(s: Session, input: CallInput): Promise<void> {
@@ -540,7 +543,8 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     audit({ actor: ASSISTANT, event: 'safety.prompt_injection_flagged', status: 'info', sessionId: s.id, correlationId: s.correlationId });
     if (c.caseId) addRiskFlag(c.caseId, 'prompt_injection_attempt');
   }
-  if (sig.humanRequested) return handoff(s, 'customer_requested', 'customer asked for a person', 'Of course — I’ll connect you with a member of our team.');
+  if (COMPLAINT.test(text)) return handoff(s, 'complaint', 'customer asked to make a formal complaint', "I'm sorry it's come to this. I've logged your complaint and I'm passing you to a colleague who'll take it from here. They'll have everything we've discussed, so you won't need to repeat it.");
+  if (sig.humanRequested) return handoff(s, 'customer_requested', 'customer asked for a person', 'Of course. I’ll connect you with a member of our team.');
   if (sig.thirdPartyCaller) {
     c.flags.push('third_party_caller');
     return handoff(
@@ -1374,6 +1378,12 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
   else if (reason === 'social_engineering_suspected' || reason === 'account_takeover_suspected') await retrieveGuidance(s, 'handoff', ['security', 'handoff'], { agentReview: true });
   else await retrieveGuidance(s, 'handoff', ['handoff'], { agentReview: true });
   const r = await requestHandoff({ sessionId: s.id, caseId: c.caseId, reason, reasonDetail: detail, actor: s.actor, correlationId: s.correlationId, missing: opts.missing, priority: opts.priority });
+  // The case gets a ticket automatically, so the team that picks it up has one record to work from.
+  try {
+    createTicket(c.caseId, ASSISTANT, { type: reason === 'complaint' ? 'complaint' : 'escalation', reason: `${HANDOFF_REASON_LABELS[reason] ?? reason}: ${detail}`.slice(0, 300), requestKey: `handoff:${r.handoffId}` });
+  } catch (e) {
+    log.warn('ticket creation failed', { sessionId: s.id, error: (e as Error).message });
+  }
   tl(s, { type: 'handoff.prepared', stage: 'handoff', title: 'Agent brief prepared from the recorded call', detail: `Reason: ${detail}. The brief carries the customer’s words, verification status, facts, actions and next step.`, status: 'ok', source: 'handoff', ref: r.handoffId });
   refreshTags(s, 'handoff');
   if (r.status === 'queued') {

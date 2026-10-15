@@ -23,6 +23,9 @@ beforeEach(() => {
   // Remove the S07 fixture's prior session so this dataset is exactly the rows below.
   run("DELETE FROM cases WHERE session_id IN (SELECT id FROM call_sessions WHERE scenario_id = 'S07-prior')");
   run("DELETE FROM call_sessions WHERE scenario_id = 'S07-prior'");
+  // Likewise the earlier CRM interactions seeded for the demo customers.
+  run("DELETE FROM cases WHERE session_id IN (SELECT id FROM call_sessions WHERE scenario_id = 'crm-history')");
+  run("DELETE FROM call_sessions WHERE scenario_id = 'crm-history'");
   // A: resolved lost card, block confirmed 30 s after verification, case before end, csat 5
   session('A', { customer_id: 'CUS-1001', issue_type: 'lost_stolen_card', outcome: 'resolved', resolution_status: 'resolved', verified_at: at(40), ended_at: at(200), case_created_at: at(45), csat: 5, retrieval_started_at: at(40), retrieval_completed_at: at(41), proposal_at: at(50), consent_at: at(60), execution_completed_at: at(70) });
   run("INSERT INTO action_operations (id, idempotency_key, action_type, session_id, customer_id, target_ref, params_json, params_hash, actor_type, actor_id, status, requested_at, completed_at, updated_at) VALUES ('OP-A','k1','block_card','A','CUS-1001','CRD-1001A','{}','h','customer_session','A','succeeded',?,?,?)", [at(65), at(70), at(70)]);

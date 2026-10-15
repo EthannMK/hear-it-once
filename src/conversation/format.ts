@@ -32,6 +32,7 @@ export const OP_STATUS_LABELS: Record<string, string> = {
 
 export const HANDOFF_REASON_LABELS: Record<string, string> = {
   customer_requested: 'Customer asked for a person',
+  complaint: 'Customer made a formal complaint',
   verification_failed: 'Identity verification failed',
   ai_uncertain: 'Assistant uncertain of the request',
   system_unavailable: 'Required system unavailable',
