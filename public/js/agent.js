@@ -3,6 +3,11 @@
 // GET /api/handoffs/:id/workspace; every edit goes back through PATCH and is audited server-side.
 import { api, h, mount, fmtTime, fmtDateTime, staffSignin } from './lib.js';
 const app = document.getElementById('app');
+// Embedded in the customer page: signed in automatically as the demo agent and focused on one call.
+const params = new URLSearchParams(location.search);
+const EMBED = params.get('embed') === '1';
+const FOCUS = params.get('session');
+if (EMBED) document.body.classList.add('embed');
 
 const state = { me: null, items: [], selected: null, ws: null, form: null, crm: null, es: null, live: false, timer: null, flash: null };
 const liveEl = h('span.wx-small.wx-muted', { role: 'status' });
@@ -16,7 +21,17 @@ const PHASE = { waiting: ['warn', 'Waiting'], accepted: ['ok', 'Accepted'], comp
 const TONE = { ok: 'ok', passed: 'ok', failed: 'bad', locked: 'bad', warn: 'warn', pending: 'warn', blocked: 'bad', issued: 'ok', running: 'warn' };
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-staffSignin(signinEl, {
+async function start() {
+  if (EMBED) {
+    try {
+      const me = await api('/api/auth/me');
+      if (!me.authenticated) await api('/api/auth/demo-login', { method: 'POST', body: { userId: 'STF-AGENT-1' } });
+    } catch { /* the sign-in strip below still works */ }
+  }
+  signIn();
+}
+
+function signIn() { staffSignin(signinEl, {
   roles: ['agent'],
   onChange: (me) => {
     state.me = me;
@@ -32,7 +47,8 @@ staffSignin(signinEl, {
       mount(centerEl); mount(sideEl);
     }
   },
-});
+}); }
+start();
 
 function connectLive() {
   const es = new EventSource('/api/handoffs/stream');
@@ -54,7 +70,10 @@ function setLive() { liveEl.textContent = state.live ? '● Live — new cases a
 
 /* ------------------------------------------------------------------ queue */
 async function loadQueue() {
-  try { state.items = (await api('/api/handoffs')).items; state.done = (await api('/api/completed-calls')).items; renderQueue(); }
+  try { state.items = (await api('/api/handoffs')).items; state.done = (await api('/api/completed-calls')).items; renderQueue();
+    // Embedded view: open the handover for the call on the customer's page as soon as it exists.
+    if (FOCUS && !state.selected && !state.selectedCall) { const hit = state.items.find((i) => i.sessionId === FOCUS && i.status !== 'cancelled'); if (hit) select(hit.id); }
+  }
   catch (e) { mount(queueEl, h('div.wx-empty', e.message)); }
 }
 function renderQueue() {

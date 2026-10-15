@@ -45,7 +45,7 @@ const groupPan = (n) => String(n ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/
 const standing = (k) => ({ good: t('good'), watch: t('watch'), restricted: t('restricted') }[k] ?? k);
 
 async function home() {
-  S.call?.destroy?.(); S.call = null;
+  S.call?.destroy?.(); S.call = null; S.desk = null; S.deskFor = null;
   render(top(), h('main.single', h('div.skeleton', { role: 'status', 'aria-label': t('loading') }, h('span.sk.w60'), h('span.sk.w90'), h('span.sk.w75'), h('span.sk.w90'))));
   try {
     const [j, st] = await Promise.all([api('/api/demo/customers'), api('/api/live/status')]);
@@ -245,6 +245,23 @@ class CallController {
   }
 }
 
+/* ------------------------------------------------------------------ human agent desk (embedded) */
+const group4 = (d) => String(d).replace(/(.{4})(?=.)/g, '$1 ');
+/** Shows the human agent's workspace beside the call as soon as a handover exists, already signed in and focused on this call. */
+function ensureDesk(c) {
+  if (S.desk && S.deskFor === c.id) return;
+  const main = document.querySelector('main.single');
+  if (!main) return;
+  S.desk?.remove();
+  S.desk = h('section.desk', { 'aria-label': 'Human agent desk' },
+    h('header', h('h3', 'Human agent desk'), h('span.chip.demo', 'What the agent sees'), h('span.grow'),
+      h('a.link', { href: `/agent.html?session=${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Open full screen ↗')),
+    h('p.small.muted.pad', 'Lily has prepared this case for a person: the call reason, what was verified, the transcript and a suggested solution. Accept the handover to take over the conversation.'),
+    h('iframe.deskframe', { src: `/agent.html?embed=1&session=${encodeURIComponent(c.id)}`, title: 'Human agent workspace for this call', loading: 'lazy' }));
+  S.deskFor = c.id;
+  main.append(S.desk);
+}
+
 /* ------------------------------------------------------------------ call screen */
 const STAGE_KEYS = ['understand', 'verify', 'investigate', 'explain', 'confirm', 'act', 'record', 'resolve', 'handoff'];
 function callScreen(c) {
@@ -280,7 +297,14 @@ function callScreen(c) {
   function drawSide() {
     const v = c.view ?? {}; const hd = v.handoff; const bits = [];
     if (v.demoDevice) bits.push(h('div.demo-box', h('div.label', v.demoDevice.label), h('p.small', t('passcode')), h('b.mono', v.demoDevice.code)));
+    const cc = v.cardCapture;
+    if (cc) {
+      const shown = group4(cc.digits.replace(/ /g, '').padEnd(16, '•'));
+      bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.label', 'What Lily heard'), h('b.mono.heardnum', shown),
+        h('p.small', cc.confirming ? 'All 16 digits heard. Say yes if this is right, or say the correct digits.' : `${cc.count} of 16 digits. Keep reading the rest.`)));
+    }
     if (hd && hd.status !== 'cancelled') {
+      ensureDesk(c);
       const acc = hd.status === 'connected' || hd.status === 'completed';
       const txt = acc ? t('hJoined', { n: hd.agentName ?? t('anAgent') }) : hd.status === 'no_agent' ? t('hNone') : hd.status === 'failed' ? t('hFailed') : t('hSent');
       bits.push(h('div.handover' + (acc ? '.accepted' : ''), { role: 'status' }, h('span.label', acc ? t('hConnected') : hd.status === 'requested' ? t('hRequested') : t('hWaiting')), h('p', txt), h('p.small.muted', t('hDemo'))));

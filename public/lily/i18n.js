@@ -14,7 +14,7 @@ const D = {
     hintNote: 'You are not role-playing. This is only a test identity so Lily has an account to look up. Ask anything about banking.',
     loading: 'Loading demo data…', noProfiles: 'No demo identities are available.',
     heroTitle: 'Say it once. Lily handles the rest.',
-    heroLead: 'Talk to Lily, the AI assistant at Northstar Bank Card Services. Ask anything about cards and banking. Choose the call language at the top: English, Burmese or Tagalog.',
+    heroLead: 'Talk to Lily, the AI assistant at Northstar Bank. Ask anything about cards and banking. Choose the call language at the top: English, Burmese or Tagalog.',
     start: 'Start talking to Lily', startNote: 'You are speaking with an AI assistant. Your browser will ask for the microphone. Nothing here touches a real account.',
     tryTitle: 'Things you can ask',
     ex: ["I don't recognise a charge on my card", 'Why was my payment declined?', 'What is this fee?', 'What is APR and how is it calculated?', 'How do I spot a card scam?', 'I want to speak to a person'],

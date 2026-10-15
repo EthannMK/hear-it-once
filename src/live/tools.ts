@@ -10,7 +10,7 @@ import { redactText } from '../lib/redact.ts';
 import { audit, ASSISTANT } from '../audit/audit.ts';
 import { emitTimeline } from '../events/timeline.ts';
 import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
-import { handleInput, getContext } from '../conversation/orchestrator.ts';
+import { handleInput, getContext, cardCaptureFor } from '../conversation/orchestrator.ts';
 import { policy } from '../config/policy.ts';
 import { TOOL } from './lily.ts';
 import { profileById, profileCard } from './profiles.ts';
@@ -36,6 +36,8 @@ const maxSeq = (sessionId: string) => get<{ m: number | null }>('SELECT MAX(seq)
 
 /** Low-confidence markers a recogniser may emit; the orchestrator then asks the caller to repeat. */
 export function estimateAsrConfidence(text: string): number | undefined {
+  // Digits are content: a transcript chunk like "4" or "four" is a valid piece of a number being read out.
+  if (/\d/.test(text)) return undefined;
   if (/\[(?:inaudible|unclear|noise|unintelligible)[^\]]*\]|<noise>|<unk>/i.test(text) || text.replace(/[^a-z0-9]/gi, '').length < 2) return 0.2;
   return undefined;
 }
@@ -47,9 +49,10 @@ function stateSummary(sessionId: string) {
   const pending = ctx.pending;
   return {
     identity: s.verification_status === 'verified' ? 'verified' : s.verification_status === 'failed' ? 'locked_after_failed_attempts' : 'not_yet_verified',
-    awaiting: pending?.kind === 'consent' ? 'customer_yes_or_no_to_the_proposed_action' : pending?.kind === 'choice' ? 'customer_to_choose_one_option' : pending?.kind === 'yes_no' ? 'customer_yes_or_no' : ctx.stage === 'awaiting_card' ? 'full_16_digit_card_number' : ctx.stage === 'awaiting_dob' ? 'date_of_birth' : ctx.stage === 'awaiting_otp' ? 'one_time_passcode' : ctx.stage === 'identifying' ? 'customer_number' : 'nothing_specific',
+    awaiting: pending?.kind === 'consent' ? 'customer_yes_or_no_to_the_proposed_action' : pending?.kind === 'choice' ? 'customer_to_choose_one_option' : pending?.kind === 'yes_no' ? 'customer_yes_or_no' : ctx.stage === 'awaiting_card' ? (cardCaptureFor(sessionId)?.confirming ? 'customer_yes_or_no_to_the_card_number_read_back' : cardCaptureFor(sessionId) ? 'the_remaining_card_digits' : 'full_16_digit_card_number') : ctx.stage === 'awaiting_dob' ? 'date_of_birth' : ctx.stage === 'awaiting_otp' ? 'one_time_passcode' : ctx.stage === 'identifying' ? 'customer_number' : 'nothing_specific',
     options: pending?.kind === 'choice' ? pending.options.map((o) => o.label) : [],
     handoff: h ? { status: h.status === 'queued' || h.status === 'requested' ? 'waiting_for_an_agent_not_yet_accepted' : h.status === 'connected' ? 'accepted_by_an_agent' : h.status } : null,
+    cardDigitsHeardSoFar: ctx.stage === 'awaiting_card' ? cardCaptureFor(sessionId)?.count ?? 0 : undefined,
     callEnded: ctx.stage === 'ended',
   };
 }

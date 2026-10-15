@@ -29,7 +29,7 @@ Sign in as a demo agent. The queue has Waiting, Accepted and Completed groups an
 | Variable | Default | Purpose |
 |---|---|---|
 | `LIVE_PROVIDER` | `gemini` | `gemini`, `scripted` (tests) or `off` |
-| `LIVE_MODEL` | `gemini-live-2.5-flash-native-audio` | Gemini Live model ID. Verify with `npm run check:live` |
+| `LIVE_MODEL` | `gemini-3.8-live,gemini-3.8-live@global,gemini-live-2.5-flash-native-audio` | One or more Gemini Live model IDs, best first. Verify with `npm run check:live` |
 | `LIVE_VOICE` | `Aoede` | Voice name |
 | `GOOGLE_CLOUD_PROJECT` | from Cloud Run | Vertex AI project |
 | `GOOGLE_CLOUD_LOCATION` | `us-central1` | Vertex AI region |

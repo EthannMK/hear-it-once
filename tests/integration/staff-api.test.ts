@@ -46,7 +46,7 @@ describe('RBAC matrix (server-side, not UI hiding)', () => {
     expect([400, 415]).toContain(t.statusCode);
     const g = await app.inject({ method: 'GET', url: '/api/health' });
     expect(g.headers['content-security-policy']).toContain("default-src 'self'");
-    expect(g.headers['x-frame-options']).toBe('DENY');
+    expect(g.headers['x-frame-options']).toBe('SAMEORIGIN');
     expect(g.headers['cache-control']).toBe('no-store');
   });
   it('errors never leak internals', async () => {

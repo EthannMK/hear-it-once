@@ -464,7 +464,7 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
       return goSurvey(s);
     }
     case 'fallback':
-      return say(s, 'Please hold — you are being routed to the card services team. Everything you told me is saved.', 'system');
+      return say(s, 'Please hold while I route you to a specialist. Everything you told me is saved.', 'system');
     default:
       return;
   }
@@ -572,40 +572,80 @@ const vctx = (s: Session) => ({ sessionId: s.id, correlationId: s.correlationId,
 
 /* ------------------------------------------------------------------------- verification */
 
-/** Card numbers waiting for the caller's "yes". Held in memory only and never written to the database, logs or prompts. */
-const pendingCards = new Map<string, string>();
+/**
+ * Card digits being collected, per call. Held in memory only: never written to the database, logs, audit
+ * or model prompts. `confirming` means all 16 digits were heard and the caller was asked "is that correct?".
+ */
+interface CardCapture { digits: string; confirming: boolean }
+const captures = new Map<string, CardCapture>();
+const group4 = (d: string) => d.replace(/(.{4})(?=.)/g, '$1 ');
+const spoken = (d: string) => group4(d).split(' ').map((g) => [...g].join(' ')).join(', ');
+
+/** What Lily has heard so far, shown to the caller on screen so they can see whether it was captured correctly. */
+export function cardCaptureFor(sessionId: string): { digits: string; count: number; confirming: boolean } | null {
+  const c = captures.get(sessionId);
+  return c ? { digits: group4(c.digits), count: c.digits.length, confirming: c.confirming } : null;
+}
 
 /**
- * Card collection reads the number back (last four only), waits for confirmation and takes corrections.
- * Returns the digits to verify once the caller has confirmed, otherwise answers the caller and returns null.
+ * Card collection, like a careful agent: digits are kept across turns, so a number read in groups of
+ * four is assembled rather than lost. Every turn says what was heard. Once all 16 are heard the last
+ * four are read back and the caller confirms or corrects. Returns the digits to verify once confirmed,
+ * otherwise answers the caller and returns null.
  */
 function collectCard(s: Session, text: string): string | null {
-  const pending = pendingCards.get(s.id);
+  const cap = captures.get(s.id);
   const digits = text.replace(/\D/g, '');
   const yn = parseYesNo(text);
+  const note = (title: string, detail: string) => tl(s, { type: 'verification.readback', stage: 'verify', title, detail, status: 'info', source: 'identity verification (simulated)' });
+  const readback = (d: string, updated: boolean) => {
+    captures.set(s.id, { digits: d, confirming: true });
+    s.ctx.unclearCount = 0;
+    note(updated ? 'Card number corrected — read back for confirmation' : 'All 16 digits heard — read back for confirmation', 'Only the last four digits are repeated aloud. The number is held in memory until confirmed and is never stored.');
+    say(s, M.cardReadback(d.slice(-4), updated));
+    return null;
+  };
+
   if (digits.length === 0) {
-    if (pending && yn === 'yes') { pendingCards.delete(s.id); return pending; }
-    if (pending && yn === 'no') { pendingCards.delete(s.id); say(s, M.CARD_REASK); return null; }
-    if (pending) { say(s, M.CARD_YESNO); return null; }
+    if (cap?.confirming) {
+      if (yn === 'yes') { captures.delete(s.id); return cap.digits; }
+      if (yn === 'no') { captures.delete(s.id); say(s, M.CARD_REASK); return null; }
+      say(s, M.CARD_YESNO); return null;
+    }
+    if (cap) {
+      if (/\b(start over|again|restart|clear|wrong|mistake|reset)\b/i.test(text)) { captures.delete(s.id); say(s, M.CARD_REASK); return null; }
+      say(s, M.cardProgress(cap.digits, spoken(cap.digits))); return null;
+    }
     // "Try again" after the check was unavailable reuses the number the caller already confirmed.
     const saved = unavailableCards.get(s.id);
     if (saved && (yn === 'yes' || /\b(try|check)\b.*\bagain\b|\bretry\b/i.test(text))) return saved;
     // Nothing usable was said: the verifier asks again without using an attempt.
     return text;
   }
-  if (digits.length !== 16) {
-    pendingCards.delete(s.id);
+
+  // A short correction of a number already read back: "the last four are 4827".
+  if (cap?.confirming && digits.length === 4) return readback(cap.digits.slice(0, 12) + digits, true);
+  if (cap?.confirming && digits.length === 16) return readback(digits, true);
+
+  // A full 16 digits in one go wins. Otherwise digits are added to what was heard so far.
+  const base = cap?.confirming ? '' : cap?.digits ?? '';
+  let next = digits.length === 16 ? digits : base + digits;
+  if (next.length > 16) next = digits; // the caller probably started again
+  if (next.length > 16) {
+    captures.delete(s.id);
     s.ctx.unclearCount++;
-    tl(s, { type: 'verification.unclear', stage: 'verify', title: `Card number not captured fully (${digits.length} of 16 digits) — asked again, no attempt used`, status: 'info', source: 'identity verification (simulated)' });
+    note(`Too many digits heard (${next.length}) — asked again, no attempt used`, 'Nothing was checked.');
     if (s.ctx.unclearCount >= 3) { void handoff(s, 'communication_breakdown', 'could not capture the card number', "I'm having trouble capturing that. Let me connect you with an agent who can help verify you."); return null; }
-    say(s, M.CARD_WRONG_LENGTH(digits.length));
+    say(s, M.CARD_TOO_MANY(next.length));
     return null;
   }
-  pendingCards.set(s.id, digits);
-  s.ctx.unclearCount = 0;
-  tl(s, { type: 'verification.readback', stage: 'verify', title: pending ? 'Card number corrected — read back for confirmation' : 'Card number heard — read back for confirmation', detail: 'Only the last four digits are repeated. The full number is held in memory until confirmed and is never stored.', status: 'info', source: 'identity verification (simulated)' });
-  say(s, M.cardReadback(digits.slice(-4), !!pending));
-  return null;
+  if (next.length < 16) {
+    captures.set(s.id, { digits: next, confirming: false });
+    note(`Heard ${next.length} of 16 digits — keeping them and asking for the rest`, 'No attempt used. The digits are kept in memory for this call only.');
+    say(s, M.cardProgress(next, spoken(next)));
+    return null;
+  }
+  return readback(next, !!cap);
 }
 
 async function onVerificationAnswer(s: Session, text: string): Promise<void> {
@@ -628,7 +668,7 @@ async function runVerification(s: Session, answer: string): Promise<void> {
   const t0 = Date.now();
   const ev = await submitVerificationAnswer(vctx(s), c.verification, answer);
   if (ev.type === 'unavailable') unavailableCards.set(s.id, answer); else unavailableCards.delete(s.id);
-  pendingCards.delete(s.id);
+  captures.delete(s.id);
   if (c.verificationMode === 'card_number' && ev.type !== 'in_progress') tl(s, { type: 'verification.timing', stage: 'verify', title: `Card check finished in ${Date.now() - t0} ms`, detail: `Outcome: ${ev.type === 'verified' ? 'verified' : ev.type === 'unavailable' ? 'temporarily_unavailable' : ev.type === 'retry' && ev.unparsed ? 'invalid_input' : 'not_verified'}`, status: ev.type === 'unavailable' ? 'warn' : 'info', source: 'identity verification (simulated)', data: { latencyMs: Date.now() - t0 } });
   switch (ev.type) {
     case 'in_progress':
@@ -1146,7 +1186,7 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
     tl(s, { type: 'handoff.queued', stage: 'handoff', title: `Waiting for an agent (position ${r.queuePosition ?? 1}) — simulated desk`, detail: 'The transfer is not complete until an agent accepts it.', status: 'pending', source: 'agent desk (simulated)', ref: r.handoffId });
     c.stage = 'handoff';
     run("UPDATE call_sessions SET outcome = 'handed_off' WHERE id = ?", [s.id]);
-    say(s, `Your call is in the queue for the next available agent (position ${r.queuePosition ?? 1}). Please hold — the agent will see your case ${c.caseId} and everything we've discussed. [Simulated agent desk: a demo agent must accept this in the Agent Console.]`, 'system');
+    say(s, `${M.TRANSFER_INTRO('this')} Thank you for your patience. You are number ${r.queuePosition ?? 1} in the queue, and the agent will see your case ${c.caseId}. [Demo: a person on the agent desk must accept this handover.]`, 'system');
   } else {
     say(
       s,
