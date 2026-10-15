@@ -35,7 +35,7 @@ const ISSUE_PHRASES: Record<string, string> = {
 export function ackIssue(issueType: string, alreadyVerified = false): string {
   if (issueType === 'lost_stolen_card') return alreadyVerified ? "I'm sorry, that's stressful. Let's get the card blocked quickly." : "I'm sorry, that's stressful. Let's get the card blocked quickly. First I just need to check it's you.";
   const what = ISSUE_PHRASES[issueType] ?? ISSUE_LABELS[issueType].toLowerCase();
-  return alreadyVerified ? `Sure, I can help with ${what}.` : `I can help with ${what}. I've got the details you gave me. First, a quick security check.`;
+  return alreadyVerified ? `Sure, I can help with ${what}.` : `I can help with ${what}. First, a quick security check.`;
 }
 
 export const ASK_DOB = 'Please tell me your date of birth.';
