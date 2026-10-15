@@ -60,6 +60,8 @@ export interface WorkflowState {
   selectedPaymentId?: string | null;
   clarifications: number;
   recurring?: boolean;
+  /** How many times the customer asked for account activity without naming a charge. */
+  detailAsks?: number;
   priorCaseIds?: string[];
 }
 
@@ -71,6 +73,10 @@ export interface WorkflowCtx {
   sessionId: string;
   customerId: string;
   firstName: string;
+  /** 'strong' once the second-level check passed in this call. */
+  assurance?: 'basic' | 'strong';
+  /** True for one answer after the customer confirmed it is safe to read account activity aloud. */
+  readoutOk?: boolean;
 }
 
 export interface Workflow {

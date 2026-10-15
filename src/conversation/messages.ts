@@ -133,3 +133,34 @@ export const cardReadback = (last4: string, updated: boolean) => `${updated ? "U
 export const CARD_REASK = 'No problem. Could you read the 16-digit number again?';
 export const CARD_YESNO = 'Sorry, was that number right? A yes or no is fine, or read it again.';
 export const CARD_UNAVAILABLE = "Our security check is taking longer than usual, so I can't confirm that yet. I've kept what you told me. Say \"try again\" and I'll check once more, or I can bring in a person.";
+
+/* ------------------------------------------------------------------------- sensitive requests */
+
+export const HOLD_LINES = [
+  'One moment while I check that.',
+  'Give me a moment. I want to look at this properly.',
+  'Bear with me for a second while I go through it.',
+];
+export const STEP_UP_CONTACT = 'I can help with that. Changing contact details is something I protect closely, so I need one more check first. Please tell me the last four digits of your NRC or national ID number.';
+export const STEP_UP_READOUT = "For your privacy I don't read out account activity on the normal check. I can do it after one more check. Please tell me the last four digits of your NRC or national ID number.";
+export const STEP_UP_OK = 'Thank you, that matches.';
+export const STEP_UP_RETRY_UNCLEAR = "I didn't catch four digits. Please say or type the last four digits of your NRC or national ID number, or say skip if you'd rather leave it.";
+export const STEP_UP_RETRY = (left: number) => `That doesn't match what I have. You have ${left} ${left === 1 ? 'try' : 'tries'} left. Please give me the last four digits of your NRC or national ID number again.`;
+export const STEP_UP_DECLINED = "That's fine. Without that check I can't go ahead with it. Is there anything else I can help with?";
+export const STEP_UP_LOCKED = "I can't confirm it's you for this request, so I'm stopping here to protect your account. I'm passing you to a specialist who can help.";
+
+export const READOUT_CONFIRM = 'I can read out your most recent purchases. Are you somewhere private, and do you want me to say them aloud now? Please say yes or no.';
+export const READOUT_DECLINED = "Okay, I won't read anything out. If you tell me a charge you're wondering about, I can check it against your records without saying the rest.";
+
+export const CONTACT_ASK_VALUE = (kind: string) => kind === 'address' ? 'What is the full new address? Please include the house or flat number, the street, and the township or city.' : kind === 'phone' ? 'What is the new phone number?' : 'What is the new email address?';
+export const CONTACT_RETRY_VALUE = (kind: string) => kind === 'address' ? "I didn't get a full address. Please give the house number, street, and township or city." : kind === 'phone' ? "I didn't get a full phone number. Please say it again, digit by digit." : "I didn't get a full email address. Please say it again, for example name at example dot com.";
+export const CONTACT_READBACK = (kind: string, value: string) => `I have your new ${kind} as: ${value}. Is that exactly right?`;
+export const CONTACT_SECOND_CONFIRM = (kind: string, value: string, high: boolean) =>
+  `One last check before I send this on. New ${kind}: ${value}. ${high ? 'Because of what happened on this call, a specialist will review it before anything changes. ' : 'A person reviews it before anything changes. '}Shall I send it? Please say yes or no.`;
+export const CONTACT_YES_OR_NO = 'Sorry, was that a yes or a no?';
+export const CONTACT_CANCELLED = "Okay, I've dropped that. Nothing on your account has changed. Is there anything else I can help with?";
+export const CONTACT_GAVE_UP = "I'm having trouble getting that detail, so I've stopped. Nothing has changed. You can try again, or ask for an agent.";
+export const CONTACT_SUBMITTED = (kind: string) => `Done. I've sent your ${kind} change for review. Nothing changes until a person approves it, and we'll confirm on the phone number we hold.`;
+export const CONTACT_HANDOFF = (kind: string, why: string) => `Thank you. I can't change your ${kind} myself, and because ${why}, I'm passing you to a specialist who will review it with you. Everything you've told me is saved, and nothing on your account has changed yet.`;
+
+export const THIRD_PARTY = "Thank you for telling me. I can only discuss this account with the account holder, so I won't share or change anything. I'm passing you to a specialist who can explain the right way to do this.";

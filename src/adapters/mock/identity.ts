@@ -18,6 +18,12 @@ import { simulatedLatency } from './faults.ts';
 const MOCK_IDENTITY_PEPPER = 'hio-mock-identity-pepper-synthetic-data-only';
 
 export const hashDob = (isoDob: string) => hmac(MOCK_IDENTITY_PEPPER, `dob:${isoDob}`);
+/**
+ * Second-level check for sensitive requests (address change, reading out account activity): the
+ * last four digits of the customer's national ID (NRC). SYNTHETIC: derived from the customer id, so
+ * every demo customer has one without storing anything. The test panel shows it to the tester.
+ */
+export const nationalIdLast4 = (customerId: string) => String(parseInt(hmac(MOCK_IDENTITY_PEPPER, `nid:${customerId}`).slice(0, 8), 16) % 10000).padStart(4, '0');
 export const normalisePhone = (p: string) => p.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
 export const hashPhone = (p: string) => hmac(MOCK_IDENTITY_PEPPER, `phone:${normalisePhone(p)}`);
 

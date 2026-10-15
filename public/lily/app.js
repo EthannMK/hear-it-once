@@ -457,6 +457,7 @@ function callScreen(c) {
     const cc = v.cardCapture;
     if (cc) bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.cap', 'What Lily heard'), h('b.num', group4(String(cc.digits ?? '').replace(/ /g, '').padEnd(16, '•'))), h('p', cc.confirming ? 'All 16 digits heard. Say “yes” if this is right, or say the correct digits.' : `${cc.count ?? 0} of 16 digits. Keep reading the card number from the test-data panel.`)));
     if (v.demoDevice) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Test passcode: '), 'read this to Lily'), h('b.mono', v.demoDevice.code)));
+    if (v.testNrc) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Test NRC digits: '), 'read these to Lily'), h('b.mono', v.testNrc)));
     extras.replaceChildren(...bits);
     // Consent (buttons work in typing mode; in voice mode just say yes or no).
     if (v.proposal && v.pending?.kind === 'consent') {

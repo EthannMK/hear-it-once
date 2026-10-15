@@ -4,6 +4,7 @@
  * reachable from tests). The stand-in emits what a provider would: transcripts, audio, barge-in
  * and tool calls. Everything asserted is persisted back-end state, not UI text.
  */
+import { nationalIdLast4 } from '../../src/adapters/mock/identity.ts';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
@@ -635,6 +636,22 @@ describe('virtual agents by language (Lily, Hnin, Maya)', () => {
     expect(all<{ kind: string }>('SELECT kind FROM conversation_turns WHERE session_id = ?', [sessionId]).some((t) => t.kind === 'agent_switch:Hnin')).toBe(true);
     expect(timelineTypes(sessionId)).toContain('agent.switched');
   });
+
+  it('a language switch in the middle of a second-level check keeps the check going', async () => {
+    const { client, sessionId, session } = await connect('S01');
+    await customerSaysThenTool(client, session, "There's a charge from Novaplay for $249 that I didn't make");
+    await customerSaysThenTool(client, session, 'My date of birth is 1986-04-12');
+    await customerSaysThenTool(client, session, client.view.demoDevice.code);
+    const ask = await customerSaysThenTool(client, session, 'I also want to change my address');
+    expect(ask.backend_said.join(' ')).toMatch(/last four digits/i);
+    await moveTo(session, 'fil');
+    const maya = ScriptedProvider.last;
+    expect(maya.opts.systemInstruction).toMatch(/^You are Maya,/);
+    const cust = get<{ customer_id: string }>('SELECT customer_id FROM call_sessions WHERE id = ?', [sessionId])!.customer_id;
+    const out = await customerSaysThenTool(client, maya, nationalIdLast4(cust));
+    expect(out.backend_said.join(' ')).toMatch(/that matches/i);
+    expect(out.backend_said.join(' ')).toMatch(/full new address/i);
+  }, 20000);
 
   it('keeps the new agent through a dropped connection and a new browser tab', async () => {
     const { client, sessionId, token, session } = await connect('S01');

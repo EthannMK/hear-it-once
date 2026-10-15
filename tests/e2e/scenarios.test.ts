@@ -410,7 +410,7 @@ describe('cross-scenario privacy', () => {
     await c.verify('S01');
     await c.consent();
     for (const { name } of all<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table'")) {
-      for (const row of all(`SELECT * FROM ${name}`)) expect(containsProhibitedCardData(JSON.stringify(row)), name).toBe(false);
+      for (const row of all(`SELECT * FROM ${name}`)) expect(containsProhibitedCardData(JSON.stringify(row)), name + " " + JSON.stringify(row).slice(0, 400)).toBe(false);
     }
     await c.refresh();
     expect(containsProhibitedCardData(JSON.stringify(c.view))).toBe(false);
