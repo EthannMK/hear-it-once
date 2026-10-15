@@ -11,6 +11,7 @@ import { audit } from '../../audit/audit.ts';
 import { resetScenario } from '../../db/seed.ts';
 import { breakers } from '../../retrieval/retrieval.ts';
 import { SOURCE_DISPLAY } from '../../retrieval/labels.ts';
+import { INFO } from '../../kb/bank-info.ts';
 import { KB_ARTICLES, knowledgeBase } from '../../kb/kb.ts';
 import { SUPPORTED_LANGUAGES } from '../../voice/interfaces.ts';
 
@@ -27,7 +28,7 @@ export function registerDemoRoutes(app: FastifyInstance): void {
       { id: 'dispute_intake', label: 'Dispute intake', kind: 'write', status: 'simulated' },
       { id: 'fee_ledger', label: 'Fee ledger', kind: 'write', status: 'simulated' },
       { id: 'identity', label: 'Identity verification (DOB + passcode)', kind: 'verify', status: 'simulated' },
-      { id: 'kb', label: `Knowledge base (${KB_ARTICLES.length} synthetic articles)`, kind: 'read', status: 'simulated', provider: knowledgeBase().name },
+      { id: 'kb', label: `Knowledge base (${KB_ARTICLES.length + INFO.length} synthetic articles)`, kind: 'read', status: 'simulated', provider: knowledgeBase().name },
       { id: 'agent_desk', label: 'Agent desk / transfer', kind: 'telephony', status: 'simulated' },
       { id: 'intent', label: `Intent model: ${env().INTENT_MODEL === 'rules' ? 'deterministic rules' : env().INTENT_MODEL}`, kind: 'ai', status: env().INTENT_MODEL === 'rules' ? 'local' : 'configured' },
       { id: 'voice', label: 'Speech recognition & synthesis', kind: 'voice', status: 'browser', note: 'Uses your browser’s built-in speech features where supported; text input always works.' },
