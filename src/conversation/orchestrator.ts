@@ -39,7 +39,8 @@ import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
 import { profileById } from '../live/profiles.ts';
 import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
 import { maskPhone } from '../lib/redact.ts';
-import { ISSUE_LABELS, formatDate } from './format.ts';
+import { ISSUE_LABELS, formatDate, formatMoney } from './format.ts';
+import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
 
 export type Stage =
   | 'awaiting_issue'
@@ -88,6 +89,8 @@ export interface CallContext {
   verificationMode?: 'dob_otp' | 'card_number';
   /** Active demo customer profile for this call (server-side context). */
   profileId?: string | null;
+  /** Structured memory of the call: what is known, with status and source (see facts.ts). */
+  facts?: Facts;
 }
 
 /** Default synthetic persona per issue type for free-talk demos (no injected faults). */
@@ -184,12 +187,12 @@ async function retrieveGuidance(s: Session, stage: TStage, context: string[], op
   const query = [issueType, ...context].filter(Boolean).join(' + ') || 'general';
   const results = await knowledgeBase().search({ issueType, text: s.ctx.issue?.statement ?? '', context });
   if (!results.length) {
-    tl(s, { type: 'kb.none', stage, title: 'No relevant knowledge article found', detail: `Query: ${query}. Continuing with configured rules only.`, status: 'warn', source: 'knowledge base (synthetic)' });
+    tl(s, { type: 'kb.none', stage, title: 'No relevant knowledge article found', detail: `Query: ${query}. Continuing with configured rules only.`, status: 'warn', source: 'knowledge base' });
     return;
   }
   for (const r of results) {
     recordKbReference(s.id, r, query, { supportsNextStep: !!opts.supportsNextStep, agentReview: !!opts.agentReview });
-    tl(s, { type: 'kb.retrieved', stage, title: `Guidance retrieved: ${r.article.id} ${r.article.title}`, detail: `Why: ${r.reason}. ${r.article.excerpt}`, status: 'ok', source: 'knowledge base (synthetic)', data: { articleId: r.article.id } });
+    tl(s, { type: 'kb.retrieved', stage, title: `Guidance retrieved: ${r.article.id} ${r.article.title}`, detail: `Why: ${r.reason}. ${r.article.excerpt}`, status: 'ok', source: 'knowledge base', data: { articleId: r.article.id } });
   }
 }
 
@@ -269,6 +272,7 @@ export async function startCall(input: StartCallInput): Promise<string> {
     persona: null,
     sentiment: null,
     tags: null,
+    facts: {},
   };
   const profile = input.profileId ? profileById(input.profileId) : undefined;
   if (input.profileId && !profile) throw new Error('Unknown demo profile.');
@@ -294,7 +298,7 @@ export async function startCall(input: StartCallInput): Promise<string> {
       ctx.verification.identifiedBy = 'ani';
     }
   }
-  tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: `Channel: ${input.channel === 'voice_browser' ? 'browser voice' : 'text simulator'}${profile ? `; active demo customer ${sc!.customer.name} (caller ID matched — identification only)` : sc ? `; demo scenario ${sc.id}` : ctx.freeMode ? '; free-talk demo' : ''}.`, status: 'ok', source: 'telephony (simulated)', ref: correlationId });
+  tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: `Channel: ${input.channel === 'voice_browser' ? 'browser voice' : 'text simulator'}${profile ? `; active demo customer ${sc!.customer.name} (caller ID matched — identification only)` : sc ? `; demo scenario ${sc.id}` : ctx.freeMode ? '; free-talk demo' : ''}.`, status: 'ok', source: 'phone line', ref: correlationId });
   say(s, M.GREETING_NOTICE, 'system');
   // On a live voice call Lily speaks her own greeting; the AI disclosure is recorded when she has
   // actually said it (see the voice bridge), not assumed here.
@@ -326,6 +330,99 @@ export async function handleInput(sessionId: string, input: CallInput): Promise<
       save(s);
     }
   });
+}
+
+/* ------------------------------------------------------------------------- heard but not yet handled */
+
+/**
+ * What the customer said on a live call that no tool call has taken yet. Held in memory only
+ * (it may contain a date of birth or card digits) and cleared as soon as the back end uses it.
+ */
+const unheard = new Map<string, { text: string; stage: Stage; at: number }[]>();
+const UNHEARD_MAX_AGE_MS = 120_000;
+
+/** True when the customer said something on this call that the back end has not acted on yet. */
+export function hasUnhandledSpeech(sessionId: string): boolean {
+  return hadUnheard(sessionId);
+}
+function hadUnheard(sessionId: string): boolean {
+  return (unheard.get(sessionId) ?? []).length > 0;
+}
+function clearUnheard(sessionId: string): void {
+  unheard.delete(sessionId);
+}
+/** Earlier words that may be combined with the current turn, or null when they must not be used. */
+function takeUnheard(sessionId: string, c: CallContext): string | null {
+  const list = (unheard.get(sessionId) ?? []).filter((u) => u.stage === c.stage && Date.now() - u.at < UNHEARD_MAX_AGE_MS);
+  if (!list.length) return null;
+  // Consent is never inferred from earlier words: Lily may have asked her own question in between.
+  if (c.pending?.kind === 'consent') return null;
+  // Single-answer steps use only the most recent words.
+  if (c.pending?.kind === 'yes_no' || ['identifying', 'awaiting_dob', 'awaiting_otp', 'awaiting_card', 'awaiting_survey'].includes(c.stage)) return list[list.length - 1].text;
+  return list.slice(-3).map((u) => u.text).join(' ');
+}
+
+/**
+ * The customer spoke on a live call and the voice model replied without calling a tool. The words
+ * are recorded, their details are captured into the call facts, and they are kept for the next
+ * back-end step so the customer never has to say them again.
+ */
+export async function observeSpeech(sessionId: string, rawText: string): Promise<void> {
+  const text = rawText.trim().slice(0, 1000);
+  if (!text) return;
+  await withLock(sessionId, async () => {
+    const s = load(sessionId);
+    const c = s.ctx;
+    c.facts ??= {};
+    const sensitive = SENSITIVE_STAGES.includes(c.stage);
+    addTurn(s.id, 'customer', sensitive ? '[verification answer — not stored]' : text, { kind: 'voice', sensitive });
+    if (c.stage === 'ended') return;
+    if (c.stage === 'awaiting_card') {
+      // Card digits read out between tool calls are kept with the rest of the number.
+      if (absorbCardDigits(s, text)) { save(s); return; }
+    } else if (!sensitive) {
+      noteEarlyCardNumber(s, text);
+      factsFromCustomerText(c.facts, extractSlots(text), { correction: isCorrection(text) });
+      if (!c.issue && (c.stage === 'awaiting_issue' || c.stage === 'clarifying_issue')) {
+        setFact(c.facts, 'issue', text, 'provided', 'customer');
+        run('UPDATE call_sessions SET issue_statement = COALESCE(issue_statement, ?) WHERE id = ?', [redactText(text), s.id]);
+      }
+    }
+    const list = (unheard.get(s.id) ?? []).filter((u) => u.stage === c.stage);
+    list.push({ text, stage: c.stage, at: Date.now() });
+    unheard.set(s.id, list.slice(-4));
+    event(s, 'speech_observed', { stage: c.stage });
+    save(s);
+  });
+}
+
+/** A full card number said before the identity step: kept in memory (never stored) for that step. */
+function noteEarlyCardNumber(s: Session, text: string): void {
+  if (s.ctx.verificationMode !== 'card_number' || isVerified(s.ctx.verification)) return;
+  const m = text.match(/(?:\d[ -]?){15}\d/);
+  if (!m) return;
+  const digits = m[0].replace(/\D/g, '');
+  if (digits.length !== 16) return;
+  captures.set(s.id, { digits, confirming: false });
+  setFact(s.ctx.facts ??= {}, 'card_reference', `card ending ${digits.slice(-4)}`, 'provided', 'customer');
+  tl(s, { type: 'verification.card_noted', stage: 'understand', title: 'Card number noted for the identity check', detail: 'Held in memory for this call only, never stored. It is read back and checked at the identity step.', status: 'info', source: 'identity verification' });
+}
+
+/** Silently add card digits heard between tool calls. Returns true when the words were digits. */
+function absorbCardDigits(s: Session, text: string): boolean {
+  const digits = text.replace(/\D/g, '');
+  if (!digits) return false;
+  const cap = captures.get(s.id);
+  if (cap?.confirming) {
+    if (digits.length === 16) captures.set(s.id, { digits, confirming: false });
+    else if (digits.length === 4) captures.set(s.id, { digits: cap.digits.slice(0, 12) + digits, confirming: false });
+    return true;
+  }
+  let next = digits.length === 16 ? digits : (cap?.digits ?? '') + digits;
+  if (next.length > 16) next = digits.length <= 16 ? digits : '';
+  if (next) captures.set(s.id, { digits: next, confirming: false });
+  else captures.delete(s.id);
+  return true;
 }
 
 /* ------------------------------------------------------------------------- dispatch */
@@ -370,12 +467,29 @@ function labelForChoice(c: CallContext, id: string): string {
 
 async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'utterance' }>): Promise<void> {
   const c = s.ctx;
-  const text = input.text.trim().slice(0, 1000);
+  c.facts ??= {};
+  const said = input.text.trim().slice(0, 1000);
   const sensitive = SENSITIVE_STAGES.includes(c.stage);
   // Verification answers are never written to the transcript.
-  addTurn(s.id, 'customer', sensitive ? '[verification answer — not stored]' : text, { sensitive, clientMessageId: input.clientMessageId, asrConfidence: input.asrConfidence ?? null });
+  if (said) addTurn(s.id, 'customer', sensitive ? '[verification answer — not stored]' : said, { sensitive, clientMessageId: input.clientMessageId, asrConfidence: input.asrConfidence ?? null });
   c.silenceCount = 0;
+  // Words the customer spoke earlier in this step that the back end has not acted on yet (e.g. Lily
+  // answered them before calling a tool). They are part of what the customer told us; consent is
+  // the exception and must always come from the customer's latest words.
+  const earlier = takeUnheard(s.id, c);
+  if (!said && earlier === null && hadUnheard(s.id)) {
+    clearUnheard(s.id);
+    return say(s, c.pending?.kind === 'consent' ? 'Just to be sure, should I go ahead? Please say yes or no.' : c.lastPrompt);
+  }
+  clearUnheard(s.id);
+  const text = earlier ? (said ? `${earlier} ${said}` : earlier) : said;
+  // Card digits read out between tool calls are already held: carry on from them.
+  if (!text && c.stage === 'awaiting_card' && captures.has(s.id)) return onVerificationAnswer(s, '');
   if (!text) return onSilence(s);
+  if (!sensitive) {
+    noteEarlyCardNumber(s, text);
+    factsFromCustomerText(c.facts, extractSlots(text), { correction: isCorrection(text) });
+  }
 
   if ((c.stage === 'awaiting_issue' || c.stage === 'clarifying_issue') && !c.issue) {
     run('UPDATE call_sessions SET issue_statement = COALESCE(issue_statement, ?) WHERE id = ?', [redactText(text), s.id]);
@@ -529,9 +643,10 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
     issueType, nowIso(), JSON.stringify(c.issue.slots), nowIso(), s.id,
   ]);
   event(s, 'issue_captured', { issueType, confidence });
+  setIssueFacts(c.facts ??= {}, c.issue.statement, issueType, true);
   if (c.freeMode && !c.verification.identifiedCustomerId) await bindFreeTalkPersona(s, issueType);
   say(s, (distressed ? 'I understand — and if at any point you’d prefer a person, just say so. ' : '') + M.ackIssue(issueType));
-  tl(s, { type: 'verification.started', stage: 'verify', title: issueType === 'lost_stolen_card' ? 'Identity verification started — card block will follow immediately' : 'Identity verification started', detail: c.verificationMode === 'card_number' ? 'Demo check: the full card number is compared on the server with the active demo customer’s record. Nothing about the account is read until it matches. (Synthetic demo verification, not production identity checking.)' : 'Two factors required: date of birth, then a one-time passcode to the registered phone. Nothing about the account is read until both pass.', status: 'running', source: 'identity verification (simulated)' });
+  tl(s, { type: 'verification.started', stage: 'verify', title: issueType === 'lost_stolen_card' ? 'Identity verification started — card block will follow immediately' : 'Identity verification started', detail: c.verificationMode === 'card_number' ? 'The full card number is checked on the server against the customer’s record. Nothing about the account is read until it matches.' : 'Two factors required: date of birth, then a one-time passcode to the registered phone. Nothing about the account is read until both pass.', status: 'running', source: 'identity verification' });
   // Verification begins immediately (lost/stolen fast path uses the same flow, nothing else first).
   const ev = await startVerification(vctx(s), c.verification, null, c.verificationMode ?? 'dob_otp');
   if (c.verification.identifiedCustomerId && c.verification.identifiedBy === 'ani' && ev.type === 'need_identifier') {
@@ -544,7 +659,13 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
     c.verification.status = 'awaiting_card';
     run("UPDATE call_sessions SET verification_status = 'identified' WHERE id = ?", [s.id]);
     c.stage = 'awaiting_card';
-    say(s, M.ASK_CARD);
+    const early = captures.get(s.id);
+    const said4 = c.facts?.card_reference?.status === 'provided' ? c.facts.card_reference.value.match(/\d{4}$/)?.[0] ?? null : null;
+    if (early && early.digits.length === 16) {
+      // The customer already gave the full number earlier in the call: confirm it instead of asking again.
+      captures.set(s.id, { digits: early.digits, confirming: true });
+      say(s, M.cardReadbackEarlier(early.digits.slice(-4)));
+    } else say(s, said4 ? M.askCardKnowing(said4) : M.ASK_CARD);
   } else if (c.verification.status === 'awaiting_dob') {
     c.stage = 'awaiting_dob';
     say(s, M.ASK_DOB);
@@ -597,7 +718,7 @@ function collectCard(s: Session, text: string): string | null {
   const cap = captures.get(s.id);
   const digits = text.replace(/\D/g, '');
   const yn = parseYesNo(text);
-  const note = (title: string, detail: string) => tl(s, { type: 'verification.readback', stage: 'verify', title, detail, status: 'info', source: 'identity verification (simulated)' });
+  const note = (title: string, detail: string) => tl(s, { type: 'verification.readback', stage: 'verify', title, detail, status: 'info', source: 'identity verification' });
   const readback = (d: string, updated: boolean) => {
     captures.set(s.id, { digits: d, confirming: true });
     s.ctx.unclearCount = 0;
@@ -614,6 +735,8 @@ function collectCard(s: Session, text: string): string | null {
     }
     if (cap) {
       if (/\b(start over|again|restart|clear|wrong|mistake|reset)\b/i.test(text)) { captures.delete(s.id); say(s, M.CARD_REASK); return null; }
+      // All 16 were heard already (read out between tool calls, or given earlier in the call): read back.
+      if (cap.digits.length === 16) return readback(cap.digits, false);
       say(s, M.cardProgress(cap.digits, spoken(cap.digits))); return null;
     }
     // "Try again" after the check was unavailable reuses the number the caller already confirmed.
@@ -645,12 +768,26 @@ function collectCard(s: Session, text: string): string | null {
     say(s, M.cardProgress(next, spoken(next)));
     return null;
   }
-  return readback(next, !!cap);
+  return readback(next, false);
 }
+
+const MONEY_MENTION = /\$\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?:dollars?|usd|bucks)\b/gi;
 
 async function onVerificationAnswer(s: Session, text: string): Promise<void> {
   const c = s.ctx;
   if (c.stage === 'awaiting_card' && c.verificationMode === 'card_number') {
+    // An amount mentioned during the card step ("actually it was $249") is a detail of the issue, not card digits.
+    const detail = text.match(MONEY_MENTION);
+    if (detail) {
+      c.facts ??= {};
+      factsFromCustomerText(c.facts, extractSlots(text), { correction: true });
+      if (c.issue) c.issue.slots = mergeSlots(c.issue.slots, extractSlots(text));
+      text = text.replace(MONEY_MENTION, ' ');
+      if (!/\d/.test(text) && parseYesNo(text) === null) {
+        const cap = captures.get(s.id);
+        return say(s, `Thanks, I've noted that. ${cap && !cap.confirming && cap.digits.length < 16 ? M.cardProgress(cap.digits, spoken(cap.digits)) : M.ASK_CARD}`);
+      }
+    }
     const confirmed = collectCard(s, text);
     if (confirmed === null) return;
     // Only a confirmed 16-digit number is acknowledged and checked; anything else goes to the verifier to ask again.
@@ -669,12 +806,12 @@ async function runVerification(s: Session, answer: string): Promise<void> {
   const ev = await submitVerificationAnswer(vctx(s), c.verification, answer);
   if (ev.type === 'unavailable') unavailableCards.set(s.id, answer); else unavailableCards.delete(s.id);
   captures.delete(s.id);
-  if (c.verificationMode === 'card_number' && ev.type !== 'in_progress') tl(s, { type: 'verification.timing', stage: 'verify', title: `Card check finished in ${Date.now() - t0} ms`, detail: `Outcome: ${ev.type === 'verified' ? 'verified' : ev.type === 'unavailable' ? 'temporarily_unavailable' : ev.type === 'retry' && ev.unparsed ? 'invalid_input' : 'not_verified'}`, status: ev.type === 'unavailable' ? 'warn' : 'info', source: 'identity verification (simulated)', data: { latencyMs: Date.now() - t0 } });
+  if (c.verificationMode === 'card_number' && ev.type !== 'in_progress') tl(s, { type: 'verification.timing', stage: 'verify', title: `Card check finished in ${Date.now() - t0} ms`, detail: `Outcome: ${ev.type === 'verified' ? 'verified' : ev.type === 'unavailable' ? 'temporarily_unavailable' : ev.type === 'retry' && ev.unparsed ? 'invalid_input' : 'not_verified'}`, status: ev.type === 'unavailable' ? 'warn' : 'info', source: 'identity verification', data: { latencyMs: Date.now() - t0 } });
   switch (ev.type) {
     case 'in_progress':
       return;
     case 'unavailable':
-      tl(s, { type: 'verification.unavailable', stage: 'verify', title: 'Card check could not run — nothing decided, no attempt used', detail: `The check did not answer within the time limit (${ev.latencyMs} ms across one retry). The conversation state is kept.`, status: 'warn', source: 'identity verification (simulated)' });
+      tl(s, { type: 'verification.unavailable', stage: 'verify', title: 'Card check could not run — nothing decided, no attempt used', detail: `The check did not answer within the time limit (${ev.latencyMs} ms across one retry). The conversation state is kept.`, status: 'warn', source: 'identity verification' });
       return say(s, M.CARD_UNAVAILABLE);
     case 'need_card':
       c.stage = 'awaiting_card';
@@ -684,28 +821,30 @@ async function runVerification(s: Session, answer: string): Promise<void> {
       return say(s, `Thank you. ${M.ASK_DOB}`);
     case 'otp_sent':
       c.stage = 'awaiting_otp';
-      tl(s, { type: 'verification.factor_passed', stage: 'verify', title: 'Date of birth matched', detail: `One-time passcode sent to the registered phone (${ev.deliveredTo}).`, status: 'ok', source: 'identity verification (simulated)' });
+      tl(s, { type: 'verification.factor_passed', stage: 'verify', title: 'Date of birth matched', detail: `One-time passcode sent to the registered phone (${ev.deliveredTo}).`, status: 'ok', source: 'identity verification' });
       return say(s, M.otpSent(ev.deliveredTo));
     case 'retry':
       if (ev.unparsed) {
         c.unclearCount++;
         if (c.unclearCount >= 3) return handoff(s, 'communication_breakdown', `could not capture ${ev.step} answer`, "I'm having trouble capturing that. Let me connect you with an agent who can help verify you.");
       }
-      if (!ev.unparsed) tl(s, { type: 'verification.retry', stage: 'verify', title: ev.step === 'card' ? `Card number check failed — no match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)` : `Verification answer did not match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)`, detail: ev.step === 'card' ? 'The number given did not match the active customer’s record. The expected number is never revealed and the call carries on.' : 'Generic message given — the caller is not told which detail was wrong.', status: 'warn', source: 'identity verification (simulated)', data: { attemptResult: 'failed', attemptsRemaining: ev.remaining } });
-      else if (ev.step === 'card') tl(s, { type: 'verification.unclear', stage: 'verify', title: 'Card number not captured clearly — asked again (no attempt used)', status: 'info', source: 'identity verification (simulated)' });
+      if (!ev.unparsed) tl(s, { type: 'verification.retry', stage: 'verify', title: ev.step === 'card' ? `Card number check failed — no match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)` : `Verification answer did not match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)`, detail: ev.step === 'card' ? 'The number given did not match the active customer’s record. The expected number is never revealed and the call carries on.' : 'Generic message given — the caller is not told which detail was wrong.', status: 'warn', source: 'identity verification', data: { attemptResult: 'failed', attemptsRemaining: ev.remaining } });
+      else if (ev.step === 'card') tl(s, { type: 'verification.unclear', stage: 'verify', title: 'Card number not captured clearly — asked again (no attempt used)', status: 'info', source: 'identity verification' });
       return say(s, M.retryVerification(ev.step, ev.remaining, ev.unparsed));
     case 'locked':
+      setFact(c.facts ??= {}, 'identity', `Not verified: ${ev.step === 'card' ? 'card number' : 'answers'} did not match after the maximum attempts`, 'needs_clarification', 'verification');
       event(s, 'verification_failed', { step: ev.step });
       run("UPDATE call_sessions SET outcome = 'verification_failed' WHERE id = ?", [s.id]);
       c.caseId = ensureCase({ sessionId: s.id, customerId: null, issueType: c.issue?.issueType ?? null, verificationOutcome: 'failed', customerReported: c.issue?.statement ?? null, actor: s.actor, correlationId: s.correlationId });
       addRiskFlag(c.caseId, 'verification_failed');
-      tl(s, { type: 'verification.failed', stage: 'verify', title: ev.step === 'card' ? 'Card number check failed 3 times — preparing handover to a person' : 'Identity verification failed — locked after 3 attempts', detail: 'No account data was read or disclosed and no action is possible. Routing to an agent to verify another way.', status: 'failed', source: 'identity verification (simulated)', ref: c.caseId });
+      tl(s, { type: 'verification.failed', stage: 'verify', title: ev.step === 'card' ? 'Card number check failed 3 times — preparing handover to a person' : 'Identity verification failed — locked after 3 attempts', detail: 'No account data was read or disclosed and no action is possible. Routing to an agent to verify another way.', status: 'failed', source: 'identity verification', ref: c.caseId });
       refreshTags(s, 'verify');
       return handoff(s, 'verification_failed', `locked at ${ev.step}`, M.LOCKED);
     case 'verified':
       c.unclearCount = 0;
       event(s, 'verified');
-      tl(s, { type: 'verification.passed', stage: 'verify', title: c.verificationMode === 'card_number' ? 'Card number matched — identity verified (demo check)' : 'Identity verified (two factors)', detail: c.verificationMode === 'card_number' ? 'The card number matched the active demo customer’s record on the server. Protected reads are now allowed. Synthetic demo verification only.' : 'Date of birth and one-time passcode both passed. Protected reads are now allowed.', status: 'ok', source: 'identity verification (simulated)', data: { attemptResult: 'passed' } });
+      recordVerifiedFacts(s);
+      tl(s, { type: 'verification.passed', stage: 'verify', title: c.verificationMode === 'card_number' ? 'Card number matched — identity verified' : 'Identity verified (two factors)', detail: c.verificationMode === 'card_number' ? 'The card number matched the active demo customer’s record on the server. Protected reads are now allowed.' : 'Date of birth and one-time passcode both passed. Protected reads are now allowed.', status: 'ok', source: 'identity verification', data: { attemptResult: 'passed' } });
       refreshTags(s, 'verify');
       return onVerified(s);
     default:
@@ -713,11 +852,36 @@ async function runVerification(s: Session, answer: string): Promise<void> {
   }
 }
 
+/** Identity passed: record it, and check the card the customer mentioned against the verified one. */
+function recordVerifiedFacts(s: Session): void {
+  const c = s.ctx;
+  c.facts ??= {};
+  setFact(c.facts, 'identity', c.verificationMode === 'card_number' ? 'Verified by full card number' : 'Verified by date of birth and one-time passcode', 'verified', 'verification');
+  if (c.verificationMode !== 'card_number') return;
+  const card = get<{ last4: string }>('SELECT last4 FROM bank_cards WHERE customer_id = ? ORDER BY id LIMIT 1', [c.verification.identifiedCustomerId]);
+  if (!card) return;
+  const prev = c.facts.card_reference;
+  const value = `card ending ${card.last4}`;
+  const differs = prev && prev.source === 'customer' && !prev.value.endsWith(card.last4);
+  c.facts.card_reference = {
+    value,
+    status: 'verified',
+    source: 'verification',
+    at: nowIso(),
+    ...(differs ? { customerValue: prev!.value } : {}),
+    ...(prev ? { history: [...(prev.history ?? []), { value: prev.value, status: prev.status, source: prev.source, at: prev.at, why: 'replaced by the verified card' }] } : {}),
+  };
+}
+
 async function onVerified(s: Session): Promise<void> {
   const c = s.ctx;
   const customerId = c.verification.identifiedCustomerId!;
   const issueType = c.issue!.issueType!;
+  const cardFact = c.facts?.card_reference;
   say(s, M.VERIFIED);
+  if (cardFact?.status === 'verified' && cardFact.customerValue) {
+    say(s, `One thing to check: earlier you mentioned the ${cardFact.customerValue}, but the card you just verified is the ${cardFact.value}. I'll use the verified card. If you meant a different card, just tell me.`);
+  }
   c.caseId = ensureCase({ sessionId: s.id, customerId, issueType, verificationOutcome: 'verified', customerReported: c.issue!.statement, actor: s.actor, correlationId: s.correlationId });
   tl(s, { type: 'case.created', stage: 'record', title: `Case ${c.caseId} opened during the call`, detail: 'The case is updated live as facts and actions are recorded.', status: 'ok', source: 'case management', ref: c.caseId });
 
@@ -924,9 +1088,36 @@ async function onYesNoAnswer(s: Session, p: Extract<Pending, { kind: 'yes_no' }>
 
 /* ------------------------------------------------------------------------- results → dialogue */
 
-async function applyResult(s: Session, r: WorkflowResult, prefix = ''): Promise<void> {
+/** The transaction the workflow settled on is a bank fact; compare it with what the customer said. */
+function recordTransactionFacts(s: Session): string | null {
+  const c = s.ctx;
+  const id = c.wf?.selectedTxnId;
+  if (!id || !c.snapshotId) return null;
+  const snap = loadSnapshot(c.snapshotId);
+  const t = snap ? (sourceData(snap, 'transactions') ?? []).find((x) => x.transactionId === id) : undefined;
+  if (!t) return null;
+  const f = (c.facts ??= {});
+  const already = f.transaction?.status === 'confirmed' && f.transaction.value.startsWith(formatMoney(t.amountMinor, t.currency)) && f.transaction.value.includes(t.merchant ?? '');
+  if (already) return null;
+  setFact(f, 'transaction', `${formatMoney(t.amountMinor, t.currency)} at ${t.merchant ?? 'unknown merchant'} on ${formatDate(t.transactedAt)} (${t.status})`, 'confirmed', 'bank_system');
+  const notes: string[] = [];
+  if (setFact(f, 'amount', formatMoney(t.amountMinor, t.currency), 'confirmed', 'bank_system') === 'conflict') notes.push(`you mentioned ${f.amount!.customerValue}, and the charge on record is ${formatMoney(t.amountMinor, t.currency)}`);
+  if (t.merchant) {
+    const said = f.merchant?.source === 'customer' ? f.merchant.value : null;
+    const loose = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (said && (loose(t.merchant).includes(loose(said)) || loose(said).includes(loose(t.merchant)))) {
+      f.merchant = { value: t.merchant, status: 'confirmed', source: 'bank_system', at: nowIso(), history: [{ value: said, status: 'provided', source: 'customer', at: f.merchant!.at, why: 'matched the bank record' }] };
+    } else if (setFact(f, 'merchant', t.merchant, 'confirmed', 'bank_system') === 'conflict') notes.push(`you mentioned ${f.merchant!.customerValue}, and the merchant on record is ${t.merchant}`);
+  }
+  if (notes.length) tl(s, { type: 'facts.conflict', stage: 'explain', title: 'Customer’s details differ from the bank record', detail: notes.join('; '), status: 'warn', source: 'call facts' });
+  return notes.length ? `Just to flag: ${notes.join(', and ')}. I'm going by the bank's record, so tell me if that's not the right charge.` : null;
+}
+
+async function applyResult(s: Session, r: WorkflowResult, prefixIn = ''): Promise<void> {
   const c = s.ctx;
   const caseId = c.caseId!;
+  const prefix = [prefixIn, recordTransactionFacts(s)].filter(Boolean).join('\n\n');
+  if (r.kind === 'inform') setFact(c.facts ??= {}, 'resolution', r.nextSteps || r.resolution.replace(/_/g, ' '), r.resolution === 'resolved' || r.resolution === 'informational' ? 'confirmed' : 'needs_clarification', 'workflow');
   if ('findings' in r && r.findings?.length) {
     recordFindings(caseId, r.findings);
     const conf = r.findings.filter((f) => f.kind === 'confirmed');
@@ -1024,6 +1215,7 @@ async function propose(s: Session, r: Extract<WorkflowResult, { kind: 'propose' 
     }
   }
   c.pending = { kind: 'consent', proposalId };
+  setFact(c.facts ??= {}, 'consent', `Asked: ${actions.map((a) => a.label).join('; ')}`, 'needs_clarification', 'workflow');
   tl(s, { type: 'actions.proposed', stage: 'confirm', title: `Proposed ${actions.length} action${actions.length === 1 ? '' : 's'} — waiting for the customer’s confirmation`, detail: actions.map((a, i) => `${i + 1}) ${a.label}`).join(' '), status: 'pending', source: 'policy engine', ref: proposalId, data: { actions: actions.map((a) => ({ type: a.type, label: a.label })), ruleRefs: r.ruleRefs } });
   say(s, pre + r.message);
 }
@@ -1055,6 +1247,7 @@ async function onConsent(s: Session, proposalId: string, decision: 'accept' | 'd
   });
   if (!ok) return;
   c.pending = null;
+  setFact(c.facts ??= {}, 'consent', decision === 'accept' ? `Customer said yes (${via === 'button' ? 'on screen' : 'in their own words'})` : 'Customer said no; nothing was changed', 'confirmed', 'customer');
   audit({ actor: s.actor, event: `consent.${decision === 'accept' ? 'accepted' : 'declined'}`, status: 'ok', resourceType: 'proposal', resourceId: proposalId, sessionId: s.id, correlationId: s.correlationId, metadata: { consentId, via } });
   caseEvent(c.caseId!, decision === 'accept' ? 'consent_accepted' : 'consent_declined', { proposalId, consentId });
   tl(s, { type: decision === 'accept' ? 'consent.given' : 'consent.declined', stage: 'confirm', title: decision === 'accept' ? 'Customer confirmed the proposed actions' : 'Customer declined — nothing will be changed', detail: `Consent ${consentId} is linked to proposal ${proposalId} and covers only those actions; it expires in ${Math.round(policy().consent.ttlSeconds / 60)} minutes.`, status: decision === 'accept' ? 'ok' : 'info', source: `customer (${via})`, ref: consentId });
@@ -1175,6 +1368,7 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
     correlationId: s.correlationId,
   });
   c.pending = null;
+  setFact(c.facts ??= {}, 'resolution', `Passed to a person: ${detail}`, 'needs_clarification', 'workflow');
   event(s, 'handoff_requested', { reason });
   if (reason === 'verification_failed') await retrieveGuidance(s, 'handoff', ['verification', 'handoff'], { agentReview: true });
   else if (reason === 'social_engineering_suspected' || reason === 'account_takeover_suspected') await retrieveGuidance(s, 'handoff', ['security', 'handoff'], { agentReview: true });
@@ -1183,10 +1377,10 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
   tl(s, { type: 'handoff.prepared', stage: 'handoff', title: 'Agent brief prepared from the recorded call', detail: `Reason: ${detail}. The brief carries the customer’s words, verification status, facts, actions and next step.`, status: 'ok', source: 'handoff', ref: r.handoffId });
   refreshTags(s, 'handoff');
   if (r.status === 'queued') {
-    tl(s, { type: 'handoff.queued', stage: 'handoff', title: `Waiting for an agent (position ${r.queuePosition ?? 1}) — simulated desk`, detail: 'The transfer is not complete until an agent accepts it.', status: 'pending', source: 'agent desk (simulated)', ref: r.handoffId });
+    tl(s, { type: 'handoff.queued', stage: 'handoff', title: `Waiting for an agent (position ${r.queuePosition ?? 1})`, detail: 'The transfer is not complete until an agent accepts it.', status: 'pending', source: 'agent desk', ref: r.handoffId });
     c.stage = 'handoff';
     run("UPDATE call_sessions SET outcome = 'handed_off' WHERE id = ?", [s.id]);
-    say(s, `${M.TRANSFER_INTRO('this')} Thank you for your patience. You are number ${r.queuePosition ?? 1} in the queue, and the agent will see your case ${c.caseId}. [Demo: a person on the agent desk must accept this handover.]`, 'system');
+    say(s, `${M.TRANSFER_INTRO('this')} Thank you for your patience. You are number ${r.queuePosition ?? 1} in the queue, and the agent will see your case ${c.caseId}.`, 'system');
   } else {
     say(
       s,
@@ -1194,7 +1388,7 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
       'system',
     );
     event(s, 'handoff_fallback_callback', { handoffId: r.handoffId });
-    tl(s, { type: 'handoff.no_agent', stage: 'handoff', title: 'No agent available — callback requested instead', detail: 'Nothing is described as transferred. The case holds everything for the callback.', status: 'failed', source: 'agent desk (simulated)', ref: r.handoffId });
+    tl(s, { type: 'handoff.no_agent', stage: 'handoff', title: 'No agent available — callback requested instead', detail: 'Nothing is described as transferred. The case holds everything for the callback.', status: 'failed', source: 'agent desk', ref: r.handoffId });
     return endCall(s, 'ended_unresolved');
   }
 }
@@ -1232,7 +1426,7 @@ async function enterFallback(s: Session, err: Error): Promise<void> {
     if (r.status === 'queued') {
       c.stage = 'handoff';
       run("UPDATE call_sessions SET outcome = 'fallback' WHERE id = ?", [s.id]);
-      say(s, `You're in the queue for the next available agent. Your reference is ${c.caseId}. [Simulated agent desk]`, 'system');
+      say(s, `You're in the queue for the next available agent. Your reference is ${c.caseId}.`, 'system');
     } else {
       say(s, `No agents are available right now. A callback has been requested on case ${c.caseId}.`, 'system');
       await endCall(s, 'fallback');

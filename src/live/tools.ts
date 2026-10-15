@@ -10,7 +10,8 @@ import { redactText } from '../lib/redact.ts';
 import { audit, ASSISTANT } from '../audit/audit.ts';
 import { emitTimeline } from '../events/timeline.ts';
 import { knowledgeBase, recordKbReference } from '../kb/kb.ts';
-import { handleInput, getContext, cardCaptureFor } from '../conversation/orchestrator.ts';
+import { handleInput, getContext, cardCaptureFor, hasUnhandledSpeech } from '../conversation/orchestrator.ts';
+import { knownForAssistant } from '../conversation/facts.ts';
 import { policy } from '../config/policy.ts';
 import { TOOL } from './lily.ts';
 import { profileById, profileCard } from './profiles.ts';
@@ -54,10 +55,12 @@ function stateSummary(sessionId: string) {
     handoff: h ? { status: h.status === 'queued' || h.status === 'requested' ? 'waiting_for_an_agent_not_yet_accepted' : h.status === 'connected' ? 'accepted_by_an_agent' : h.status } : null,
     cardDigitsHeardSoFar: ctx.stage === 'awaiting_card' ? cardCaptureFor(sessionId)?.count ?? 0 : undefined,
     callEnded: ctx.stage === 'ended',
+    // The call's structured memory. Never ask the customer for anything already listed here.
+    already_known: knownForAssistant(ctx.facts),
   };
 }
 
-const GUIDE = 'Say this to the customer in natural spoken words. Keep every fact and amount exactly as given. Do not add anything the back end did not say.';
+const GUIDE = 'Say this in natural, warm spoken words: one or two short sentences at a time, one question at a time. Keep every fact and amount exactly as given and add nothing the back end did not say. Do not ask for anything listed in already_known.';
 
 export async function runTool(name: string, args: Record<string, unknown>, c: ToolContext): Promise<Record<string, unknown>> {
   const at = Date.now();
@@ -83,21 +86,22 @@ async function dispatch(name: string, args: Record<string, unknown>, c: ToolCont
   switch (name) {
     case TOOL.banking: {
       const text = c.customerText.trim();
-      if (!text) return { ok: false, error: 'no_new_customer_speech', message: 'The customer has not said anything new. Do not act. Ask them what they would like to do or to repeat themselves.' };
+      // Words the customer said earlier in this step (answered by Lily before this call) are already held by the back end.
+      if (!text && !hasUnhandledSpeech(c.sessionId)) return { ok: false, error: 'no_new_customer_speech', ...stateSummary(c.sessionId), message: 'Nothing new to act on. Do not ask the customer to repeat anything listed in already_known. If you need something, ask one short, specific question.' };
       c.consumeCustomerText();
       const before = maxSeq(c.sessionId);
-      await handleInput(c.sessionId, { kind: 'utterance', text, clientMessageId: `voice-${c.turnId}`, asrConfidence: estimateAsrConfidence(text) });
+      await handleInput(c.sessionId, { kind: 'utterance', text, clientMessageId: `voice-${c.turnId}`, asrConfidence: text ? estimateAsrConfidence(text) : undefined });
       return { ok: true, backend_said: turnsAfter(c.sessionId, before).map((t) => t.text), ...stateSummary(c.sessionId), instruction: GUIDE };
     }
     case TOOL.card: {
       const ctx0 = getContext(c.sessionId);
       if (ctx0.stage !== 'awaiting_card') return { ok: false, error: 'not_expecting_a_card_number', ...stateSummary(c.sessionId), message: 'The back end is not asking for a card number right now. Do not collect one. Use the banking tool for what the customer said.' };
       const text = c.customerText.trim();
-      if (!text) return { ok: false, error: 'no_card_number_heard', message: 'Nothing new was heard. Ask the customer to read the 16-digit number from the card shown on their screen.' };
+      if (!text && !hasUnhandledSpeech(c.sessionId) && !cardCaptureFor(c.sessionId)) return { ok: false, error: 'no_card_number_heard', ...stateSummary(c.sessionId), message: 'Nothing new was heard. Ask the customer to read the 16-digit card number.' };
       c.consumeCustomerText();
       const before = maxSeq(c.sessionId);
       // The server uses the customer's own transcribed digits, never digits supplied by the model.
-      await handleInput(c.sessionId, { kind: 'utterance', text, clientMessageId: `voice-${c.turnId}-card`, asrConfidence: estimateAsrConfidence(text) });
+      await handleInput(c.sessionId, { kind: 'utterance', text, clientMessageId: `voice-${c.turnId}-card`, asrConfidence: text ? estimateAsrConfidence(text) : undefined });
       const after = getContext(c.sessionId);
       const ver = after.verification;
       const max = policy().verification.maxCardAttempts;

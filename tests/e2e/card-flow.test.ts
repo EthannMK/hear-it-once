@@ -31,14 +31,14 @@ describe('card read-back', () => {
     expect(c.session().verification_status).not.toBe('verified');
     await c.say('yes');
     expect(c.session().verification_status).toBe('verified');
-    expect(c.transcriptText()).toContain('Let me check that for you');
+    expect(c.transcriptText()).toContain('One moment while I check that');
   });
 
   it('uses the corrected number, not the first one', async () => {
     const { c, pan } = await start();
     await c.say(wrong(pan));
     await c.say('sorry, it is ' + pan);
-    expect(last(c)).toMatch(/updated it/);
+    expect(last(c)).toMatch(/^Updated\./);
     await c.say('yes');
     expect(c.session().verification_status).toBe('verified');
     const attempts = all<any>("SELECT outcome FROM verification_attempts WHERE session_id = ? AND step = 'card'", [c.sessionId]);
@@ -65,7 +65,7 @@ describe('card read-back', () => {
     expect(c.view.cardCapture.digits).toBe(d.slice(0, 12).replace(/(.{4})(?=.)/g, '$1 '));
     expect(all("SELECT 1 FROM verification_attempts WHERE session_id = ? AND step = 'card'", [c.sessionId])).toHaveLength(0);
     await c.say(d.slice(12));
-    expect(last(c)).toMatch(/Is that correct/);
+    expect(last(c)).toMatch(/Is that right\?/);
     expect(c.view.cardCapture.confirming).toBe(true);
     await c.say('yes');
     expect(c.session().verification_status).toBe('verified');
@@ -77,7 +77,7 @@ describe('card read-back', () => {
     const d = pan.replace(/\D/g, '');
     await c.say(wrong(pan));
     await c.say(d.slice(12));
-    expect(last(c)).toMatch(/updated it/);
+    expect(last(c)).toMatch(/^Updated\./);
     await c.say('yes');
     expect(c.session().verification_status).toBe('verified');
   });
@@ -105,7 +105,7 @@ describe('verification service', () => {
     let slow = true;
     setAdapters({ ...mockRegistry, identity: { ...mockRegistry.identity, checkCardNumber: (...a) => (slow ? new Promise<boolean>(() => {}) : real(...a)) } });
     await c.say(pan); await c.say('yes');
-    expect(last(c)).toMatch(/taking longer than expected/);
+    expect(last(c)).toMatch(/taking longer than usual/);
     expect(c.session().verification_status).not.toBe('verified');
     expect(all("SELECT 1 FROM verification_attempts WHERE session_id = ? AND step = 'card'", [c.sessionId])).toHaveLength(0);
     slow = false;

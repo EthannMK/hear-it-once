@@ -4,13 +4,12 @@ import { formatDateTime, formatMoney, ISSUE_LABELS } from './format.ts';
 import { get } from '../db/db.ts';
 
 export const GREETING_NOTICE =
-  'Notice: this call may be recorded and transcribed for quality, security and training. Your information is handled under our privacy notice. ' +
-  '[DEMO: this is a simulation with synthetic data — nothing is actually recorded and no real account, card or payment is affected.]';
+  'This call may be recorded and transcribed for quality, security and training. Your information is handled under our privacy notice.';
 
 export const GREETING =
-  "Thank you for calling Northstar Bank. My name is Lily, and I'm an AI assistant, not a person. You can ask for a person at any time. How may I help you today?";
+  "Thanks for calling Northstar Bank. I'm Lily, an AI assistant. You can ask for a person at any time. How can I help today?";
 
-export const CLARIFY_ISSUE = 'Just so I get this right — which of these is closest to what you need help with?';
+export const CLARIFY_ISSUE = 'Just so I get this right, which of these is closest?';
 
 export const ISSUE_CHOICES = [
   { id: 'unrecognised_transaction', label: "A charge I don't recognise" },
@@ -33,23 +32,27 @@ const ISSUE_PHRASES: Record<string, string> = {
 };
 
 export function ackIssue(issueType: string): string {
-  if (issueType === 'lost_stolen_card') return "I'm sorry to hear that. Let's get the card blocked as quickly as possible — first I need to quickly verify it's you.";
-  return `Thanks — I understand this is about ${ISSUE_PHRASES[issueType] ?? ISSUE_LABELS[issueType].toLowerCase()}. I've noted what you said, so you won't need to repeat it. First, I need to verify your identity.`;
+  if (issueType === 'lost_stolen_card') return "I'm sorry, that's stressful. Let's get the card blocked quickly. First I just need to check it's you.";
+  return `I can help with ${ISSUE_PHRASES[issueType] ?? ISSUE_LABELS[issueType].toLowerCase()}. I've got the details you gave me. First, a quick security check.`;
 }
 
 export const ASK_DOB = 'Please tell me your date of birth.';
-export const ASK_CARD = 'To verify it\'s you, please read me the 16-digit card number on your Northstar card. [Demo only: use the demo card number shown on screen — it is fictional.]';
+export const ASK_CARD = 'Could you read me your 16-digit card number? A few digits at a time is fine.';
+/** The customer already said which card (last four) — use it, and ask only for what is still needed. */
+export const askCardKnowing = (last4: string) => `Thanks, I've noted it's the card ending ${[...last4].join(' ')}. To confirm it's you, could you read me the full 16-digit card number? A few digits at a time is fine.`;
+/** The customer gave the full number before the security step: confirm it rather than asking again. */
+export const cardReadbackEarlier = (last4: string) => `You gave me your card number a moment ago, the one ending in ${[...last4].join(' ')}. Shall I use that one?`;
 export const ASK_CUSTOMER_NUMBER = "I couldn't match the number you're calling from to an account. Please tell me your 8-digit customer number.";
 export const otpSent = (to: string) => `Thank you. I've sent a 6-digit passcode by text message to your registered phone (${to}). Please read me the code when it arrives.`;
-export const VERIFIED = "Thank you — you're verified. I'm checking our systems now.";
+export const VERIFIED = "Thanks, you're verified. Let me take a look.";
 export const LOCKED =
-  "I'm sorry, I wasn't able to verify your identity, so I can't access or change anything on the account. For your security, I'm transferring you to an agent who can verify you another way.";
+  "I'm sorry, I couldn't confirm it's you, so I can't look at or change anything on the account. I'll pass you to a colleague who can verify you another way.";
 
 export function retryVerification(step: 'identify' | 'dob' | 'otp' | 'card', remaining: number, unparsed: boolean): string {
   if (step === 'card') {
     return unparsed
-      ? "I didn't catch the whole card number. Could you read all 16 digits again, slowly?"
-      : `I'm sorry, that number doesn't match the card on file. Could you check the card and read the number again? You have ${remaining} attempt${remaining === 1 ? '' : 's'} left.`;
+      ? "I didn't catch the whole number. Could you read all 16 digits again, slowly?"
+      : `That number doesn't match the card we have on file. Could you check the card and read it again? You have ${remaining} attempt${remaining === 1 ? '' : 's'} left.`;
   }
   if (unparsed) {
     if (step === 'dob') return 'Please tell me your date of birth, including the year — for example "April 12, 1986".';
@@ -108,16 +111,16 @@ export const HOLD_ASK = (why: string) => `May I place you on a brief hold while 
 export const HOLD_BACK = 'Thank you for holding.';
 export const HOLD_CHECKIN = 'Thank you for your patience. I am still working on this. Would you like to keep holding, or shall I arrange a callback?';
 export const TRANSFER_INTRO = (reason: string) => `I'm going to connect you with a specialist who can help with ${reason}. I've passed on everything we discussed, so you won't need to repeat it. May I place you on a brief hold while they pick up?`;
-export const SURVEY = 'Before you go: on a scale of 1 (poor) to 5 (excellent), how would you rate this call? [Demo survey — simulated]';
-export const GOODBYE = 'Thank you for calling Northstar Bank. Have a wonderful day. Goodbye.';
+export const SURVEY = 'Before you go, on a scale of 1 to 5, how was this call?';
+export const GOODBYE = 'Thanks for calling Northstar Bank. Take care.';
 
-export const CARD_ACK = 'Thank you. Let me check that for you.';
+export const CARD_ACK = 'Thanks. One moment while I check that.';
 export const CARD_TOO_MANY = (n: number) => `I heard ${n} digits, which is more than 16. Let's start again. Could you read the card number slowly, a few digits at a time?`;
 export const cardProgress = (digits: string, said: string) => {
   const left = 16 - digits.length;
-  return `Thank you. So far I have ${said}. That's ${digits.length} of 16 digits. Please read the remaining ${left}.`;
+  return `Got it, ${said}. That's ${digits.length} of 16. Go ahead with the last ${left}.`;
 };
-export const cardReadback = (last4: string, updated: boolean) => `${updated ? "No problem, I've updated it. " : 'Thank you. '}I heard a card number ending in ${[...last4].join(' ')}. Is that correct?`;
-export const CARD_REASK = 'No problem. Please read the 16-digit card number again.';
-export const CARD_YESNO = 'Sorry, was that number correct? Please say yes or no, or read the card number again.';
-export const CARD_UNAVAILABLE = "I'm sorry, our verification check is taking longer than expected, so I can't confirm that yet. I've kept what you told me. Say \"try again\" and I'll check once more, or I can bring in a person.";
+export const cardReadback = (last4: string, updated: boolean) => `${updated ? "Updated. " : 'Thanks. '}That's a card ending in ${[...last4].join(' ')}. Is that right?`;
+export const CARD_REASK = 'No problem. Could you read the 16-digit number again?';
+export const CARD_YESNO = 'Sorry, was that number right? A yes or no is fine, or read it again.';
+export const CARD_UNAVAILABLE = "Our security check is taking longer than usual, so I can't confirm that yet. I've kept what you told me. Say \"try again\" and I'll check once more, or I can bring in a person.";
