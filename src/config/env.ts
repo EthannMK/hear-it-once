@@ -14,6 +14,10 @@ const EnvSchema = z.object({
   HOST: z.string().default('127.0.0.1'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   HIO_DB_PATH: z.string().default('./data/hear-it-once.db'),
+  /** Durable storage: a Cloud Storage bucket (production) or a local folder (development). Both unset = local file only. */
+  HIO_BACKUP_BUCKET: z.string().optional(),
+  HIO_BACKUP_DIR: z.string().optional(),
+  HIO_BACKUP_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
   SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 characters').optional(),
   DEMO_MODE: z
     .enum(['true', 'false'])
@@ -29,7 +33,7 @@ const EnvSchema = z.object({
   ADAPTER_TIMEOUT_MS: z.coerce.number().int().positive().default(1500),
   ACTION_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
   ADAPTER_READ_RETRIES: z.coerce.number().int().min(0).max(3).default(1),
-  TRANSCRIPT_RETENTION_DAYS: z.coerce.number().int().min(0).default(30),
+  TRANSCRIPT_RETENTION_DAYS: z.coerce.number().int().min(0).default(365),
   /**
    * Live voice (Lily). "gemini" streams audio to Gemini Live on Vertex AI through the server-side
    * bridge; "off" leaves the text fallback only. "scripted" is a test/offline stand-in and is
