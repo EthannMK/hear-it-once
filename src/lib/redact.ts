@@ -6,6 +6,8 @@
 
 const PAN_CANDIDATE = /\b(?:\d[ -]?){12,18}\d\b/g;
 const CVV_PHRASE = /\b(cvv2?|cvc2?|cid|security\s*code|card\s*verification(?:\s*(?:value|code))?|3[- ]digit\s*code)\b[^0-9]{0,20}(\d{3,4})\b/gi;
+const SECRET_PHRASE = /\b(pin|passcode|password|passwd|pwd)\b(\s*(?:number|code)?\s*(?:is|was|:|=)\s*)([^\s,;]{3,})/gi;
+const PIN_DIGITS = /\b(pin|passcode)\b(\s*(?:number|code)?\s*)(\d{4,8})\b/gi;
 const BEARER = /\b(bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 const API_KEY = /\b(sk-[A-Za-z0-9_-]{10,}|sk-ant-[A-Za-z0-9_-]{10,})\b/g;
 const EMAIL = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
@@ -33,6 +35,8 @@ export function luhnValid(digits: string): boolean {
 export function redactText(input: string): string {
   if (!input) return input;
   let out = input.replace(CVV_PHRASE, (_m, label: string) => `${label} [REDACTED-CVV]`);
+  out = out.replace(SECRET_PHRASE, (_m, label: string, mid: string) => `${label}${mid}[REDACTED-SECRET]`);
+  out = out.replace(PIN_DIGITS, (_m, label: string, mid: string) => `${label}${mid}[REDACTED-SECRET]`);
   out = out.replace(PAN_CANDIDATE, (m) => {
     const digits = m.replace(/[ -]/g, '');
     if (digits.length < 13 || digits.length > 19) return m;

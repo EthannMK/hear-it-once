@@ -342,11 +342,13 @@ function timelineCard(w) {
 
 function conversationCard(w) {
   const turns = w.transcript;
+  let agentNow = 'Lily';
   return h('section.card.crm-sec', h('details', h('summary', h('h2', `Conversation (${turns.length})`), h('span.small.muted', 'Supporting detail, the summary above is enough to act on')),
     h('div.convo', turns.map((tr) => {
+      if (tr.kind?.startsWith('agent_switch:')) agentNow = tr.kind.slice(13);
       if (tr.speaker === 'system') return h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim());
       const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
-      return h(`div.b.${cls}`, h('div.wl', h('b', cls === 'cust' ? 'Customer' : cls === 'lily' ? 'Lily (AI)' : 'Agent'), h('span', fmtFull(tr.at))), h('div.txt', tr.hidden ? 'Security answer given (not stored)' : tr.text));
+      return h(`div.b.${cls}`, h('div.wl', h('b', cls === 'cust' ? 'Customer' : cls === 'lily' ? `${agentNow} (AI)` : 'Agent'), h('span', fmtFull(tr.at))), h('div.txt', tr.hidden ? 'Security answer given (not stored)' : tr.text));
     }))));
 }
 

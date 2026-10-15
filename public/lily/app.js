@@ -6,7 +6,7 @@
 // the agent workspace read model. Nothing is simulated in the browser.
 import { api, h } from '/js/lib.js';
 import { Mic, Player } from '/lily/audio.js';
-import { t, tList, LANGS, getLang, setLang } from '/lily/i18n.js';
+import { t, tList } from '/lily/i18n.js';
 import { initCrm, crmRoute } from '/lily/crm.js';
 
 const root = document.getElementById('root');
@@ -58,8 +58,6 @@ function icon(name) {
 /* ------------------------------------------------------------------ chrome */
 function header(active) {
   const callLive = S.call && !S.call.ended;
-  const lang = h('select', { 'aria-label': t('lang'), title: t('langHint'), disabled: !!callLive, onchange: (e) => setLang(e.target.value) },
-    LANGS.map(([c, n]) => h('option', { value: c, lang: c === 'fil' ? 'fil' : c, ...(c === getLang() ? { selected: '' } : {}) }, n)));
   return h('header.top',
     h('a.brand', { href: '#/' }, h('span.mk', icon('wave')), h('b', 'Hear It Once')),
     h('span.badge.lav.bank', S.bank),
@@ -67,7 +65,6 @@ function header(active) {
       h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Talk to Lily'),
       h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Agent CRM')),
     h('span.grow'),
-    active === 'crm' ? null : h('label.langwrap', h('span.sr-only', t('lang')), lang),
   );
 }
 function render(active, ...nodes) {
@@ -151,13 +148,15 @@ function drawHome() {
         h('div',
           h('h1', 'Meet Lily.', h('br'), h('em', 'Your banking questions,'), ' heard.'),
           h('p.lede', `Talk to Lily, ${S.bank}'s voice assistant, the way you'd talk to a person. She verifies who you are, checks the bank's systems while you talk, and hands you to a human with the full story whenever you ask.`),
+          h('ul.langs', { 'aria-label': 'Languages and agents' }, [['en', 'English', 'Lily'], ['my', 'Burmese', 'Hnin'], ['fil', 'Tagalog', 'Maya']].map(([k, n, a]) => h('li', h(`i.flag.${k}`), h('span', h('b', n), h('small', a))))),
+          h('p.langnote', 'Lily speaks English. Speak Burmese or Tagalog and she will offer Hnin or Maya.'),
           h('button.connect', { type: 'button', disabled: !c, onclick: () => startCall(c) },
             h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', c ? `As test customer ${c.name}` : 'Choose a test customer first')), icon('arrow')),
           h('div.subs',
             h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
             h('p', icon('info'), h('span', 'You are speaking with an AI. Your browser will ask for the microphone and no audio is stored. No microphone? Start anyway and type.')))),
         h('div.pod-wrap',
-          h('div.pod', h('div', bars, h('div.mic', icon('wave')), h('h3', 'Lily'), h(`div.ready${ready ? '' : '.off'}`, ready ? 'Ready to listen' : 'Typing only'), h('div.prov', `Call language: ${LANGS.find(([k]) => k === getLang())?.[1] ?? 'English'}`))),
+          h('div.pod', h('div', bars, h('div.mic', icon('wave')), h('h3', 'Lily'), h(`div.ready${ready ? '' : '.off'}`, ready ? 'Ready to listen' : 'Typing only'))),
           h('div.float.f1', icon('lock'), 'Verifies you before any account detail'),
           h('div.float.f2', icon('headset'), 'Human handover any time'))),
       !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
@@ -233,6 +232,7 @@ class Call {
     this.card = c; this.id = null; this.ws = null; this.mic = null; this.player = null;
     this.muted = false; this.phase = 'idle'; this.reconnecting = false; this.ended = false; this.ending = false;
     this.voiceReady = false; this.textOnly = false; this.micDenied = false;
+    this.agent = { lang: 'en', name: 'Lily' };
     this.turns = []; this.partial = {}; this.events = []; this.view = null; this.banner = null; this.ui = {}; this.latency = null;
     S.call = this;
   }
@@ -245,7 +245,7 @@ class Call {
   async create() {
     const r = await api('/api/calls', { method: 'POST', body: { channel: 'voice_browser', profileId: this.card.id } });
     this.id = r.sessionId; this.view = r.view;
-    this.turns = (r.view?.transcript ?? []).map((x) => ({ speaker: x.speaker, kind: x.kind ?? '', text: x.text, at: x.at }));
+    this.turns = (r.view?.transcript ?? []).map((x) => ({ seq: x.seq, speaker: x.speaker, kind: x.kind ?? '', text: x.text, at: x.at }));
     S.lastCall = this.id;
     try { sessionStorage.setItem('hio.lastCall', this.id); } catch { /* ignore */ }
   }
@@ -253,14 +253,14 @@ class Call {
     if (!this.player) { this.player = new Player(); this.player.resume().catch(() => {}); }
     return new Promise((resolve) => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${proto}://${location.host}/api/calls/${this.id}/live?lang=${getLang()}`);
+      const ws = new WebSocket(`${proto}://${location.host}/api/calls/${this.id}/live`);
       this.ws = ws;
       let settled = false;
       const done = (r) => { if (!settled) { settled = true; clearTimeout(timer); resolve(r); } };
       const timer = setTimeout(() => done({ ok: false, message: 'The voice service did not answer in time.' }), 20000);
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch { return; }
-        if (m.type === 'ready') { this.voiceReady = true; done({ ok: true, provider: m.model ?? m.provider }); }
+        if (m.type === 'ready') { this.voiceReady = true; if (m.agent) this.agent = m.agent; done({ ok: true, provider: m.model ?? m.provider }); }
         else if (m.type === 'error' && !settled) { this.textOnly = true; done({ ok: false, message: m.message }); }
         this.onMessage(m);
       };
@@ -276,7 +276,19 @@ class Call {
       case 'audio': this.player?.push(m.data); break;
       case 'interrupted': this.player?.flush(); this.partial.assistant = ''; this.ui.transcript?.(); break;
       case 'partial': this.partial[m.speaker] = m.text; if (m.speaker === 'customer') this.lastHeard = performance.now(); this.ui.transcript?.(); break;
-      case 'turns': this.turns = m.turns; this.partial = {}; this.ui.transcript?.(); break;
+      case 'turns': {
+        // The server sends only what is new, so merge by sequence number instead of replacing the list.
+        const by = new Map(this.turns.filter((x) => x.seq != null).map((x) => [x.seq, x]));
+        for (const x of m.turns) by.set(x.seq, x);
+        this.turns = [...by.values()].sort((a, b) => a.seq - b.seq);
+        this.partial = {}; this.ui.transcript?.(); break;
+      }
+      case 'agent':
+        this.agent = { lang: m.lang, name: m.name };
+        this.banner = { kind: 'ok', text: `${m.name} joined the call and has the details so far.` };
+        setTimeout(() => { if (this.banner?.kind === 'ok') { this.banner = null; this.ui.refresh?.(); } }, 4500);
+        this.ui.refresh?.(); this.ui.transcript?.();
+        break;
       case 'phase': this.phase = m.phase; this.ui.refresh?.(); break;
       case 'timeline': this.events.push(m.event); this.ui.activity?.(); break;
       case 'view': this.view = m.view; this.ui.refresh?.(); break;
@@ -400,20 +412,22 @@ function callScreen(c) {
     const verified = v.tags?.identity === 'verified';
     head.replaceChildren(
       h('div.av', icon('wave'), h(`i${c.voiceReady ? '' : '.off'}`)),
-      h('div', h('h1', 'Lily'), h('div.meta', h('span.t', fmtDur(secs)), h('span', '·'), h('span', c.voiceReady ? 'Live voice' : 'Typing mode'))),
+      h('div', h('h1', c.agent.name, h(`i.flag.${c.agent.lang}`, { title: `${c.agent.name} speaks ${{ en: 'English', my: 'Burmese', fil: 'Tagalog' }[c.agent.lang]}` })), h('div.meta', h('span.t', fmtDur(secs)), h('span', '·'), h('span', c.voiceReady ? 'Live voice' : 'Typing mode'))),
       h('div.cust', h('span.mono2', c.card.name.split(' ').map((x) => x[0]).join('').slice(0, 2)), h('div', h('b', c.card.name, verified ? icon('check') : null), h('span', verified ? 'Identity verified · test customer' : v.tags?.identity === 'failed' ? 'Verification failed' : 'Not verified yet · test customer'))));
   }
   function drawTranscript() {
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+    let agentNow = 'Lily';
     const nodes = c.turns.map((tr) => {
+      if (tr.kind?.startsWith('agent_switch:')) agentNow = tr.kind.slice(13);
       if (/^\[Pressed|^\[Asked|^\[Confirmed|^\[Declined/.test(tr.text)) return h('div.note', tr.text.replace(/^\[|\]$/g, ''));
       if (tr.speaker === 'customer' && /^\[verification answer/.test(tr.text)) return h('div.b.cust', h('div.wl', h('b', 'You'), tr.at ? h('span', fmtTime(tr.at)) : null), h('div.txt', h('i', 'Security answer given · not stored')));
       if (tr.speaker === 'system' || !['customer', 'assistant', 'agent'].includes(tr.speaker)) return tr.text ? h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim()) : null;
       const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
-      const who = cls === 'lily' ? [h('span.av', 'L'), h('b', 'Lily')] : cls === 'agent' ? [h('b', 'Human agent')] : [h('b', 'You')];
+      const who = cls === 'lily' ? [h('span.av', agentNow[0]), h('b', agentNow)] : cls === 'agent' ? [h('b', 'Human agent')] : [h('b', 'You')];
       return h(`div.b.${cls}`, h('div.wl', who, tr.at ? h('span', fmtTime(tr.at)) : null), h('div.txt', tr.text));
     });
-    for (const sp of ['customer', 'assistant']) if (c.partial[sp]) nodes.push(h(`div.b.partial.${sp === 'customer' ? 'cust' : 'lily'}`, h('div.wl', sp === 'customer' ? h('b', 'You') : [h('span.av', 'L'), h('b', 'Lily')], h('span', sp === 'customer' ? 'hearing…' : 'speaking…')), h('div.txt', c.partial[sp])));
+    for (const sp of ['customer', 'assistant']) if (c.partial[sp]) nodes.push(h(`div.b.partial.${sp === 'customer' ? 'cust' : 'lily'}`, h('div.wl', sp === 'customer' ? h('b', 'You') : [h('span.av', c.agent.name[0]), h('b', c.agent.name)], h('span', sp === 'customer' ? 'hearing…' : 'speaking…')), h('div.txt', c.partial[sp])));
     list.replaceChildren(...nodes.filter(Boolean));
     if (atBottom || c.partial.customer || c.partial.assistant) list.scrollTop = list.scrollHeight;
   }

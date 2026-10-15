@@ -188,12 +188,14 @@ describe('S08 customer asks for a human immediately', () => {
 });
 
 describe('S09 AI uncertainty', () => {
-  it('hands off with reason ai_uncertain after one clarification', async () => {
+  it('hands off with reason ai_uncertain after two clarifications', async () => {
     const c = new Caller(app);
     await c.start('S09');
     await c.say('Something is off with my stuff');
     expect(c.view.choices.length).toBeGreaterThan(3);
     await c.say("It's the thing from before, you know");
+    expect(c.view.choices.length).toBeGreaterThan(0);
+    await c.say('Just the usual problem with it');
     expect(get<any>('SELECT reason FROM handoffs WHERE session_id = ?', [c.sessionId]).reason).toBe('ai_uncertain');
   });
 });
