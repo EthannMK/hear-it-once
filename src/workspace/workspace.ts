@@ -39,7 +39,20 @@ const looksLikeCardNumber = (q: string): boolean => /\b\d{4}[ -]\d{4}[ -]\d{4}[ 
 export function buildWorkspace(handoffId: string) {
   const h = get<HandoffRow>('SELECT id, session_id, status, reason, reason_detail, agent_id, requested_at, connected_at, completed_at, outcome, agent_notes FROM handoffs WHERE id = ?', [handoffId]);
   if (!h) return null;
-  const sessionId = h.session_id;
+  return assemble(h.session_id, h);
+}
+
+/**
+ * The agent's view of ANY call — with or without a handover — so a judge can see, right after
+ * the call, exactly what a human agent would see. Uses the latest handover when there is one.
+ */
+export function buildSessionWorkspace(sessionId: string) {
+  if (!get('SELECT 1 FROM call_sessions WHERE id = ?', [sessionId])) return null;
+  const h = get<HandoffRow>('SELECT id, session_id, status, reason, reason_detail, agent_id, requested_at, connected_at, completed_at, outcome, agent_notes FROM handoffs WHERE session_id = ? ORDER BY requested_at DESC LIMIT 1', [sessionId]) ?? null;
+  return assemble(sessionId, h);
+}
+
+function assemble(sessionId: string, h: HandoffRow | null) {
   const s = get<SessionRow>('SELECT * FROM call_sessions WHERE id = ?', [sessionId])!;
   const ctx = getContext(sessionId);
   const res = buildResolution(sessionId)!;
@@ -73,7 +86,7 @@ export function buildWorkspace(handoffId: string) {
     tags ? `Identity: ${tags.identity}` : null,
     tags ? `Urgency: ${tags.urgency}` : null,
     tags ? `Sentiment: ${tags.sentiment}` : null,
-    h.reason ? HANDOFF_REASON_LABELS[h.reason] ?? h.reason : null,
+    h?.reason ? HANDOFF_REASON_LABELS[h.reason] ?? h.reason : null,
   ].filter(Boolean) as string[];
   const agentTags = s.agent_tags_json ? parseJson<string[]>(s.agent_tags_json, []) : null;
 
@@ -90,16 +103,16 @@ export function buildWorkspace(handoffId: string) {
     res.verifiedFacts.length ? `Systems confirmed: ${res.verifiedFacts.slice(0, 3).join(' ')}` : 'No account facts have been confirmed yet.',
     done.length ? `Completed and confirmed by systems: ${done.join(', ')}.` : 'No account changes were made.',
     openActs.length ? `Not completed: ${openActs.join('; ')}.` : null,
-    `Handover reason: ${HANDOFF_REASON_LABELS[h.reason] ?? h.reason}${h.reason_detail ? ` (${h.reason_detail})` : ''}.`,
+    h ? `Handover reason: ${HANDOFF_REASON_LABELS[h.reason] ?? h.reason}${h.reason_detail ? ` (${h.reason_detail})` : ''}.` : 'Lily handled the call without a handover.',
   ].filter(Boolean).join(' ');
 
   // Suggested solution: an AI RECOMMENDATION, separate from confirmed actions.
-  const verificationFailed = h.reason === 'verification_failed';
+  const verificationFailed = h?.reason === 'verification_failed' || s.verification_status === 'failed';
   const recommendation = verificationFailed
     ? 'Do not discuss or change the account yet. Verify the customer another way (for example a callback to the registered phone), then handle the original request.'
-    : res.brief.recommendedNextStep;
+    : res.nextStep ?? res.brief.recommendedNextStep;
   const reasoning = [
-    `Handover reason: ${HANDOFF_REASON_LABELS[h.reason] ?? h.reason}.`,
+    h ? `Handover reason: ${HANDOFF_REASON_LABELS[h.reason] ?? h.reason}.` : null,
     verificationFailed ? 'The card number given did not match the active customer’s record on the server.' : null,
     ...res.verifiedFacts.slice(0, 3).map((f) => `Confirmed: ${f}`),
     ...kb.slice(0, 2).map((k) => `Guidance “${k.title}” applies — ${k.reason || 'matches the call'}.`),
@@ -128,7 +141,7 @@ export function buildWorkspace(handoffId: string) {
   return {
     simulated: true,
     bank: BANK_NAME,
-    handoff: { id: h.id, status: h.status, phase: PHASE[h.status] ?? h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[h.reason] ?? h.reason, reasonDetail: h.reason_detail, agentId: h.agent_id, requestedAt: h.requested_at, connectedAt: h.connected_at, completedAt: h.completed_at, outcome: h.outcome },
+    handoff: h ? { id: h.id, status: h.status, phase: PHASE[h.status] ?? h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[h.reason] ?? h.reason, reasonDetail: h.reason_detail, agentId: h.agent_id, requestedAt: h.requested_at, connectedAt: h.connected_at, completedAt: h.completed_at, outcome: h.outcome } : null,
     customer: {
       name: cu?.full_name ?? 'Unknown caller',
       phone: sc?.customer.phone ?? null,
@@ -155,7 +168,7 @@ export function buildWorkspace(handoffId: string) {
     knowledge: kb.map((k) => ({ id: k.id, title: k.title, excerpt: k.excerpt, steps: k.steps, reason: k.reason, ruleRefs: k.ruleRefs, notice: 'Illustrative demo policy — not real bank policy.' })),
     crm: { query: crmQuery },
     notes: s.agent_notes_text ?? '',
-    resolution: { text: s.resolution_text ?? '', nextSteps: s.next_steps_text ?? '', outcome: h.outcome, agentNotes: h.agent_notes },
+    resolution: { text: s.resolution_text ?? '', nextSteps: s.next_steps_text ?? '', outcome: h?.outcome ?? null, agentNotes: h?.agent_notes ?? null },
     edits,
     editedAt: s.agent_edited_at,
   };
