@@ -262,6 +262,8 @@ function seedPriorCase(customerId: string): void {
       'Customer reported: $300.00 payment not showing. Bank systems confirmed: payment record exists with status pending; no posting date supplied by the payment system. Actions completed: none. Status: unresolved.',
       'Payment operations to trace the transfer. Customer to be updated when the trace completes.', at, at],
   );
+  [['assistant', 'Thank you for calling Northstar Bank. This is Lily, an AI assistant. How can I help?'], ['customer', 'I paid $300 last week and it is not on my card.'], ['assistant', 'The payment is on record but still pending. I have passed it to payment operations to trace.']]
+    .forEach(([who, text], i) => run('INSERT INTO conversation_turns (session_id, seq, speaker, kind, text, created_at) VALUES (?,?,?,?,?,?)', [sid, i + 1, who, 'utterance', text, at]));
 }
 
 export function seedAll(opts: { history?: boolean } = {}): void {

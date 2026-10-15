@@ -488,3 +488,11 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
+
+/* In-page confirmation box (replaces the browser's own pop-ups) */
+.crm-dlg { border: 0; border-radius: 24px; padding: 24px; width: min(440px, calc(100% - 32px)); box-shadow: var(--shadow-2); background: var(--surface, #fff); color: inherit; }
+.crm-dlg::backdrop { background: rgba(30, 24, 60, 0.45); }
+.crm-dlg form { display: grid; gap: 12px; }
+.crm-dlg h2 { font: 600 1.25rem var(--display, inherit); }
+.crm-dlg p { color: var(--muted); }
+.crm-dlg textarea { width: 100%; border-radius: 14px; border: 1px solid var(--line, #d9d6e8); padding: 10px 12px; font: inherit; }

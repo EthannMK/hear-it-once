@@ -26,6 +26,21 @@ const LAST = ['Park', 'Silva', 'Novak', 'Okoye', 'Larsen', 'Reyes', 'Haddad', 'M
 
 type Issue = 'unrecognised_transaction' | 'lost_stolen_card' | 'wrong_or_duplicate_charge' | 'payment_not_showing' | 'fee_query';
 
+
+/** What the caller said, per issue. Short and plain, so a seeded case reads like a real one. */
+const SAID: Record<string, string[]> = {
+  unrecognised_transaction: ['There is a charge on my card I did not make.', 'I see a payment I do not recognise and I think someone used my card.'],
+  lost_stolen_card: ['I lost my card and need it blocked.', 'My card was stolen from my bag this morning.'],
+  wrong_or_duplicate_charge: ['I was charged twice for the same purchase.', 'A shop took the money two times.'],
+  payment_not_showing: ['I paid my bill days ago and it is not showing.', 'My payment has not appeared on my account.'],
+  fee_query: ['Why was I charged a fee on my card?', 'I was charged a late fee and I think it is a mistake.'],
+};
+const REPLY: Record<string, string> = {
+  resolved: 'I have taken care of that and your case is up to date.',
+  informational: 'I checked the details and explained what the records show.',
+  unresolved: 'I could not finish this myself, so I passed it to a colleague with the full details.',
+};
+
 export function seedIllustrativeHistory(opts: { days?: number; calls?: number; seed?: number } = {}): void {
   const rnd = mulberry32(opts.seed ?? 20261013);
   const pick = <T>(xs: readonly T[]) => xs[Math.floor(rnd() * xs.length)];
@@ -66,6 +81,7 @@ export function seedIllustrativeHistory(opts: { days?: number; calls?: number; s
 
     for (let c = 0; c < callCount; c++) {
       const sid = id('SES');
+      let said: string | null = null;
       // Repeat contacts: ~9% of calls are a same-issue follow-up within 7 days.
       let cust = pick(customers);
       let issue = pickIssue();
@@ -129,12 +145,13 @@ export function seedIllustrativeHistory(opts: { days?: number; calls?: number; s
         t.proposal = clock += between(8, 50) * 1000;
       }
 
+      said = issue ? SAID[issue][c % 2] : null;
       run(
         `INSERT INTO call_sessions (id, correlation_id, channel, data_origin, state, issue_type, issue_statement, customer_id, verification_status, verification_level, eligible, outcome, resolution_status,
            handoff_reason, issue_restatements, mood_start, csat, answered_at, issue_captured_at, verified_at, retrieval_started_at, retrieval_completed_at, created_at, updated_at)
          VALUES (?,?, 'telephony', 'seeded_illustrative', 'ended', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          sid, id('COR'), issue, issue ? '[seeded illustrative call — no transcript]' : null, verified ? cust.id : null, verified ? 'verified' : issue ? 'failed' : 'not_started', verified ? 'standard' : null,
+          sid, id('COR'), issue, said, verified ? cust.id : null, verified ? 'verified' : issue ? 'failed' : 'not_started', verified ? 'standard' : null,
           issue ? 1 : 0, outcome, resolution, handoffReason, restated, pick(['calm', 'calm', 'worried', 'frustrated', 'upset']), null,
           iso(t.answered), issueCaptured ? iso(issueCaptured) : null, t.verified ? iso(t.verified) : null, t.retrievalStart ? iso(t.retrievalStart) : null, t.retrievalEnd ? iso(t.retrievalEnd) : null, iso(t.answered), iso(t.answered),
         ],
@@ -158,11 +175,17 @@ export function seedIllustrativeHistory(opts: { days?: number; calls?: number; s
       if (issue || handoffReason) {
         caseId = id('CASE');
         const caseAt = t.verified ? t.verified + 2000 : clock;
+        const verifiedText = verified ? 'Identity was verified.' : 'Identity could not be verified.';
         run(
-          `INSERT INTO cases (id, session_id, customer_id, issue_type, status, resolution_status, verification_outcome, summary, data_origin, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?, 'seeded_illustrative', ?, ?)`,
-          [caseId, sid, verified ? cust.id : null, issue, outcome === 'resolved' ? 'resolved' : 'pending', resolution, verified ? 'verified' : 'not_verified', 'Seeded illustrative case — synthetic.', iso(caseAt), iso(caseAt)],
+          `INSERT INTO cases (id, session_id, customer_id, issue_type, status, resolution_status, verification_outcome, customer_reported, summary, data_origin, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?, 'seeded_illustrative', ?, ?)`,
+          [caseId, sid, verified ? cust.id : null, issue, outcome === 'resolved' ? 'resolved' : 'pending', resolution, verified ? 'verified' : 'not_verified', said, `${said ?? 'The caller did not state a clear reason.'} ${verifiedText}`, iso(caseAt), iso(caseAt)],
         );
+        // A short transcript, so the case reads like a real call.
+        const turns: [string, string][] = [['assistant', 'Thank you for calling Northstar Bank. This is Lily, an AI assistant. How can I help?']];
+        if (said) turns.push(['customer', said]);
+        if (said && verified) turns.push(['assistant', REPLY[resolution ?? 'unresolved'] ?? REPLY.unresolved]);
+        turns.forEach(([who, text], i) => run('INSERT INTO conversation_turns (session_id, seq, speaker, kind, text, created_at) VALUES (?,?,?,?,?,?)', [sid, i + 1, who, 'utterance', text, iso(caseAt + i * 1000)]));
         run('UPDATE call_sessions SET case_created_at = ? WHERE id = ?', [iso(caseAt), sid]);
       }
 

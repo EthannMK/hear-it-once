@@ -64,14 +64,14 @@ const GUIDE = 'Say this in natural, warm spoken words: one or two short sentence
 
 export async function runTool(name: string, args: Record<string, unknown>, c: ToolContext): Promise<Record<string, unknown>> {
   const at = Date.now();
-  emitTimeline(c.sessionId, { type: 'tool.requested', stage: 'understand', title: `Lily asked the back end to ${toolVerb(name)}`, status: 'running', source: 'voice agent', data: { tool: name } });
+  emitTimeline(c.sessionId, { type: 'tool.requested', stage: 'understand', title: `Lily is working on it: ${toolVerb(name)}`, status: 'running', source: 'voice agent', data: { tool: name } });
   audit({ actor: ASSISTANT, event: 'live.tool_requested', status: 'info', sessionId: c.sessionId, metadata: { tool: name } });
   try {
     const out = await dispatch(name, args, c);
     audit({ actor: ASSISTANT, event: 'live.tool_completed', status: out.ok === false ? 'denied' : 'ok', sessionId: c.sessionId, metadata: { tool: name, ms: Date.now() - at } });
     return out;
   } catch (e) {
-    const msg = e instanceof AppError ? e.message : 'The back end could not complete that.';
+    const msg = e instanceof AppError ? e.message : 'The system could not complete that.';
     emitTimeline(c.sessionId, { type: 'tool.failed', stage: 'investigate', title: `${toolVerb(name)} did not complete`, detail: msg, status: 'failed', source: 'voice agent' });
     audit({ actor: ASSISTANT, event: 'live.tool_failed', status: 'failed', sessionId: c.sessionId, metadata: { tool: name } });
     return { ok: false, error: 'tool_failed', message: `${msg} Tell the customer you could not complete that and offer a person. Do not guess a result.` };
@@ -95,7 +95,7 @@ async function dispatch(name: string, args: Record<string, unknown>, c: ToolCont
     }
     case TOOL.card: {
       const ctx0 = getContext(c.sessionId);
-      if (ctx0.stage !== 'awaiting_card') return { ok: false, error: 'not_expecting_a_card_number', ...stateSummary(c.sessionId), message: 'The back end is not asking for a card number right now. Do not collect one. Use the banking tool for what the customer said.' };
+      if (ctx0.stage !== 'awaiting_card') return { ok: false, error: 'not_expecting_a_card_number', ...stateSummary(c.sessionId), message: 'The system is not asking for a card number right now. Do not collect one. Use the banking tool for what the customer said.' };
       const text = c.customerText.trim();
       if (!text && !hasUnhandledSpeech(c.sessionId) && !cardCaptureFor(c.sessionId)) return { ok: false, error: 'no_card_number_heard', ...stateSummary(c.sessionId), message: 'Nothing new was heard. Ask the customer to read the 16-digit card number.' };
       c.consumeCustomerText();

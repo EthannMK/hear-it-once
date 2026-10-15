@@ -691,7 +691,7 @@ async function bindFreeTalkPersona(s: Session, issueType: IssueType): Promise<vo
   s.ctx.persona = { scenarioId: sc.id, name: sc.customer.name, customerNumber: sc.customer.number, phoneMasked: maskPhone(sc.customer.phone) };
   s.scenarioId = sc.id;
   run('UPDATE call_sessions SET scenario_id = ? WHERE id = ?', [sc.id, s.id]);
-  tl(s, { type: 'demo.persona', stage: 'verify', title: `Demo: you are calling as ${sc.customer.name} (synthetic customer)`, detail: `Chosen because the request is about ${ISSUE_LABELS[issueType].toLowerCase()}. Caller ID matched a synthetic profile — identification only, not proof of identity.`, status: 'info', source: 'demo environment' });
+  tl(s, { type: 'demo.persona', stage: 'verify', title: `Calling as ${sc.customer.name} (test identity)`, detail: `Chosen because the request is about ${ISSUE_LABELS[issueType].toLowerCase()}. Caller ID matched a synthetic profile — identification only, not proof of identity.`, status: 'info', source: 'demo environment' });
 }
 
 const vctx = (s: Session) => ({ sessionId: s.id, correlationId: s.correlationId, scenarioId: s.scenarioId, actor: s.actor });
