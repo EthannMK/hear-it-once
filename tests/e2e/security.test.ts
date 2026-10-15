@@ -212,3 +212,39 @@ describe('general questions and honest not-knowing', () => {
     expect(get<{ outcome: string }>('SELECT outcome FROM call_sessions WHERE id = ?', [c.sessionId])!.outcome).toBe('resolved');
   });
 });
+
+describe('findings from real calls', () => {
+  it('a second tester does not inherit the first tester\'s blocked card', async () => {
+    const first = await verifiedCall('I lost my card');
+    await first.consent('accept');
+    await first.input({ kind: 'hangup' });
+    const second = await verifiedCall('is my card active');
+    expect(recent(second, 3)).toMatch(/active/i);
+    expect(recent(second, 3)).not.toMatch(/disagree/i);
+  });
+
+  it('a block keeps the fraud system and card system in step', async () => {
+    const c = await verifiedCall('I lost my card');
+    await c.consent('accept');
+    const rows = all<{ reported_card_status: string }>("SELECT a.reported_card_status FROM bank_fraud_alerts a JOIN call_sessions s ON s.customer_id = a.customer_id WHERE s.id = ?", [c.sessionId]);
+    for (const r of rows) expect(r.reported_card_status).toBe('blocked');
+  });
+
+  it('"I lost my phone" asks about the card instead of blocking it', async () => {
+    const c = new Caller(app);
+    await c.start(undefined, { channel: 'voice_browser', profileId: 'alex-morgan' });
+    await c.say('I lost my phone');
+    expect(recent(c, 1)).toMatch(/card affected too/i);
+    expect(recent(c, 1)).not.toMatch(/16-digit/i);
+  });
+
+  it('"what does it mean" and "speak english" are not strikes toward a transfer', async () => {
+    const c = new Caller(app);
+    await c.start(undefined, { channel: 'voice_browser', profileId: 'alex-morgan' });
+    await c.say('hmm');
+    await c.say('what does it mean');
+    await c.say('can you speak english');
+    await c.refresh();
+    expect(c.view.handoff?.status ?? 'none').toBe('none');
+  });
+});

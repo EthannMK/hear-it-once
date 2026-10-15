@@ -80,6 +80,8 @@ export const mockCardControl: CardControlWriteAdapter = {
       if (card.customer_id !== ctx.customerId) return { outcome: 'failed', externalRef: null, failureCode: 'CARD_NOT_OWNED' };
       if (card.status === 'closed') return { outcome: 'failed', externalRef: null, failureCode: 'CARD_CLOSED' };
       run("UPDATE bank_cards SET status = 'blocked', status_reason = ?, status_as_of = ? WHERE id = ?", [`reported_${req.reason}`, nowIso(), req.cardRef]);
+      // The fraud system mirrors the card system, so a block never leaves the two systems disagreeing.
+      run("UPDATE bank_fraud_alerts SET reported_card_status = 'blocked' WHERE card_id = ?", [req.cardRef]);
       return { outcome: 'succeeded', externalRef: null, failureCode: null, detail: { previousStatus: card.status } };
     }),
   lookup: (_ctx, key) => lookup('card_control', key),

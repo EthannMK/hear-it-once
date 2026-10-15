@@ -23,7 +23,7 @@ import { CALL_COOKIE, callerOwns, requireCaller } from '../app.ts';
 import { SUPPORTED_LANGUAGES } from '../../voice/interfaces.ts';
 import { listTimeline, subscribe } from '../../events/timeline.ts';
 import { buildResolution } from '../brief.ts';
-import { resetScenario } from '../../db/seed.ts';
+import { refreshDemoFixtures, resetScenario } from '../../db/seed.ts';
 import { analyseCall, getAnalysis, lifecycle, transcriptSegments } from '../../analysis/analysis.ts';
 
 const StartCall = z
@@ -94,6 +94,7 @@ export function registerCallRoutes(app: FastifyInstance): void {
     if (body.scenarioId && !scenario) throw new AppError('NOT_FOUND', 'Unknown scenario.');
     // Scripted-scenario replay only. Demo-customer calls never reset data, so earlier calls and cases stay on record.
     if (scenario && !profile && body.resetScenario && env().DEMO_MODE) resetScenario(scenario.id);
+    if (profile && scenario && env().DEMO_MODE) refreshDemoFixtures(scenario.customer.id);
     const token = randomBytes(24).toString('base64url');
     const sessionId = await startCall({
       channel: body.channel,
