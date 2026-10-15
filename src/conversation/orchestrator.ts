@@ -42,9 +42,10 @@ import { SCENARIOS, scenarioById } from '../db/scenarios.ts';
 import { maskPhone } from '../lib/redact.ts';
 import { HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate, formatMoney } from './format.ts';
 import { createTicket } from '../crm/crm.ts';
-import { answerFromInfo, NOT_FOUND } from '../kb/bank-info.ts';
+import { answerFromInfo, NOT_FOUND, NOT_FOUND_AGAIN } from '../kb/bank-info.ts';
 import { THIRD_PARTY, assessContactRisk, checkNationalId, contactChangeKind, parseNationalIdLast4, READ_ALOUD, STEP_UP_MAX_ATTEMPTS, type Assurance, type ContactKind, type Risk } from './security.ts';
 import { sideTalk } from './sidetalk.ts';
+import { LET_ME_TALK } from '../ai/parsers.ts';
 import { normaliseSpoken } from '../live/speech.ts';
 import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
 
@@ -66,7 +67,7 @@ export type Stage =
 type Pending =
   | { kind: 'choice'; purpose: string; options: Choice[]; scope: 'issue' | 'workflow' }
   | { kind: 'consent'; proposalId: string }
-  | { kind: 'yes_no'; purpose: string; agentReason?: string }
+  | { kind: 'yes_no'; purpose: string; agentReason?: string; resume?: Pending; resumePrompt?: string }
   | { kind: 'free_text'; purpose: string };
 
 export interface CallContext {
@@ -104,6 +105,8 @@ export interface CallContext {
   lastInfoTopic?: string;
   /** How many times a person was offered after an unclear request, so the wording changes. */
   offerCount?: number;
+  /** How many times the bank information had no answer, so the wording alternates. */
+  notFoundCount?: number;
   /** Which virtual agent currently has the call (en = Lily, my = Hnin, fil = Maya). */
   agentLang?: string;
   /** How many times in a row the card number could not be read; picks gentler, more specific help each time. */
@@ -550,7 +553,10 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
   if (c.stage === 'handoff') return onWhileInHandoff(s);
   if (c.stage === 'awaiting_survey') {
     const n = Number(text.match(/[1-5]/)?.[0]);
-    return onSurvey(s, Number.isFinite(n) ? n : null);
+    // A real question after the rating prompt is a new request, not an answer to the survey.
+    const isRequest = !Number.isFinite(n) && text.trim().split(/\s+/).length >= 3 && parseYesNo(text) !== 'no';
+    if (!isRequest) return onSurvey(s, Number.isFinite(n) ? n : null);
+    c.stage = 'wrap_up';
   }
 
   if (!sensitive) {
@@ -623,8 +629,11 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     case 'workflow':
       return onWorkflowText(s, text);
     case 'wrap_up': {
+      // "Let me finish" is a request for time, never an answer to "anything else?".
+      if (LET_ME_TALK.test(text)) return say(s, "Of course, go ahead. I'm listening.");
       const yn = parseYesNo(text);
       // A new, supported banking topic in an already verified call is handled here, not handed off.
+      if (yn === null && tryGeneralFirst(s, text)) return;
       if (yn === null && isVerified(c.verification) && text.length > 8) {
         const cls = await classify(s, redactText(text));
         if (cls.issueType && cls.confidence >= policy().conversation.minIntentConfidence) return startSecondaryTopic(s, cls, text);
@@ -647,6 +656,8 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
 
 /* ------------------------------------------------------------------------- general bank information */
 
+/** "Okay" and "right" can mean "I am listening". They are not enough to transfer the call. */
+const WEAK_YES = /^(ok|okay|alright|all right|fine|right|hmm+|mm+|uh huh|yeah right)[\s.,!?]*$/i;
 const BANKING_WORDS = /\b(my (card|account|payment|fee|charge|statement)|charge|charged|transaction|stolen|lost|dispute|fraud|decline|declined|refund|late fee)\b/i;
 const QUESTION_START = /^(what|how|where|when|why|which|who|do you|does|can i|can you|could i|is there|are there|will you|i want to|i would like to|i'd like to|i need to)\b/i;
 
@@ -658,8 +669,29 @@ const QUESTION_START = /^(what|how|where|when|why|which|who|do you|does|can i|ca
 function tryBankInfo(s: Session, text: string, opts: { allowNotFound: boolean }): boolean {
   const c = s.ctx;
   // A short follow-up inherits the subject of the last general answer ("it" means the earlier topic).
-  const followUp = !!c.lastInfoTopic && text.trim().split(/\s+/).length <= 9 && /^(and |so |what about |how |where |can i |do i |is it )/i.test(text.trim());
-  const found = (followUp && answerFromInfo(`${c.lastInfoTopic} ${text}`)) || answerFromInfo(text);
+  const followUp = !!c.lastInfoTopic && text.trim().split(/\s+/).length <= 9 && /^(and |so |what about |how |where |can i |do i |is it |actually|sorry,? i meant|i meant|no,? i meant)/i.test(text.trim());
+  // Inherit the earlier topic only when the sentence alone says nothing, or when the pair is a known combination
+  // (a deposit asked about at an ATM). Otherwise a new question such as "can I get a loan" keeps its own answer.
+  const alone = answerFromInfo(text);
+  const joined = followUp ? answerFromInfo(`${c.lastInfoTopic} ${text}`) : null;
+  const found = !alone ? joined : joined && joined.entry.id === 'INFO-atm-deposit' ? joined : alone;
+  // Two questions in one breath ("opening hours and how do I deposit"): answer both, in the order asked.
+  if (!BANKING_WORDS.test(text)) {
+    const parts = text.split(/\b(?:and|also|then|plus)\b|[?;]/i).map((x) => x.trim()).filter((x) => x.split(/\s+/).length >= 2);
+    const hits: NonNullable<typeof found>[] = [];
+    for (const part of parts) { const f = answerFromInfo(part); if (f && !hits.some((h) => h.entry.id === f.entry.id)) hits.push(f); }
+    if (hits.length >= 2) {
+      const two = hits.slice(0, 2);
+      c.lastInfoTopic = two[1].entry.topic;
+      for (const h of two) {
+        event(s, 'bank_info_answered', { topic: h.entry.id });
+        recordKbReference(s.id, { article: { id: h.entry.id } as never, score: 3, reason: 'general bank information' }, redactText(text), { supportsNextStep: false, agentReview: false });
+      }
+      tl(s, { type: 'kb.info', stage: 'explain', title: `Answered from bank information: ${two.map((h) => h.entry.topic).join(' and ')}`, detail: 'Two questions in one turn, both answered.', status: 'ok', source: 'bank information (demo)' });
+      say(s, `${two.map((h) => h.reply).join(' ')} ${M.INFO_FOLLOWUP}`);
+      return true;
+    }
+  }
   if (found) {
     c.lastInfoTopic = found.entry.topic;
     event(s, 'bank_info_answered', { topic: found.entry.id });
@@ -671,10 +703,37 @@ function tryBankInfo(s: Session, text: string, opts: { allowNotFound: boolean })
   if (opts.allowNotFound && !BANKING_WORDS.test(text) && QUESTION_START.test(text.trim()) && text.trim().length > 15) {
     event(s, 'bank_info_not_found', {});
     tl(s, { type: 'kb.info', stage: 'explain', title: 'No matching bank information', detail: 'The assistant says it does not have this rather than guessing.', status: 'warn', source: 'bank information (demo)' });
-    say(s, NOT_FOUND);
+    c.notFoundCount = (c.notFoundCount ?? 0) + 1;
+    say(s, c.notFoundCount % 2 === 1 ? NOT_FOUND : NOT_FOUND_AGAIN);
     return true;
   }
   return false;
+}
+
+/**
+ * A general question ("what are your fees", "how do I deposit") is never a request about this caller's account.
+ * It is answered from the bank information before any intent is guessed, in every stage that can take a new
+ * question. Words like "my", or having lost or been charged something, make it personal and the normal flow runs.
+ */
+function tryGeneralFirst(s: Session, text: string): boolean {
+  // An amount or a specific figure ("a payment of 98765 dollars to Zorbo Mart") is about one transaction, not a general topic.
+  const personal = /\b(my|mine|i was|i've been|i have been|i got|i lost|i did not|i didn't|i don't recognise|i do not recognise)\b/i.test(text) || /\$|\d{2,}/.test(text) || /\b(paid|payment|purchase|charged?|transaction)\b/i.test(text);
+  return !personal && QUESTION_START.test(text.trim()) && tryBankInfo(s, text, { allowNotFound: false });
+}
+
+/**
+ * A general question asked while the call is waiting on an answer (a choice, a yes or no, a card number):
+ * answer it from the bank information, then say the call is still waiting. The pending question is kept.
+ * Returns true when it answered.
+ */
+function answerAside(s: Session, text: string): boolean {
+  if (/\b(my|mine)\b/i.test(text) || !QUESTION_START.test(text.trim()) || parseYesNo(text) !== null) return false;
+  const f = answerFromInfo(text);
+  if (!f) return false;
+  event(s, 'bank_info_answered', { topic: f.entry.id, during: 'pending_question' });
+  tl(s, { type: 'kb.info', stage: 'explain', title: `Answered from bank information: ${f.entry.topic}`, detail: 'Answered while a question was still open. The open question was kept.', status: 'ok', source: 'bank information (demo)' });
+  say(s, `${f.reply} Whenever you are ready, I still need your answer to my last question.`);
+  return true;
 }
 
 async function onIssueText(s: Session, text: string, distressed: boolean): Promise<void> {
@@ -683,18 +742,17 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
   if (c.pending?.kind === 'yes_no' && c.pending.purpose === 'offer_agent' && c.pending.agentReason === 'ai_uncertain') {
     const p = c.pending;
     const yn = parseYesNo(text);
+    if (yn && WEAK_YES.test(text.trim())) return say(s, 'Just to be sure, would you like me to connect you with a person? Please say yes or no.');
     if (yn) return onYesNoAnswer(s, p, yn === 'yes');
     c.pending = null;
   }
   const combined = c.issue && c.stage === 'clarifying_issue' ? `${c.issue.statement} ${redactText(text)}` : redactText(text);
   const cls = await classify(s, combined);
-  // A general question ("what are your fees", "how do I deposit") is never about this caller's account.
-  // The words "my", "I was charged" or a lost card make it personal, and then the normal flow runs.
-  const personal = /\b(my|mine|i was|i've been|i have been|i got|i lost|i did not|i didn't|i don't recognise|i do not recognise)\b/i.test(text);
-  if (!c.issue && !personal && QUESTION_START.test(text.trim()) && tryBankInfo(s, text, { allowNotFound: false })) { c.unclearCount = 0; return; }
+  // A general question is answered before any intent is guessed.
+  if (tryGeneralFirst(s, text)) { c.unclearCount = 0; c.issue = null; c.pending = null; c.stage = 'awaiting_issue'; return; }
   // General bank questions are answered from the bank information without starting a case.
-  if (!cls.issueType && !c.issue && tryBankInfo(s, text, { allowNotFound: true })) { c.unclearCount = 0; return; }
-  if (cls.unsupportedTopic && !cls.issueType && !c.issue && tryBankInfo(s, text, { allowNotFound: false })) return;
+  if (!cls.issueType && tryBankInfo(s, text, { allowNotFound: true })) { c.unclearCount = 0; c.issue = null; c.pending = null; c.stage = 'awaiting_issue'; return; }
+  if (cls.unsupportedTopic && !cls.issueType && tryBankInfo(s, text, { allowNotFound: false })) { c.issue = null; c.pending = null; c.stage = 'awaiting_issue'; return; }
   const min = policy().conversation.minIntentConfidence;
   const clarifications = c.issue?.clarifications ?? 0;
   c.issue = { ...cls, statement: combined, slots: mergeSlots(c.issue?.slots, cls.slots), clarifications };
@@ -722,9 +780,11 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
     event(s, 'issue_unclear_offer_agent', { confidence: cls.confidence });
     tl(s, { type: 'clarification.requested', stage: 'understand', title: 'Still unclear, offered a person', detail: 'Unclear input does not transfer the call by itself. The customer chooses.', status: 'pending', source: 'conversation' });
     c.offerCount = (c.offerCount ?? 0) + 1;
-    say(s, c.offerCount === 1
-      ? "I'm sorry, I still haven't caught what you need. Would you like me to connect you with a person? Or you can tell me again in your own words."
-      : "I can bring in a person whenever you like, just say yes. Or tell me in a few words what you need and I will try again.");
+    say(s, [
+      "I'm sorry, I still haven't caught what you need. Would you like me to connect you with a person? Or you can tell me again in your own words.",
+      'I can bring in a person whenever you like, just say yes. Or tell me in a few words what you need and I will try again.',
+      'No problem, take your time. Say yes if you want a person now, or just tell me what is going on.',
+    ][(c.offerCount - 1) % 3]);
     return;
   }
   c.issue.clarifications++;
@@ -839,7 +899,7 @@ const vctx = (s: Session) => ({ sessionId: s.id, correlationId: s.correlationId,
  * Card digits being collected, per call. Held in memory only: never written to the database, logs, audit
  * or model prompts. `confirming` means all 16 digits were heard and the caller was asked "is that correct?".
  */
-interface CardCapture { digits: string; confirming: boolean }
+interface CardCapture { digits: string; confirming: boolean; nudges?: number }
 const captures = new Map<string, CardCapture>();
 const group4 = (d: string) => d.replace(/(.{4})(?=.)/g, '$1 ');
 const spoken = (d: string) => group4(d).split(' ').map((g) => [...g].join(' ')).join(', ');
@@ -858,7 +918,9 @@ export function cardCaptureFor(sessionId: string): { digits: string; count: numb
  */
 function collectCard(s: Session, text: string): string | null {
   const cap = captures.get(s.id);
-  const digits = text.replace(/\D/g, '');
+  // One or two stray digits inside an ordinary sentence ("alert(1)", "option 2") are not part of a card number.
+  const rawDigits = text.replace(/\D/g, '');
+  const digits = rawDigits.length < 4 && text.replace(/[^a-z]/gi, '').length >= 8 ? '' : rawDigits;
   const yn = parseYesNo(text);
   const note = (title: string, detail: string) => tl(s, { type: 'verification.readback', stage: 'verify', title, detail, status: 'info', source: 'identity verification' });
   const readback = (d: string, updated: boolean) => {
@@ -873,7 +935,9 @@ function collectCard(s: Session, text: string): string | null {
     if (cap?.confirming) {
       if (yn === 'yes') { captures.delete(s.id); return cap.digits; }
       if (yn === 'no') { captures.delete(s.id); say(s, M.CARD_REASK); return null; }
-      say(s, M.CARD_YESNO); return null;
+      say(s, [M.CARD_YESNO, M.CARD_YESNO_AGAIN, M.CARD_YESNO_LAST][(cap.nudges ?? 0) % 3]);
+      cap.nudges = (cap.nudges ?? 0) + 1;
+      return null;
     }
     if (cap) {
       if (/\b(start over|again|restart|clear|wrong|mistake|reset)\b/i.test(text)) { captures.delete(s.id); say(s, M.CARD_REASK); return null; }
@@ -917,6 +981,17 @@ const MONEY_MENTION = /\$\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?
 
 async function onVerificationAnswer(s: Session, text: string): Promise<void> {
   const c = s.ctx;
+  // A general question in the middle of the check ("what are your hours?") is answered, then the check carries on.
+  // It never counts as a failed answer and never touches the card digits held so far.
+  if (c.stage === 'awaiting_card' && text.replace(/\D/g, '').length < 3 && QUESTION_START.test(text.trim()) && !/\b(my|mine)\b/i.test(text) && parseYesNo(text) === null) {
+    const f = answerFromInfo(text);
+    if (f) {
+      event(s, 'bank_info_answered', { topic: f.entry.id, during: 'verification' });
+      tl(s, { type: 'kb.info', stage: 'explain', title: `Answered from bank information: ${f.entry.topic}`, detail: 'Answered in the middle of the security check. The check was not affected.', status: 'ok', source: 'bank information (demo)' });
+      say(s, `${f.reply} Whenever you are ready, we can carry on with the check.`);
+      return;
+    }
+  }
   if (c.stage === 'awaiting_card' && c.verificationMode === 'card_number') {
     // An amount mentioned during the card step ("actually it was $249") is a detail of the issue, not card digits.
     const detail = text.match(MONEY_MENTION);
@@ -1092,7 +1167,7 @@ async function startSecondaryTopic(s: Session, cls: Classification, text: string
   c.unclearCount = 0;
   event(s, 'secondary_topic', { issueType });
   tl(s, { type: 'intent.secondary', stage: 'understand', title: `New topic in the same call: ${ISSUE_LABELS[issueType]}`, detail: `Already verified, so no second identity check. The primary intent stays “${ISSUE_LABELS[get<{ issue_type: string }>('SELECT issue_type FROM call_sessions WHERE id = ?', [s.id])?.issue_type ?? issueType] ?? ISSUE_LABELS[issueType]}”.`, status: 'ok', source: `intent model: ${cls.model}` });
-  say(s, M.ackIssue(issueType));
+  say(s, M.ackIssue(issueType, true));
   c.stage = 'workflow';
   refreshTags(s, 'investigate');
   const snap = await retrieveFacts({ sessionId: s.id, correlationId: s.correlationId, scenarioId: s.scenarioId, customerId, issueType });
@@ -1123,6 +1198,7 @@ async function onWorkflowText(s: Session, text: string): Promise<void> {
   // Not while an answer is expected to a choice or a free-text question of the current workflow.
   const choicePicked = p?.kind === 'choice' && (parseOrdinalChoice(text, p.options.length) != null || !!matchChoiceByText(p.options, text) || /\b(none|neither|not (any|one) of (these|them)|no)\b/i.test(text));
   const answeringSomething = choicePicked || p?.kind === 'free_text' || (p?.kind === 'consent' && parseYesNo(text)) || (p?.kind === 'yes_no' && parseYesNo(text));
+  if (!answeringSomething && text.length > 12 && tryGeneralFirst(s, text)) return;
   if (!answeringSomething && text.length > 12) {
     const cls = await classify(s, redactText(text));
     if (cls.issueType && cls.issueType !== c.issue?.issueType && cls.confidence >= Math.max(0.7, policy().conversation.minIntentConfidence)) return startSecondaryTopic(s, cls, text);
@@ -1132,12 +1208,14 @@ async function onWorkflowText(s: Session, text: string): Promise<void> {
     if (isCorrection(text) || hasNewDetails(c, text)) return onCorrection(s, text);
     const yn = parseYesNo(text);
     if (yn) return onConsent(s, p.proposalId, yn === 'yes' ? 'accept' : 'decline', 'utterance');
+    if (answerAside(s, text)) return;
     return unclear(s, M.CONSENT_NUDGE[Math.min(s.ctx.unclearCount, M.CONSENT_NUDGE.length - 1)]);
   }
   if (p?.kind === 'yes_no') {
     if (/\b(check|status|did it work|worked|go through|went through)\b/i.test(text) && p.purpose === 'reconcile') return onReconcile(s);
     const yn = parseYesNo(text);
-    if (!yn) return unclear(s, 'Sorry — was that a yes or a no?');
+    if (yn && p.purpose === 'offer_agent' && WEAK_YES.test(text.trim())) return say(s, 'Just to be sure, would you like me to connect you with a person? Please say yes or no.');
+    if (!yn) { if (answerAside(s, text)) return; return unclear(s, 'Sorry — was that a yes or a no?'); }
     return onYesNoAnswer(s, p, yn === 'yes');
   }
   if (p?.kind === 'choice') {
@@ -1152,7 +1230,8 @@ async function onWorkflowText(s: Session, text: string): Promise<void> {
       c.pending = null;
       return applyResult(s, wf.onFreeText ? wf.onFreeText(wfCtx(s), p.purpose, text) : wf.start(wfCtx(s)));
     }
-    return unclear(s, 'Sorry, which one did you mean? You can say "the first one", or tap an option.');
+    if (answerAside(s, text)) return;
+    return unclear(s, ['Sorry, which one did you mean? You can say "the first one", or tap an option.', 'Tap one of the options on screen, or say the first, second or third one.', 'If none of these is right, say none of them.'][Math.min(c.unclearCount, 2)]);
   }
   if (p?.kind === 'free_text') {
     c.issue!.slots = mergeSlots(c.issue!.slots, extractSlots(text));
@@ -1182,9 +1261,17 @@ function matchChoiceByText(options: Choice[], text: string): Choice | null {
 }
 
 async function unclear(s: Session, reprompt: string): Promise<void> {
-  s.ctx.unclearCount++;
-  event(s, 'unclear_input', { count: s.ctx.unclearCount });
-  if (s.ctx.unclearCount >= 3) return handoff(s, 'communication_breakdown', 'repeated unclear input', "I'm sorry I'm not getting this right. I'll connect you with a person — they'll see everything we've covered.");
+  const c = s.ctx;
+  c.unclearCount++;
+  event(s, 'unclear_input', { count: c.unclearCount });
+  if (c.unclearCount >= 3) {
+    // Not getting an answer is not a reason to transfer by itself. Offer a person and keep the open question.
+    const resume = c.pending ?? undefined;
+    const resumePrompt = c.lastPrompt;
+    c.unclearCount = 0;
+    c.pending = { kind: 'yes_no', purpose: 'offer_agent', agentReason: 'communication_breakdown', resume, resumePrompt };
+    return say(s, "I'm sorry, I'm not getting this right. Would you like me to connect you with a person? Say yes for a person, or no and we will carry on.");
+  }
   say(s, reprompt);
 }
 
@@ -1223,6 +1310,11 @@ async function onYesNoAnswer(s: Session, p: Extract<Pending, { kind: 'yes_no' }>
   c.pending = null;
   if (p.purpose === 'offer_agent') {
     if (yes) return handoff(s, p.agentReason ?? 'customer_accepted_offer', 'customer accepted offer of an agent', "I'll transfer you now. The agent will see everything we've covered.");
+    if (p.agentReason === 'communication_breakdown') {
+      c.pending = p.resume ?? null;
+      say(s, p.resumePrompt ? `No problem, let's carry on. ${p.resumePrompt}` : "No problem, let's carry on.");
+      return;
+    }
     if (p.agentReason === 'ai_uncertain') {
       // Declined a person after an unclear request: go back to listening instead of ending the call.
       c.issue = null; c.stage = 'awaiting_issue';

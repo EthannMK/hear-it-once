@@ -131,6 +131,8 @@ export const cardProgress = (digits: string, said: string) => {
 };
 export const cardReadback = (last4: string, updated: boolean) => `${updated ? "Updated. " : 'Thanks. '}That's a card ending in ${[...last4].join(' ')}. Is that right?`;
 export const CARD_REASK = 'No problem. Could you read the 16-digit number again?';
+export const CARD_YESNO_AGAIN = 'Just say yes if the last four digits are right, or no to start over. You can also ask for a person.';
+export const CARD_YESNO_LAST = "I'm still waiting for a yes or a no on those last four digits. Say person if you would rather speak to someone.";
 export const CARD_YESNO = 'Sorry, was that number right? A yes or no is fine, or read it again.';
 export const CARD_UNAVAILABLE = "Our security check is taking longer than usual, so I can't confirm that yet. I've kept what you told me. Say \"try again\" and I'll check once more, or I can bring in a person.";
 
