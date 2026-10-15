@@ -3,6 +3,7 @@
  * a short, human reply that keeps the call on track instead of a blank "I didn't understand", and
  * none of them is ever acted on as a banking request. Pure functions, no database access.
  */
+import { LET_ME_TALK } from '../ai/parsers.ts';
 import type { Facts } from './facts.ts';
 
 export type SideKind = 'injection' | 'secret' | 'repeat' | 'recall' | 'hello' | 'abuse' | 'offtopic' | 'general';
@@ -26,8 +27,6 @@ const MAKE_THE_BANK_SPEAK = /\b(ignore|disregard|forget)\b.{0,30}\b(instructions
 const LANGUAGE_ASK = /\b(speak|talk|reply|answer|switch|change|continue)\b.{0,24}\b(english|burmese|tagalog|filipino|myanmar)\b|\b(english|burmese|tagalog) (please|only)\b/i;
 /** A bare acknowledgement ("OK", "right", "mm-hmm") carries no request, so it must never start a workflow. */
 const ACK = /^\s*(ok(ay)?|alright|all right|right|sure|yes|yeah|yep|yup|mm+(-| )?hm+|uh[- ]?huh|hmm+|um+|uh+|well|so|good|fine|thanks|thank you|cool|got it)[\s.,!?]*$/i;
-/** The caller is saying they have not started yet, or asking for a moment to speak. */
-const LET_ME_TALK = /\b(haven'?t|have not|hasn'?t|did ?n'?t|didn'?t)\s+(said|say|spoken|talked|started|told)\b|\blet me (start|talk|speak|say|explain|finish|tell)\b|\b(wait|hold on|one (moment|second|sec)|give me a (moment|second|sec|minute)|just a (moment|second|sec|minute)|i'?m (about|going) to)\b|\bi (was|am) (about|going) to\b|\bdon'?t (interrupt|cut me)\b|\bstop talking\b/i;
 const CONFUSED = /\b(what does (it|that|this) mean|what do you mean|i (don'?t|do not) (understand|get it)|not sure what you mean|confused)\b/i;
 /** A lost item that is not a card: ask whether the card is affected before touching anything. */
 const LOST_OTHER = /\b(lost|stolen|missing|misplaced|forgot)\b.{0,25}\b(phone|mobile|wallet|laptop|bag|passport|keys)\b|\b(phone|mobile|wallet|laptop|bag|passport|keys)\b.{0,25}\b(lost|stolen|missing|misplaced)\b/i;
@@ -78,15 +77,22 @@ export function sideTalk(text: string, o: Opts): Side | null {
     return { kind: 'recall', strike: false, reply: `${said} ${o.lastPrompt}`.trim() };
   }
   if (o.sensitive) return null;
-  if (SECRET_TALK.test(t)) {
+  // Sharing a secret is different from asking how to reset one. Only warn when a value seems to be given.
+  const asksHow = /^(how|what|where|can i|can you|do i|is there)\b/i.test(t) && !/\d{3,}|REDACTED/i.test(t);
+  if (SECRET_TALK.test(t) && !asksHow) {
     return { kind: 'secret', strike: false, alsoProcess: true, reply: "Please don't share your PIN, CVV or password with me. I will never ask for them. I only need what I ask for, one step at a time." };
   }
   if (!o.inIssueStage) return null;
-  if (LANGUAGE_ASK.test(t)) return { kind: 'general', strike: false, reply: /english/i.test(t) ? 'Of course, we can carry on in English. What can I help you with?' : "I'm Lily and I speak English. If you'd like to speak Burmese or Tagalog, say so and I'll bring in Hnin or Maya. What can I help you with?" };
+  // Never say the same invitation twice in a row.
+  const fresh = (a: string[]) => a.find((x) => x !== o.lastPrompt) ?? a[a.length - 1];
+  if (LANGUAGE_ASK.test(t)) return { kind: 'general', strike: false, reply: /english/i.test(t) ? 'Of course, we can carry on in English. What can I help you with?' : fresh(["I'm Lily and I speak English. If you'd like to speak Burmese or Tagalog, say so and I'll bring in Hnin or Maya. What can I help you with?", 'Hnin speaks Burmese and Maya speaks Tagalog. Just start speaking in that language and I will bring them in. What can I help you with?']) };
   if (CONFUSED.test(t)) return { kind: 'general', strike: false, reply: 'Sorry, let me say it more simply. Tell me what happened in your own words, for example "I lost my card", "there is a charge I don\'t know", "I want to make a deposit" or "where is your nearest branch".' };
   if (LOST_OTHER.test(t) && !/\bcard\b/i.test(t)) return { kind: 'general', strike: false, reply: "I'm sorry to hear that. Is your Northstar card affected too? If so, say \"my card is lost\" and I'll block it right away. If it was only the phone or something else, tell me what you need from the bank." };
-  if (LET_ME_TALK.test(t)) return { kind: 'general', strike: false, reply: pick(["Of course, go ahead. I'm listening.", 'Take your time. I am here whenever you are ready.']) };
-  if (ACK.test(t) && !o.awaitingYesNo) return { kind: 'general', strike: false, reply: 'Take your time. What can I help you with today?' };
+  // Nothing but punctuation or symbols: the words were not captured. Say so politely instead of guessing an intent.
+  if (!/[\p{L}\p{N}]/u.test(t) || /^[\p{P}\p{S}\s]+$/u.test(t)) return { kind: 'general', strike: false, reply: fresh(["I didn't catch that. Could you say it again?", "I'm still here. Take your time, I'm listening."]) };
+  if (/^\s*(never ?mind|forget it|actually,? forget it|cancel( that)?|scratch that|ignore that)[\s.,!?]*$/i.test(t) && !o.awaitingYesNo) return { kind: 'general', strike: false, reply: fresh(["No problem. I'm here whenever you need something.", 'Okay, nothing to do for now. Tell me if you think of anything.']) };
+  if (LET_ME_TALK.test(t)) return { kind: 'general', strike: false, reply: fresh(["Of course, go ahead. I'm listening.", 'Take your time. I am here whenever you are ready.', 'No rush. Tell me in your own words when you are ready.']) };
+  if (ACK.test(t) && !o.awaitingYesNo) return { kind: 'general', strike: false, reply: fresh(['Take your time. What can I help you with today?', 'I am here whenever you are ready. Just tell me what you need.', 'Go ahead, I am listening.']) };
   if (HELLO.test(t)) return { kind: 'hello', strike: true, reply: pick(["I'm here. What can I help you with today? For example a lost card, a charge you don't recognise, a payment or a fee.", "Still here. Tell me what's going on with your card or account, in your own words."]) };
   if (ABUSE.test(t)) return { kind: 'abuse', strike: true, reply: pick(["I'm sorry this has been frustrating. I do want to sort it out. Tell me in a few words what happened with your card or account, or I can bring in a colleague.", "I can hear how annoyed you are, and I'm sorry. Would it help if I brought in a colleague, or shall we try once more with what happened?"]) };
   const general = generalAnswer(t);

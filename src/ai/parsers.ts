@@ -128,7 +128,11 @@ export function parseLast4(text: string): string | null {
 }
 
 export type YesNo = 'yes' | 'no' | null;
+/** The caller is saying they have not started yet, or asks for a moment to speak. Never a yes or a no. */
+export const LET_ME_TALK = /\b(haven'?t|have not|hasn'?t|did ?n'?t|didn'?t)\s+(said|say|spoken|talked|started|told)\b|\blet me (start|talk|speak|say|explain|finish|tell)\b|\b(wait|hold on|one (moment|second|sec)|give me a (moment|second|sec|minute)|just a (moment|second|sec|minute)|i'?m (about|going) to)\b|\bi (was|am) (about|going) to\b|\bdon'?t (interrupt|cut me)\b|\bstop talking\b/i;
+
 export function parseYesNo(text: string): YesNo {
+  if (LET_ME_TALK.test(text)) return null;
   const t = text.trim().toLowerCase().replace(/[.!]+$/, '');
   if (/^(no|nope|nah|don'?t|do not|not now|not yet|cancel|stop|never ?mind|i decline|decline|no thanks|no thank you)\b/.test(t)) return 'no';
   if (/^(yes|yeah|yep|yup|sure|ok|okay|please do|please|go ahead|do it|correct|that'?s right|that is right|confirm(ed)?|absolutely|y|i agree|agreed|i consent|block it|sounds good)\b/.test(t)) return 'yes';

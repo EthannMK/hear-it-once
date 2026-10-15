@@ -2,7 +2,7 @@
   "name": "hear-it-once",
   "version": "0.1.0",
   "private": true,
-  "description": "Hear It Once — AI-assisted credit card service line prototype (SIMULATED, synthetic data only)",
+  "description": "Hear It Once \u2014 AI-assisted credit card service line prototype (SIMULATED, synthetic data only)",
   "type": "module",
   "engines": {
     "node": ">=22.13"
@@ -18,7 +18,9 @@
     "test:watch": "vitest",
     "audit:deps": "npm audit --omit=dev",
     "check:secrets": "tsx scripts/check-secrets.ts",
-    "check:live": "tsx --disable-warning=ExperimentalWarning scripts/check-live.ts"
+    "check:live": "tsx --disable-warning=ExperimentalWarning scripts/check-live.ts",
+    "test:fuzz": "vitest run tests/fuzz",
+    "test:fuzz:long": "FUZZ_RUNS=2000 vitest run tests/fuzz"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
