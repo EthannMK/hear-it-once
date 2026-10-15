@@ -47,6 +47,13 @@ const TEXT_WAIT_MAX_MS = 2500;
 
 export class LiveBridge {
   private session: LiveSession | null = null;
+  /**
+   * Incremented every time a provider session is replaced (language change, reconnect). Callbacks
+   * capture the epoch they were created with: a socket that is closing can still deliver buffered
+   * audio and text, and without this guard those frames reach the browser while the new agent is
+   * already speaking, so two voices play over each other.
+   */
+  private epoch = 0;
   private closed = false;
   private muted = false;
   private reconnects = 0;
@@ -110,25 +117,29 @@ export class LiveBridge {
   }
 
   private async openProviderSession(resumed: boolean, joinedFrom: LangCode | null = null): Promise<void> {
+    const mine = ++this.epoch;
+    /** False once this session has been replaced: its remaining frames belong to no one. */
+    const current = () => this.epoch === mine && !this.closed;
     const opts: LiveConnectOptions = {
       systemInstruction: lilySystemInstruction({ recap: resumed ? this.recap() : null, language: this.language, joinedFrom }),
       voice: this.language === 'en' ? undefined : LANGUAGES[this.language].voice,
       tools: LILY_TOOLS,
       events: {
         onAudio: (b64) => {
+          if (!current()) return;
           this.modelSpoke = true;
           this.send({ type: 'audio', data: b64 });
         },
-        onInputText: (text, final) => this.onInputText(text, final),
-        onOutputText: (text, final) => this.onOutputText(text, final),
-        onInterrupted: () => this.onInterrupted(),
-        onTurnComplete: () => this.onTurnComplete(),
-        onToolCall: (calls) => this.onToolCalls(calls),
-        onGoAway: (ms) => this.onGoAway(ms),
+        onInputText: (text, final) => { if (current()) this.onInputText(text, final); },
+        onOutputText: (text, final) => { if (current()) this.onOutputText(text, final); },
+        onInterrupted: () => { if (current()) this.onInterrupted(); },
+        onTurnComplete: () => { if (current()) this.onTurnComplete(); },
+        onToolCall: (calls) => { if (current()) this.onToolCalls(calls); },
+        onGoAway: (ms) => { if (current()) this.onGoAway(ms); },
         onError: (err) => {
-          log.warn('live provider error', { sessionId: this.sessionId, error: err.message });
+          log.warn('live provider error', { sessionId: this.sessionId, error: err.message, stale: !current() });
         },
-        onClose: (reason) => this.onProviderClosed(reason),
+        onClose: (reason) => { if (current()) this.onProviderClosed(reason); },
       },
     };
     this.session = await this.provider.connect(opts);
@@ -280,7 +291,11 @@ export class LiveBridge {
     this.reconnecting = true;
     const old = this.session;
     this.session = null;
+    this.epoch++; // anything still arriving from the outgoing session is now ignored
     try { old?.close(); } catch { /* already gone */ }
+    // Stop whatever the outgoing agent had already streamed: the browser plays its queue to the end
+    // otherwise, and the incoming agent's greeting lands on top of it.
+    this.send({ type: 'interrupted' });
     this.language = to;
     setAgentLang(this.sessionId, to);
     addTurn(this.sessionId, 'system', `${LANGUAGES[from].agent} passed the call to ${LANGUAGES[to].agent} (${LANGUAGES[to].name}).`, { kind: `agent_switch:${LANGUAGES[to].agent}` });

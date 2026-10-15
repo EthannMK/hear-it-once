@@ -17,6 +17,8 @@ try { S.lastCall = sessionStorage.getItem('hio.lastCall'); } catch { /* storage 
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; } };
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 const group4 = (d) => String(d ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/g, '$1 ');
+/** How long the caller's screen stays up after an agent accepts, before the demo moves to the agent's side. */
+const JUMP_MS = 7000;
 const STAGES = ['understand', 'verify', 'investigate', 'explain', 'confirm', 'act', 'record', 'resolve', 'handoff'];
 const STAGE_LABEL = { understand: 'Understand', verify: 'Verify', investigate: 'Investigate', explain: 'Explain', confirm: 'Confirm', act: 'Act', record: 'Record', resolve: 'Resolve', handoff: 'Handover' };
 
@@ -130,7 +132,7 @@ function demoMini() {
   const one = (v, label) => h('button.copy', { type: 'button', 'aria-label': `Copy ${label}`, onclick: async (e) => { try { await navigator.clipboard.writeText(v); const b = e.currentTarget; b.textContent = 'Copied'; b.classList.add('done'); setTimeout(() => { b.textContent = 'Copy'; b.classList.remove('done'); }, 1400); } catch { /* clipboard blocked */ } } }, 'Copy');
   return h('aside.card.dmini', { 'aria-label': 'Demo data' },
     h('h2', icon('flask'), 'Demo data'),
-    h('p.small.muted', 'Copy a card number, then type it in the secure box or read it out.'),
+    h('p.small.muted', 'Pick one of the demo accounts below and note its situation. Copy the card number, then read it out or type it in the secure box.'),
     h('ul', S.cards.map((x) => h('li', h('b', x.name), h('span.pan', group4(x.cardNumber)), one(x.cardNumber, `${x.name} card number`), h('span.sit', x.situation), h('span.nrc', `NRC last 4: ${x.nrcLast4}`), one(x.nrcLast4, `${x.name} NRC digits`)))));
 }
 
@@ -141,7 +143,7 @@ function drawHome() {
     h('section', { 'aria-label': 'Talk to Lily' },
       h('div.hero',
         h('div.hero-t',
-          h('h1', 'Meet Lily.', h('br'), h('em', 'Your banking questions,'), ' heard.'),
+          h('h1', 'Say it once.', h('br'), h('em', 'Get it sorted'), ' on the call.'),
           h('p.lede', `Talk to Lily, ${S.bank}'s voice assistant, the way you'd talk to a person. She checks who you are, looks at the bank's systems while you talk, and hands you to a human with the full story whenever you ask.`),
           h('ul.langs', { 'aria-label': 'Languages and agents' }, [['en', 'English', 'Lily'], ['my', 'Burmese', 'Hnin'], ['fil', 'Tagalog', 'Maya']].map(([k, n, a]) => h('li', h(`i.flag.${k}`), h('span', h('b', n), h('small', a))))),
           h('p.langnote', 'Lily speaks English. Speak Burmese or Tagalog and she will offer Hnin or Maya.'),
@@ -280,6 +282,9 @@ class Call {
         this.partial = {}; this.ui.transcript?.(); break;
       }
       case 'agent':
+        // The outgoing agent's queued audio must not play under the new agent's greeting.
+        this.player?.flush();
+        this.partial.assistant = '';
         this.agent = { lang: m.lang, name: m.name };
         this.banner = { kind: 'ok', text: `${m.name} joined the call and has the details so far.` };
         setTimeout(() => { if (this.banner?.kind === 'ok') { this.banner = null; this.ui.refresh?.(); } }, 4500);
@@ -340,6 +345,22 @@ class Call {
     if (this.ws?.readyState === 1 && this.voiceReady) this.ws.send(JSON.stringify({ type: 'end' }));
     else { try { this.view = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'hangup' } }); } catch { /* the agent view still loads */ } this.finish(); }
     setTimeout(() => { if (!this.ended) this.finish(); }, 4000);
+  }
+  /** Hand the viewer over to the agent's workspace for this same call. */
+  toAgentView() {
+    if (this.agentJump?.timer) clearInterval(this.agentJump.timer);
+    this.agentJump = null;
+    try { sessionStorage.setItem('hio_joined_as_agent', this.id); } catch { /* private mode */ }
+    this.destroy();
+    say('You are now the agent. Opening the case workspace.');
+    location.hash = `#/crm/call/${encodeURIComponent(this.id)}`;
+  }
+  /** The viewer would rather watch the caller's side; the switch does not come back. */
+  stayHere() {
+    if (this.agentJump?.timer) clearInterval(this.agentJump.timer);
+    this.agentJump = null;
+    this.jumpCancelled = true;
+    this.ui.refresh?.();
   }
   /** The call is over: flip to screen 2 — the human agent's view of this call. */
   finish() {
@@ -413,10 +434,18 @@ function callScreen(c) {
   }
   const muteBtn = h('button.mute', { type: 'button', 'aria-pressed': 'false', onclick: () => c.setMuted(!c.muted) }, icon('mic'), h('span.lbl', 'Mute'));
   const ccBtn = h('button.cc', { type: 'button', 'aria-pressed': 'true', onclick: () => { captions = !captions; ccBtn.setAttribute('aria-pressed', String(captions)); list.hidden = !captions; } }, icon('cc'), h('span.lbl', 'Captions'));
-  const humanBtn = h('button.human', { type: 'button', onclick: () => c.requestHuman() }, icon('headset'), 'Transfer to a human');
+  const humanBtn = h('button.human', { type: 'button', 'aria-label': 'Transfer to a human', onclick: () => c.requestHuman() }, icon('headset'), h('span.long', 'Transfer to a human'), h('span.short', 'Transfer'));
   const endBtn = h('button.endc', { type: 'button', onclick: () => c.end() }, icon('end'), 'End call');
   const tagsEl = h('dl.tags2'); const stageBar = h('div.stagebar'); const tl = h('ol.tl'); const tlSub = h('p.subt');
   const btc = h('aside.card.btc', { 'aria-label': 'Behind the conversation' }, h('h2', icon('activity'), 'Behind the conversation'), tlSub, stageBar, tagsEl, tl);
+  // On a phone the panel sits below the fold, where judges miss it. This control pulls it up as a
+  // full-width sheet and is hidden on larger screens, where the panel is already beside the call.
+  const btcToggle = h('button.btcbtn', { type: 'button', 'aria-expanded': 'false', 'aria-label': 'Behind the scenes' }, icon('activity'), h('span.lbl', 'Behind'));
+  btcToggle.onclick = () => {
+    const open = btc.classList.toggle('sheet-open');
+    btcToggle.setAttribute('aria-expanded', String(open));
+    if (open) btc.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   function drawHead() {
     const v = c.view ?? {};
@@ -483,10 +512,24 @@ function callScreen(c) {
     const hd = v.handoff;
     if (hd && hd.status !== 'cancelled') {
       const acc = hd.status === 'connected' || hd.status === 'completed';
-      handEl.replaceChildren(h(`div.handover${acc ? '.ok' : ''}`, { role: 'status' }, h('span.ic', icon('headset')),
+      // The moment the agent accepts, the demo moves from the caller's seat to the agent's. The
+      // viewer is told what is about to happen and can stay where they are.
+      if (acc && !c.agentJump && !c.jumpCancelled) {
+        c.agentJump = { at: Date.now() + JUMP_MS, timer: setInterval(() => c.ui.refresh?.(), 300) };
+        setTimeout(() => { if (c.agentJump && !c.jumpCancelled) c.toAgentView(); }, JUMP_MS);
+      }
+      const handParts = [h(`div.handover${acc ? '.ok' : ''}`, { role: 'status' }, h('span.ic', icon('headset')),
         h('div', h('b', acc ? `Agent connected${hd.agentName ? ' · ' + hd.agentName : ''}` : hd.status === 'no_agent' ? 'No agent available' : 'Waiting for a human agent'),
           h('span', acc ? 'A person accepted the handover and can see everything so far.' : hd.status === 'no_agent' ? 'Your details are saved for a callback.' : 'Your case is with the agent team. Open the Agent CRM to accept it as the agent.')),
-        !acc && hd.status !== 'no_agent' ? h('a.btn.sm', { href: `/#/crm/call/${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null));
+        !acc && hd.status !== 'no_agent' ? h('a.btn.sm', { href: `/#/crm/call/${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null),
+        acc && c.agentJump && !c.jumpCancelled
+          ? h('div.jump', { role: 'status' },
+              h('p', h('b', 'Switching to the agent’s screen'), h('span', `You are about to see this same call from the agent’s side — in ${Math.max(0, Math.ceil((c.agentJump.at - Date.now()) / 1000))}s.`)),
+              h('div.row',
+                h('button.btn.sm.mint', { type: 'button', onclick: () => c.toAgentView() }, 'Go now'),
+                h('button.btn.sm.ghost', { type: 'button', onclick: () => c.stayHere() }, 'Stay on the caller’s screen')))
+          : null];
+      handEl.replaceChildren(...handParts.filter(Boolean));
     } else handEl.replaceChildren();
     const banners = [];
     if (c.micDenied && c.voiceReady) banners.push(h('p.banner', 'Microphone blocked — type below. Lily will still answer out loud.'));
@@ -552,7 +595,7 @@ function callScreen(c) {
     demoMini(),
     h('section.call-main', { 'aria-label': 'Live call with Lily' }, head, stage, bannerEl, extras, handEl, consentEl,
       h('section.card.tx', h('div.tx-h', h('h2', 'Live transcript'), h('span.badge.lav', c.voiceReady ? 'Live captions' : 'Typed')), list, secureEl, form),
-      h('div.controls', { role: 'toolbar', 'aria-label': 'Call controls' }, muteBtn, ccBtn, h('span.sp'), humanBtn, endBtn)),
+      h('div.controls', { role: 'toolbar', 'aria-label': 'Call controls' }, muteBtn, ccBtn, btcToggle, h('span.sp'), humanBtn, endBtn)),
     btc));
   drawHead(); drawTranscript(); drawActivity(); refresh();
   if (!c.voiceReady) { c.loadTimeline(); input.focus({ preventScroll: true }); }

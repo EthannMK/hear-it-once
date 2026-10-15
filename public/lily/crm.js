@@ -150,6 +150,21 @@ async function casePage(id, opts = {}) {
   }
 }
 
+/**
+ * Shown once, when the viewer arrives here straight from a call that was just handed over: it says
+ * plainly whose seat they are now in, because the screen changed under them by design.
+ */
+function justJoinedBanner(sessionId) {
+  let flag = null;
+  try { flag = sessionStorage.getItem('hio_joined_as_agent'); } catch { /* private mode */ }
+  if (!flag || !sessionId || flag !== sessionId) return null;
+  try { sessionStorage.removeItem('hio_joined_as_agent'); } catch { /* private mode */ }
+  return h('section.card.joined', { role: 'status' },
+    h('span.badge.dark', K.icon('headset'), 'You are now the agent'),
+    h('p', 'Lily transferred this caller to you. Everything below was written while they were still talking to her — the verified identity, what the bank’s systems returned, and what was already done.'),
+    h('a.btn.sm.ghost', { href: '#/' }, '← Back to the caller’s screen'));
+}
+
 function caseView(w) {
   const cu = w.customer;
   const eff = w.tags.effective;
@@ -165,6 +180,7 @@ function caseView(w) {
       h('div.meta2', h('span', `${eff.category} · ${eff.issueType}`))));
 
   return [
+    justJoinedBanner(w.case.sessionId ?? w.case.session_id ?? null),
     head,
     handoverBar(w),
     h('div.crm-grid2.lead', keyInfo(w), recommendation(w)),

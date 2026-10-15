@@ -237,6 +237,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 12px; border-radius: 22px; background: var(--aub); }
 .controls button { display: inline-flex; gap: 8px; align-items: center; border-radius: 16px; padding: 11px 16px; border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.08); color: #f8f6f1; font-weight: 600; }
 .controls button:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.4); }
+.controls .human .short { display: none; }
 .controls button[aria-pressed='true'].mute { background: var(--coral); color: var(--aub); border-color: var(--coral); }
 .controls button[aria-pressed='true'].cc { background: rgba(117, 101, 232, 0.35); border-color: var(--violet); }
 .controls .sp { flex: 1; }
@@ -513,8 +514,10 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
   .btn, .copy, .ptabs button, .crm-tabs button { min-height: 40px; }
 }
 @media (max-width: 560px) {
-  .controls .mute .lbl, .controls .cc .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .controls .human { font-size: 0.8rem; padding: 9px 10px; }
+  .controls .mute .lbl, .controls .cc .lbl, .controls .btcbtn .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .controls .human { font-size: 0.8rem; padding: 9px 10px; white-space: nowrap; }
+  .controls .human .long { display: none; }
+  .controls .human .short { display: inline; }
   /* Header: brand and language on one row, screens below. */
   .top { flex-wrap: wrap; row-gap: 8px; }
   .top .bank { display: none; }
@@ -649,3 +652,33 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 }
 .dtable tbody th { min-width: 150px; white-space: nowrap; } .dtable tbody th .chip { white-space: nowrap; }
 @media (max-width: 760px) { .dtable tbody th { white-space: normal; } }
+
+/* ---------------------------------------------------------------- handover to the agent's seat */
+/* Shown on the caller's screen once an agent accepts: the demo is about to change seats. */
+.jump { display: grid; gap: 10px; padding: 14px 18px; border-radius: 18px; background: var(--lav); border: 1px solid var(--violet); }
+.jump p { display: grid; gap: 2px; margin: 0; }
+.jump b { color: var(--aub); }
+.jump span { font-size: 0.85rem; color: var(--text-2); }
+.jump .row { display: flex; gap: 8px; flex-wrap: wrap; }
+/* The agent's side says plainly whose seat the viewer is now in. */
+.crm .joined { display: grid; gap: 10px; justify-items: start; border-left: 4px solid var(--violet); }
+.crm .joined p { margin: 0; color: var(--text-2); }
+
+/* "Behind the scenes" is a side panel on a desktop and a sheet on a phone. */
+.btcbtn { display: none; }
+@media (max-width: 900px) {
+  /* The demo numbers stay within reach while on a call: they are read out during the security check. */
+  .judge.in-call > .dmini {
+    order: 0; position: sticky; top: 0; z-index: 25; max-height: 38vh; padding: 10px 12px;
+    box-shadow: 0 8px 20px rgba(30, 24, 60, 0.18);
+  }
+  .judge.in-call > .dmini h2 { font-size: 0.9rem; }
+  .judge.in-call > .dmini p.small { display: none; }
+  .judge.in-call > .dmini .sit { display: none; }
+  .judge.in-call > .dmini ul { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; }
+  .judge.in-call > .dmini li { flex: 0 0 auto; scroll-snap-align: start; min-width: 190px; }
+  /* The panel is reached from the call controls instead of sitting far below the transcript. */
+  .btcbtn { display: inline-flex; align-items: center; gap: 6px; }
+  .judge.in-call .btc { display: none; }
+  .judge.in-call .btc.sheet-open { display: grid; }
+}

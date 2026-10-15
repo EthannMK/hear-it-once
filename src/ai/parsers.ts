@@ -131,13 +131,35 @@ export type YesNo = 'yes' | 'no' | null;
 /** The caller is saying they have not started yet, or asks for a moment to speak. Never a yes or a no. */
 export const LET_ME_TALK = /\b(haven'?t|have not|hasn'?t|did ?n'?t|didn'?t)\s+(said|say|spoken|talked|started|told)\b|\blet me (start|talk|speak|say|explain|finish|tell)\b|\b(wait|hold on|one (moment|second|sec)|give me a (moment|second|sec|minute)|just a (moment|second|sec|minute)|i'?m (about|going) to)\b|\bi (was|am) (about|going) to\b|\bdon'?t (interrupt|cut me)\b|\bstop talking\b/i;
 
+/**
+ * Courtesy that carries no answer: "yes please", "none, thank you", "oo po". Stripped before the
+ * answer is read, so the polite form of an answer is understood as readily as the bare word.
+ */
+const COURTESY = /[\s,]*\b(please|thanks|thank you|thank you so much|thanks a lot|po|na po|ho|sir|ma'?am|miss)\b[\s.,!]*$/i;
+/** "That is everything", said in the many ways callers say it, is a no to "anything else?". */
+const NOTHING_MORE = /^(none|nothing|nothing else|nothing more|that'?s (all|it|everything)|that is (all|it|everything)|i'?m (all )?(done|good|set)|we'?re (done|good|all set)|all (good|set|done)|no more|not (right now|at the moment|for now))\b/;
+/** Clear affirmatives, including the ones callers use in Tagalog and Burmese on a mixed-language call. */
+const AFFIRM = /^(yes|yeah|yep|yup|ya|sure|ok|okay|please do|please|go ahead|go on|carry on|continue|proceed|proceed please|do it|correct|that'?s (right|correct)|that is (right|correct)|right that'?s it|confirm(ed)?|confirm it|absolutely|definitely|of course|affirmative|y|i agree|agreed|i consent|block it|sounds good|oo|opo|sige|tama|tama po|oo nga|ho?pe?ly)\b|^(ဟုတ်|ဟုတ်ကဲ့|ရပါတယ်|လုပ်ပါ)/;
+/** Clear negatives, same idea. "Hindi" is Tagalog for no; it is only read that way on its own. */
+const DENY = /^(no|nope|nah|don'?t|do not|not now|not yet|cancel|stop|never ?mind|i decline|decline|negative|no thanks|no thank you|hindi|hindi po|ayaw|wag|huwag)\b|^(မဟုတ်|မလုပ်ပါနဲ့|မလိုပါ)/;
+
+/**
+ * Read a caller's answer to a yes/no question. Politeness, a trailing courtesy word and the common
+ * ways of saying "that is everything" are all understood; anything genuinely unclear returns null so
+ * the caller is asked again rather than acted upon.
+ */
 export function parseYesNo(text: string): YesNo {
   if (LET_ME_TALK.test(text)) return null;
-  const t = text.trim().toLowerCase().replace(/[.!]+$/, '');
-  if (/^(no|nope|nah|don'?t|do not|not now|not yet|cancel|stop|never ?mind|i decline|decline|no thanks|no thank you)\b/.test(t)) return 'no';
-  if (/^(yes|yeah|yep|yup|sure|ok|okay|please do|please|go ahead|do it|correct|that'?s right|that is right|confirm(ed)?|absolutely|y|i agree|agreed|i consent|block it|sounds good)\b/.test(t)) return 'yes';
+  let t = text.trim().toLowerCase().replace(/[.!]+$/, '');
+  for (let i = 0; i < 3 && COURTESY.test(t); i++) t = t.replace(COURTESY, '').trim();
+  if (!t) return null;
+  if (NOTHING_MORE.test(t) || DENY.test(t)) return 'no';
+  if (AFFIRM.test(t)) return 'yes';
   return null;
 }
+
+/** The caller is closing the call ("that's all, bye", "goodbye", "salamat, bye"). */
+export const FAREWELL = /\b(good ?bye|bye bye|bye for now|bye now|bye|see you|talk to you later|have a (good|great|nice) (day|evening|night)|that'?s all for now)\b[\s.!,]*$/i;
 
 export function isCorrection(text: string): boolean {
   return /^\s*(no,?\s+)?(actually|sorry|i meant|correction|wait|oops|my mistake|not \$?\d)/i.test(text);

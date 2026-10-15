@@ -45,7 +45,7 @@ import { createTicket } from '../crm/crm.ts';
 import { answerFromInfo, NOT_FOUND, NOT_FOUND_AGAIN } from '../kb/bank-info.ts';
 import { THIRD_PARTY, assessContactRisk, checkNationalId, contactChangeKind, parseNationalIdLast4, READ_ALOUD, STEP_UP_MAX_ATTEMPTS, type Assurance, type ContactKind, type Risk } from './security.ts';
 import { sideTalk } from './sidetalk.ts';
-import { LET_ME_TALK } from '../ai/parsers.ts';
+import { FAREWELL, LET_ME_TALK } from '../ai/parsers.ts';
 import { normaliseSpoken } from '../live/speech.ts';
 import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
 
@@ -554,7 +554,7 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
   if (c.stage === 'awaiting_survey') {
     const n = Number(text.match(/[1-5]/)?.[0]);
     // A real question after the rating prompt is a new request, not an answer to the survey.
-    const isRequest = !Number.isFinite(n) && text.trim().split(/\s+/).length >= 3 && parseYesNo(text) !== 'no';
+    const isRequest = !Number.isFinite(n) && text.trim().split(/\s+/).length >= 3 && parseYesNo(text) !== 'no' && !FAREWELL.test(text);
     if (!isRequest) return onSurvey(s, Number.isFinite(n) ? n : null);
     c.stage = 'wrap_up';
   }
@@ -631,6 +631,8 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     case 'wrap_up': {
       // "Let me finish" is a request for time, never an answer to "anything else?".
       if (LET_ME_TALK.test(text)) return say(s, "Of course, go ahead. I'm listening.");
+      // The caller is saying goodbye: close the call rather than leaving it open on a question.
+      if (FAREWELL.test(text)) { say(s, M.GOODBYE); return endCall(s); }
       const yn = parseYesNo(text);
       // A new, supported banking topic in an already verified call is handled here, not handed off.
       if (yn === null && tryGeneralFirst(s, text)) return;
