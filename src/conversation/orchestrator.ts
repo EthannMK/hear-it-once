@@ -100,6 +100,8 @@ export interface CallContext {
   facts?: Facts;
   /** The caller is not pre-identified: the card number they give identifies and verifies them. */
   cardIdentify?: boolean;
+  /** Last general topic answered, so a short follow-up such as "how do I do it at an ATM" keeps its subject. */
+  lastInfoTopic?: string;
   /** Which virtual agent currently has the call (en = Lily, my = Hnin, fil = Maya). */
   agentLang?: string;
   /** How many times in a row the card number could not be read; picks gentler, more specific help each time. */
@@ -653,8 +655,11 @@ const QUESTION_START = /^(what|how|where|when|why|which|who|do you|does|can i|ca
  */
 function tryBankInfo(s: Session, text: string, opts: { allowNotFound: boolean }): boolean {
   const c = s.ctx;
-  const found = answerFromInfo(text);
+  // A short follow-up inherits the subject of the last general answer ("it" means the earlier topic).
+  const followUp = !!c.lastInfoTopic && text.trim().split(/\s+/).length <= 9 && /^(and |so |what about |how |where |can i |do i |is it )/i.test(text.trim());
+  const found = (followUp && answerFromInfo(`${c.lastInfoTopic} ${text}`)) || answerFromInfo(text);
   if (found) {
+    c.lastInfoTopic = found.entry.topic;
     event(s, 'bank_info_answered', { topic: found.entry.id });
     recordKbReference(s.id, { article: { id: found.entry.id } as never, score: 3, reason: 'general bank information' }, redactText(text), { supportsNextStep: false, agentReview: false });
     tl(s, { type: 'kb.info', stage: 'explain', title: `Answered from bank information: ${found.entry.topic}`, detail: 'General information, not specific to this customer.', status: 'ok', source: 'bank information (demo)' });
@@ -674,6 +679,10 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
   const c = s.ctx;
   const combined = c.issue && c.stage === 'clarifying_issue' ? `${c.issue.statement} ${redactText(text)}` : redactText(text);
   const cls = await classify(s, combined);
+  // A general question ("what are your fees", "how do I deposit") is never about this caller's account.
+  // The words "my", "I was charged" or a lost card make it personal, and then the normal flow runs.
+  const personal = /\b(my|mine|i was|i've been|i have been|i got|i lost|i did not|i didn't|i don't recognise|i do not recognise)\b/i.test(text);
+  if (!c.issue && !personal && QUESTION_START.test(text.trim()) && tryBankInfo(s, text, { allowNotFound: false })) { c.unclearCount = 0; return; }
   // General bank questions are answered from the bank information without starting a case.
   if (!cls.issueType && !c.issue && tryBankInfo(s, text, { allowNotFound: true })) { c.unclearCount = 0; return; }
   if (cls.unsupportedTopic && !cls.issueType && !c.issue && tryBankInfo(s, text, { allowNotFound: false })) return;
