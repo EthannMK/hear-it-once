@@ -11,7 +11,8 @@ const location = process.env.GOOGLE_CLOUD_LOCATION ?? 'us-central1';
 if (!project) { console.error('Set GOOGLE_CLOUD_PROJECT first (e.g. export GOOGLE_CLOUD_PROJECT=hear-it-once).'); process.exit(2); }
 
 const candidates = process.argv.slice(2).length ? process.argv.slice(2) : [
-  process.env.LIVE_MODEL,
+  'gemini-3.8-live',
+  'gemini-3.1-flash-live-preview',
   'gemini-live-2.5-flash-native-audio',
   'gemini-live-2.5-flash-preview-native-audio-09-2025',
   'gemini-2.5-flash-native-audio-preview-09-2025',
@@ -19,14 +20,12 @@ const candidates = process.argv.slice(2).length ? process.argv.slice(2) : [
   'gemini-2.0-flash-live-preview-04-09',
 ].filter((m, i, a): m is string => !!m && a.indexOf(m) === i);
 
-const ai = new GoogleGenAI({ vertexai: true, project, location });
-
-async function tryModel(model: string): Promise<string> {
+async function tryModel(model: string, location: string): Promise<string> {
   return new Promise<string>((resolve) => {
     let done = false;
     const finish = (r: string) => { if (!done) { done = true; resolve(r); } };
     const timer = setTimeout(() => finish('TIMEOUT (no setup response in 12s)'), 12000);
-    ai.live.connect({
+    new GoogleGenAI({ vertexai: true, project, location }).live.connect({
       model,
       config: { responseModalities: [Modality.AUDIO] },
       callbacks: {
@@ -39,12 +38,17 @@ async function tryModel(model: string): Promise<string> {
   });
 }
 
-console.log(`Project ${project}, location ${location}\n`);
-let first: string | null = null;
+// Newer models are sometimes served only from the global location, so each model is tried in a few locations.
+const locations = [...new Set([location, 'global', 'us-central1'])];
+console.log(`Project ${project}\n`);
+let first: { model: string; location: string } | null = null;
 for (const m of candidates) {
-  const r = await tryModel(m);
-  console.log(`${r === 'OK' ? '  OK  ' : ' FAIL '} ${m}${r === 'OK' ? '' : '  → ' + r}`);
-  if (r === 'OK' && !first) first = m;
+  for (const loc of locations) {
+    const r = await tryModel(m, loc);
+    console.log(`${r === 'OK' ? '  OK  ' : ' FAIL '} ${m} @ ${loc}${r === 'OK' ? '' : '  → ' + r}`);
+    if (r === 'OK' && !first) first = { model: m, location: loc };
+    if (r === 'OK') break;
+  }
 }
-console.log(first ? `\nUse it:  gcloud run services update hear-it-once --region=asia-southeast1 --update-env-vars=LIVE_MODEL=${first}` : '\nNo candidate worked. Check the Vertex AI API is enabled, the location, and the model list in Vertex AI Studio.');
+console.log(first ? `\nBest working model: ${first.model} in ${first.location}\nUse it:  gcloud run services update hear-it-once --region=asia-southeast1 --update-env-vars=LIVE_MODEL=${first.model},GOOGLE_CLOUD_LOCATION=${first.location}` : '\nNo candidate worked. Check the Vertex AI API is enabled, the location, and the model list in Vertex AI Studio.');
 process.exit(first ? 0 : 1);

@@ -8,7 +8,7 @@ export const GREETING_NOTICE =
   '[DEMO: this is a simulation with synthetic data — nothing is actually recorded and no real account, card or payment is affected.]';
 
 export const GREETING =
-  "Hello, you've reached Northstar Bank Card Services. I'm an AI assistant — a computer program, not a person. You can ask to speak to a person at any time. In a few words, how can I help you today?";
+  "Thank you for calling Northstar Bank. My name is Lily, and I'm an AI assistant, not a person. You can ask for a person at any time. How may I help you today?";
 
 export const CLARIFY_ISSUE = 'Just so I get this right — which of these is closest to what you need help with?';
 
@@ -101,12 +101,22 @@ export function describeOutcome(op: Operation): string {
   return `… Status: ${op.status}.`;
 }
 
+/** Closing script: recap the outcome first, then offer more help, then the survey, then the goodbye. */
 export const ANYTHING_ELSE = 'Is there anything else I can help you with today?';
+/** Hold protocol: ask first, say why and for how long, and thank the caller afterwards. */
+export const HOLD_ASK = (why: string) => `May I place you on a brief hold while ${why}? It should take less than a minute.`;
+export const HOLD_BACK = 'Thank you for holding.';
+export const HOLD_CHECKIN = 'Thank you for your patience. I am still working on this. Would you like to keep holding, or shall I arrange a callback?';
+export const TRANSFER_INTRO = (reason: string) => `I'm going to connect you with a specialist who can help with ${reason}. I've passed on everything we discussed, so you won't need to repeat it. May I place you on a brief hold while they pick up?`;
 export const SURVEY = 'Before you go: on a scale of 1 (poor) to 5 (excellent), how would you rate this call? [Demo survey — simulated]';
-export const GOODBYE = 'Thank you for calling. Goodbye.';
+export const GOODBYE = 'Thank you for calling Northstar Bank. Have a wonderful day. Goodbye.';
 
 export const CARD_ACK = 'Thank you. Let me check that for you.';
-export const CARD_WRONG_LENGTH = (n: number) => `I caught ${n} digit${n === 1 ? '' : 's'}, but I need all 16. Could you read the full card number again, slowly?`;
+export const CARD_TOO_MANY = (n: number) => `I heard ${n} digits, which is more than 16. Let's start again. Could you read the card number slowly, a few digits at a time?`;
+export const cardProgress = (digits: string, said: string) => {
+  const left = 16 - digits.length;
+  return `Thank you. So far I have ${said}. That's ${digits.length} of 16 digits. Please read the remaining ${left}.`;
+};
 export const cardReadback = (last4: string, updated: boolean) => `${updated ? "No problem, I've updated it. " : 'Thank you. '}I heard a card number ending in ${[...last4].join(' ')}. Is that correct?`;
 export const CARD_REASK = 'No problem. Please read the 16-digit card number again.';
 export const CARD_YESNO = 'Sorry, was that number correct? Please say yes or no, or read the card number again.';

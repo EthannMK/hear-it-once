@@ -55,11 +55,37 @@ describe('card read-back', () => {
     expect(c.session().verification_status).toBe('verified');
   });
 
-  it('asks for the full number when only part is heard, without using an attempt', async () => {
-    const { c } = await start();
-    await c.say('four zero zero one 4001 0000');
-    expect(last(c)).toMatch(/need all 16/);
+  it('keeps digits read in groups of four across turns and tells the caller what it has', async () => {
+    const { c, pan } = await start();
+    const d = pan.replace(/\D/g, '');
+    await c.say(d.slice(0, 4));
+    expect(last(c)).toMatch(/4 of 16|That's 4 of 16/);
+    expect(c.view.cardCapture).toMatchObject({ count: 4, confirming: false });
+    await c.say(d.slice(4, 8)); await c.say(d.slice(8, 12));
+    expect(c.view.cardCapture.digits).toBe(d.slice(0, 12).replace(/(.{4})(?=.)/g, '$1 '));
     expect(all("SELECT 1 FROM verification_attempts WHERE session_id = ? AND step = 'card'", [c.sessionId])).toHaveLength(0);
+    await c.say(d.slice(12));
+    expect(last(c)).toMatch(/Is that correct/);
+    expect(c.view.cardCapture.confirming).toBe(true);
+    await c.say('yes');
+    expect(c.session().verification_status).toBe('verified');
+    expect(c.view.cardCapture).toBeNull();
+  });
+
+  it('lets the caller correct just the last four digits', async () => {
+    const { c, pan } = await start();
+    const d = pan.replace(/\D/g, '');
+    await c.say(wrong(pan));
+    await c.say(d.slice(12));
+    expect(last(c)).toMatch(/updated it/);
+    await c.say('yes');
+    expect(c.session().verification_status).toBe('verified');
+  });
+
+  it('asks the caller to start again when too many digits are heard', async () => {
+    const { c } = await start();
+    await c.say('4001 0000 4001 0000 4001');
+    expect(last(c)).toMatch(/more than 16/);
   });
 
   it('never stores the full number in the transcript, context or audit', async () => {
@@ -97,5 +123,14 @@ describe('verification service', () => {
     const [a, b] = await Promise.all([c.say('yes'), c.say('yes, that is right')]).catch((e) => [e, e]);
     void a; void b;
     expect(calls).toBe(1);
+  });
+});
+
+describe('speech transcript chunks', () => {
+  it('treats a single spoken digit as content, not as unclear speech', async () => {
+    const { estimateAsrConfidence } = await import('../../src/live/tools.ts');
+    expect(estimateAsrConfidence('4')).toBeUndefined();
+    expect(estimateAsrConfidence('4 9 9 9')).toBeUndefined();
+    expect(estimateAsrConfidence('<noise>')).toBeLessThan(0.55);
   });
 });

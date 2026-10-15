@@ -4,7 +4,7 @@
  * locally it is `gcloud auth application-default login`. No API key or token ever reaches the
  * browser; the browser only talks to this server's WebSocket.
  */
-import { GoogleGenAI, Modality, Type, type LiveServerMessage, type Session } from '@google/genai';
+import { Behavior, EndSensitivity, GoogleGenAI, Modality, Type, type LiveServerMessage, type Session } from '@google/genai';
 import { env } from '../config/env.ts';
 import { log } from '../lib/logger.ts';
 import type { LiveConnectOptions, LiveProvider, LiveSession, LiveToolDecl } from './provider.ts';
@@ -23,47 +23,106 @@ function declarations(tools: LiveToolDecl[]) {
   }));
 }
 
+/** Models that failed to open a session in this process. They are skipped on later calls so a missing model costs one try, not one per call. */
+const unusable = new Set<string>();
+
+/** 3.x Live models call tools asynchronously by default. This app waits for each tool result, so ask for blocking calls. */
+const needsBlocking = (model: string) => /(^|[-/])3[.-]\d/.test(model);
+
 export class GeminiLiveProvider implements LiveProvider {
   readonly name = 'gemini-live-vertex';
-  readonly model: string;
-  private readonly ai: GoogleGenAI;
+  /** The model that last opened a session (or the first candidate before any call). */
+  model: string;
+  /** Entries are `model` or `model@location` (for models served only from another location, e.g. `gemini-3.8-live@global`). */
+  private readonly candidates: string[];
+  private readonly clients = new Map<string, GoogleGenAI>();
+  private readonly project: string;
 
   constructor(project: string) {
     const e = env();
-    this.model = e.LIVE_MODEL;
-    this.ai = new GoogleGenAI({ vertexai: true, project, location: e.GOOGLE_CLOUD_LOCATION });
+    // LIVE_MODEL may list several IDs, best first. The first one this project can open is used.
+    this.candidates = e.LIVE_MODEL.split(',').map((m) => m.trim()).filter(Boolean);
+    this.model = this.candidates[0];
+    this.project = project;
+  }
+
+  private client(location: string): GoogleGenAI {
+    let c = this.clients.get(location);
+    if (!c) { c = new GoogleGenAI({ vertexai: true, project: this.project, location }); this.clients.set(location, c); }
+    return c;
   }
 
   async connect(opts: LiveConnectOptions): Promise<LiveSession> {
+    const order = [...this.candidates.filter((m) => !unusable.has(m)), ...this.candidates.filter((m) => unusable.has(m))];
+    let lastError: Error | null = null;
+    for (const entry of order) {
+      const [model, loc] = entry.split('@');
+      const location = loc || env().GOOGLE_CLOUD_LOCATION;
+      // Full config first (session resumption, context compression), then the minimal one for models that reject extras.
+      for (const rich of [true, false]) {
+        try {
+          const s = await this.open(model, location, opts, rich);
+          this.model = model;
+          unusable.delete(entry);
+          return s;
+        } catch (err) {
+          lastError = err as Error;
+          log.warn('live model could not open a session', { model, location, rich, error: lastError.message });
+        }
+      }
+      unusable.add(entry);
+    }
+    throw lastError ?? new Error('No Live model is configured');
+  }
+
+  private async open(model: string, location: string, opts: LiveConnectOptions, rich: boolean): Promise<LiveSession> {
     const { events } = opts;
     let closed = false;
-    const session: Session = await this.ai.live.connect({
-      model: this.model,
+    let ready = false;
+    let settle: { ok: () => void; fail: (e: Error) => void } = { ok: () => {}, fail: () => {} };
+    const setup = new Promise<void>((resolve, reject) => { settle = { ok: resolve, fail: reject }; });
+    const fns = declarations(opts.tools).map((d) => (needsBlocking(model) ? { ...d, behavior: Behavior.BLOCKING } : d));
+    const session: Session = await this.client(location).live.connect({
+      model,
       config: {
         responseModalities: [Modality.AUDIO],
         systemInstruction: opts.systemInstruction,
-        tools: [{ functionDeclarations: declarations(opts.tools) }],
+        tools: [{ functionDeclarations: fns }],
         // Transcripts of both sides drive the on-screen conversation and consent checks.
         inputAudioTranscription: {},
         outputAudioTranscription: {},
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: env().LIVE_VOICE } } },
+        // Callers pause between groups of digits. A longer silence window stops Lily cutting in mid-number.
+        realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW, silenceDurationMs: 1100 } },
+        ...(rich ? { sessionResumption: {}, contextWindowCompression: { slidingWindow: {} } } : {}),
       },
       callbacks: {
         onmessage: (m: LiveServerMessage) => {
+          if (m.setupComplete) { ready = true; settle.ok(); }
           try {
             handle(m, events);
           } catch (err) {
             events.onError(err as Error);
           }
         },
-        onerror: (e) => events.onError(new Error(e?.message || 'Live connection error')),
+        onerror: (e) => { const err = new Error(e?.message || 'Live connection error'); if (!ready) settle.fail(err); else events.onError(err); },
         onclose: (e) => {
+          if (!ready) return settle.fail(new Error(e?.reason || 'closed before setup'));
           if (closed) return;
           closed = true;
           events.onClose(e?.reason || 'closed');
         },
       },
     });
+    const timer = setTimeout(() => settle.fail(new Error('Live setup timed out')), 9000);
+    try {
+      await setup;
+    } catch (err) {
+      try { session.close(); } catch { /* already closed */ }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     return {
       sendAudio: (b64) => session.sendRealtimeInput({ audio: { data: b64, mimeType: 'audio/pcm;rate=16000' } }),
       sendText: (text) => session.sendRealtimeInput({ text }),

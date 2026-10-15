@@ -40,7 +40,8 @@ const EnvSchema = z.object({
   GOOGLE_CLOUD_PROJECT: z.string().optional(),
   /** Live models are regional; keep this independent of the Cloud Run region. */
   GOOGLE_CLOUD_LOCATION: z.string().default('us-central1'),
-  LIVE_MODEL: z.string().default('gemini-live-2.5-flash-native-audio'),
+  /** One model ID or a comma-separated list, best first. The first one the project can open is used. */
+  LIVE_MODEL: z.string().default('gemini-3.8-live,gemini-3.8-live@global,gemini-live-2.5-flash-native-audio'),
   LIVE_VOICE: z.string().default('Aoede'),
 });
 

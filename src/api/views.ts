@@ -6,7 +6,7 @@ import { env } from '../config/env.ts';
 import { all, get, parseJson } from '../db/db.ts';
 import { nowIso } from '../lib/clock.ts';
 import { ACTION_LABELS, ISSUE_LABELS, OP_STATUS_LABELS, HANDOFF_REASON_LABELS } from '../conversation/format.ts';
-import type { CallContext } from '../conversation/orchestrator.ts';
+import { cardCaptureFor, type CallContext } from '../conversation/orchestrator.ts';
 import { loadSnapshot } from '../retrieval/retrieval.ts';
 import { opHistory, opsForSession } from '../actions/action-service.ts';
 import { SOURCE_LABELS } from '../workflows/common.ts';
@@ -58,7 +58,7 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
       'SELECT demo_display, expires_at FROM otp_challenges WHERE session_id = ? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1',
       [sessionId],
     );
-    if (otp?.demo_display && otp.expires_at > nowIso()) demoDevice = { label: 'SIMULATED registered phone — demo only', message: `Your Card Services passcode is ${otp.demo_display}. Never share it with anyone who calls you.`, code: otp.demo_display, expiresAt: otp.expires_at };
+    if (otp?.demo_display && otp.expires_at > nowIso()) demoDevice = { label: 'SIMULATED registered phone — demo only', message: `Your Northstar Bank passcode is ${otp.demo_display}. Never share it with anyone who calls you.`, code: otp.demo_display, expiresAt: otp.expires_at };
   }
   const choices = ctx.pending?.kind === 'choice' ? ctx.pending.options : ctx.pending?.kind === 'yes_no' ? [{ id: '__yes', label: 'Yes' }, { id: '__no', label: 'No' }] : [];
 
@@ -130,6 +130,8 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
       : null,
     handoff: h ? { id: h.id, status: h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[String(h.reason)] ?? h.reason, agentName: h.agent_name ?? null, requestedAt: h.requested_at, connectedAt: h.connected_at, fallback: h.fallback, simulated: true } : null,
     demoDevice,
+    // What the caller's own words were heard as, so they can see whether the number was captured correctly. Caller view only; never stored.
+    cardCapture: opts.audience === 'caller' ? cardCaptureFor(sessionId) : null,
   };
 }
 

@@ -74,11 +74,12 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
-    reply.header('X-Frame-Options', 'DENY');
+    // Same-origin framing only: the customer page embeds the agent desk next to the call.
+    reply.header('X-Frame-Options', 'SAMEORIGIN');
     reply.header('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)');
     reply.header(
       'Content-Security-Policy',
-      `default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ${wsOrigin(req.headers.host)}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+      `default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ${wsOrigin(req.headers.host)}; frame-ancestors 'self'; base-uri 'none'; form-action 'self'`,
     );
     if (req.url.startsWith('/api/')) reply.header('Cache-Control', 'no-store');
     return payload;

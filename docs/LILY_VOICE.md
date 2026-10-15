@@ -38,7 +38,7 @@ Browser speaker ◀24 kHz PCM16─┘                         │  tool calls
 | `LIVE_PROVIDER` | `gemini` | `gemini`, `off`, or `scripted` (tests only) |
 | `GOOGLE_CLOUD_PROJECT` | — | e.g. `hear-it-once` |
 | `GOOGLE_CLOUD_LOCATION` | `us-central1` | Vertex AI region for Live |
-| `LIVE_MODEL` | `gemini-live-2.5-flash-native-audio` | **Confirm the current Live model ID in Vertex AI Studio and set it here** |
+| `LIVE_MODEL` | `gemini-3.8-live,gemini-3.8-live@global,gemini-live-2.5-flash-native-audio` | Comma-separated, best first. The first the project can open is used; a model that cannot open is skipped for later calls. `model@location` sets a location for one entry. Gemini 3.8 Live may need access to be granted on Vertex AI |
 | `LIVE_VOICE` | `Aoede` | Prebuilt voice |
 
 ## Enable on Cloud Run
@@ -72,3 +72,9 @@ Card collection reads back only the last four digits, waits for a yes, and uses 
 End Call and Transfer are separate. Ending is idempotent, saves the transcript, then runs analysis, which has its own status (`pending`, `ready`, `failed`) and can be retried with `POST /api/calls/:id/analysis/retry`. A transfer marks the call `transferring` until an agent accepts. Lifecycle comes from `lifecycle()`: active, transferring, connected_to_agent, completed, failed.
 `GET /api/calls/:id/transcript` returns every segment in order with a count. `GET /api/calls/:id/analysis` returns summary, reason, resolution, suggested solutions and knowledge. Agents see ended calls under "Ended calls" in `/agent.html`.
 Resolution values: resolved, partially_resolved, unresolved, escalated, informational.
+
+## Call script, card capture, agent desk
+Lily follows a call-centre script (in `lily.ts`): opening, active listening, verification reason, hold protocol (ask permission, say why and how long, thank on return, check in if long), transfer, empathy and closing. The bank name is Northstar Bank.
+Card digits are collected across turns and kept in memory only. Each turn says what was heard. When all 16 are heard the last four are read back and the caller confirms or corrects (a four digit reply replaces the last four). The call screen shows "What Lily heard". The live session uses a longer end-of-speech window so a pause between digit groups does not cut the caller off.
+When a handover starts, the customer page embeds the agent desk (`/agent.html?embed=1&session=ID`), signed in as the demo agent and focused on that call. Pages are framed same-origin only.
+From Google ADK we use the same ideas the Live toolkit documents: session resumption, context window compression, tool calls with blocking behaviour, transcription of both sides and input guardrails. ADK has no built-in call-centre script or hold features, so those are written here.
