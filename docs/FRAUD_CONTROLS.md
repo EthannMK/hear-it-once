@@ -38,6 +38,20 @@ only to the verified cardholder.
 Tests: `tests/e2e/fraud-controls.test.ts`, `tests/e2e/security.test.ts`, `tests/e2e/live.test.ts`,
 and the generated-conversation invariants in `tests/fuzz/`.
 
+## Checks a human agent can run
+
+An agent who has taken the call can send a one-time passcode to the customer's registered number
+and ask them to type it into the private box on their screen. The agent is told where it went,
+masked, and whether it matched. The agent never sees the code, and the result is recorded against
+the agent who asked for it. This is the control for FP-02: on anything sensitive, the person on the
+line is checked by something they hold, not by something they know.
+
+The check is kept apart from the call's own verification, so a failed attempt cannot undo a
+verification the call already passed, and a passed one does not silently raise the caller's level.
+
+Route: `POST /api/handoffs/:id/identity-check`. Code: `src/verification/agent-check.ts`.
+Tests: `tests/e2e/agent-check.test.ts`.
+
 ## Where the data comes from
 
 Nothing in this system is answered from the open web or from the model's own memory.

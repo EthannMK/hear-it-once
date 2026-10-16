@@ -17,6 +17,7 @@ import { nowIso } from '../lib/clock.ts';
 import { newId } from '../lib/ids.ts';
 import { redactText } from '../lib/redact.ts';
 import { audit, type Actor } from '../audit/audit.ts';
+import { readCheck } from '../verification/agent-check.ts';
 import { emitTimeline, listTimeline } from '../events/timeline.ts';
 import { caseEvent, updateCase } from '../cases/case-service.ts';
 import { buildResolution } from '../api/brief.ts';
@@ -451,6 +452,11 @@ export function caseWorkspace(caseId: string, actor: Actor) {
     recommendations,
     actions,
     handoff: meta.handoff ? { ...meta.handoff, reasonLabel: HANDOFF_REASON_LABELS[meta.handoff.reason] ?? meta.handoff.reason, agentName: staffName(meta.handoff.agent_id) } : null,
+    // The agent's own passcode check: where it went and whether it matched. Never the code.
+    agentCheck: (() => {
+      const ck = readCheck(c.session_id);
+      return ck ? { status: ck.status, deliveredTo: ck.deliveredTo, attempts: ck.attempts, requestedByName: ck.requestedByName } : null;
+    })(),
     tickets,
     timeline: buildTimeline(c, s),
     transcript,

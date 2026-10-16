@@ -25,6 +25,7 @@ import { AnthropicIntentModel, RulesIntentModel, detectSignals, extractSlots, ty
 import { isCorrection, normaliseMerchant, parseOrdinalChoice, parseYesNo } from '../ai/parsers.ts';
 import { analyseCall } from '../analysis/analysis.ts';
 import { initialVerification, isVerified, startVerification, submitVerificationAnswer, type VerificationState } from '../verification/verification.ts';
+import { readCheck, submitAgentCheck, type AgentCheck } from '../verification/agent-check.ts';
 import { retrieveFacts, loadSnapshot, sourceData, type Snapshot } from '../retrieval/retrieval.ts';
 import { WORKFLOWS } from '../workflows/index.ts';
 import type { Choice, ProposedAction, WorkflowCtx, WorkflowResult, WorkflowState } from '../workflows/types.ts';
@@ -103,6 +104,10 @@ export interface CallContext {
   cardIdentify?: boolean;
   /** Last general topic answered, so a short follow-up such as "how do I do it at an ATM" keeps its subject. */
   lastInfoTopic?: string;
+  /** The one reference the caller is given for an escalation: spoken on the call and shown on screen. */
+  escalationRef?: string | null;
+  /** A passcode check the human agent asked for. Kept here so it survives a reconnect. */
+  agentCheck?: AgentCheck;
   /** How many times a person was offered after an unclear request, so the wording changes. */
   offerCount?: number;
   /** How many times the bank information had no answer, so the wording alternates. */
@@ -550,7 +555,11 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
   c.lastUtterance = { hash: h, at: nowIso(), prompt: sha256(c.lastPrompt ?? '') };
 
 
-  if (c.stage === 'handoff') return onWhileInHandoff(s);
+  if (c.stage === 'handoff') {
+    const answered = await answerAgentCheck(s, text);
+    if (answered) return;
+    return onWhileInHandoff(s);
+  }
   if (c.stage === 'awaiting_survey') {
     const n = Number(text.match(/[1-5]/)?.[0]);
     // A real question after the rating prompt is a new request, not an answer to the survey.
@@ -674,6 +683,18 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     default:
       return;
   }
+}
+
+/**
+ * A reference a person can hear once and write down: spoken in short groups, with the prefix read as
+ * a word. "TCK-HTL7WHGY" becomes "ticket H T L 7, W H G Y", which survives a phone line.
+ */
+function sayRef(ref: string | null): string {
+  if (!ref) return 'not yet assigned';
+  const [prefix, body] = ref.includes('-') ? [ref.slice(0, ref.indexOf('-')), ref.slice(ref.indexOf('-') + 1)] : ['', ref];
+  const word = prefix === 'TCK' ? 'ticket ' : prefix === 'CASE' ? 'case ' : prefix ? `${prefix} ` : '';
+  const groups = (body.match(/.{1,4}/g) ?? [body]).map((g) => g.split('').join(' '));
+  return `${word}${groups.join(', ')}`;
 }
 
 /* ------------------------------------------------------------------------- issue capture */
@@ -955,7 +976,7 @@ function collectCard(s: Session, text: string): string | null {
   // One or two stray digits inside an ordinary sentence ("alert(1)", "option 2") are not part of a card number.
   const rawDigits = text.replace(/\D/g, '');
   const digits = rawDigits.length < 4 && text.replace(/[^a-z]/gi, '').length >= 8 ? '' : rawDigits;
-  const yn = parseYesNo(text);
+  const yn = parseYesNo(text, { answeringPrompt: true });
   const note = (title: string, detail: string) => tl(s, { type: 'verification.readback', stage: 'verify', title, detail, status: 'info', source: 'identity verification' });
   const readback = (d: string, updated: boolean) => {
     captures.set(s.id, { digits: d, confirming: true });
@@ -1247,7 +1268,8 @@ async function onWorkflowText(s: Session, text: string): Promise<void> {
   }
   if (p?.kind === 'yes_no') {
     if (/\b(check|status|did it work|worked|go through|went through)\b/i.test(text) && p.purpose === 'reconcile') return onReconcile(s);
-    const yn = parseYesNo(text);
+    // "Right" answers a question Lily just asked, but never stands in for agreeing to be transferred.
+    const yn = parseYesNo(text, { answeringPrompt: p.purpose !== 'offer_agent' });
     if (yn && p.purpose === 'offer_agent' && WEAK_YES.test(text.trim())) return say(s, 'Just to be sure, would you like me to connect you with a person? Please say yes or no.');
     if (!yn) { if (answerAside(s, text)) return; return unclear(s, 'Sorry — was that a yes or a no?'); }
     return onYesNoAnswer(s, p, yn === 'yes');
@@ -1653,11 +1675,15 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
   else await retrieveGuidance(s, 'handoff', ['handoff'], { agentReview: true });
   const r = await requestHandoff({ sessionId: s.id, caseId: c.caseId, reason, reasonDetail: detail, actor: s.actor, correlationId: s.correlationId, missing: opts.missing, priority: opts.priority });
   // The case gets a ticket automatically, so the team that picks it up has one record to work from.
+  // Its number is also the one reference the caller is given, said out loud and shown on screen:
+  // two different numbers for one escalation is worse than none.
+  let ticketRef: string | null = null;
   try {
-    createTicket(c.caseId, ASSISTANT, { type: reason === 'complaint' ? 'complaint' : 'escalation', reason: `${HANDOFF_REASON_LABELS[reason] ?? reason}: ${detail}`.slice(0, 300), requestKey: `handoff:${r.handoffId}` });
+    ticketRef = createTicket(c.caseId, ASSISTANT, { type: reason === 'complaint' ? 'complaint' : 'escalation', reason: `${HANDOFF_REASON_LABELS[reason] ?? reason}: ${detail}`.slice(0, 300), requestKey: `handoff:${r.handoffId}` }).ticket.id;
   } catch (e) {
     log.warn('ticket creation failed', { sessionId: s.id, error: (e as Error).message });
   }
+  c.escalationRef = ticketRef ?? c.caseId;
   tl(s, { type: 'handoff.prepared', stage: 'handoff', title: 'Agent brief prepared from the recorded call', detail: `Reason: ${detail}. The brief carries the customer’s words, verification status, facts, actions and next step.`, status: 'ok', source: 'handoff', ref: r.handoffId });
   refreshTags(s, 'handoff');
   if (r.status === 'queued') {
@@ -1665,17 +1691,38 @@ async function handoff(s: Session, reason: string, detail: string, message: stri
     c.stage = 'handoff';
     run("UPDATE call_sessions SET outcome = 'handed_off' WHERE id = ?", [s.id]);
     // One message per handoff: the reason line and the queue facts together, never two separate texts.
-    say(s, message ? `${message} You are number ${r.queuePosition ?? 1} in the queue, and the agent will see your case ${c.caseId}.` : `${M.TRANSFER_INTRO('this')} Thank you for your patience. You are number ${r.queuePosition ?? 1} in the queue, and the agent will see your case ${c.caseId}.`, message ? undefined : 'system');
+    say(s, message ? `${message} You are number ${r.queuePosition ?? 1} in the queue. Your reference number is ${sayRef(c.escalationRef)} — the agent will have it in front of them.` : `${M.TRANSFER_INTRO('this')} Thank you for your patience. You are number ${r.queuePosition ?? 1} in the queue. Your reference number is ${sayRef(c.escalationRef)}.`, message ? undefined : 'system');
   } else {
     say(
       s,
-      `I'm sorry — no agents are available right now, so I can't transfer you. I've saved everything on case ${c.caseId} and requested a callback to your registered phone number. Nothing further has been changed on your account.`,
+      `I'm sorry — no agents are available right now, so I can't transfer you. I've saved everything under reference ${sayRef(c.escalationRef)} and requested a callback to your registered phone number. Nothing further has been changed on your account.`,
       'system',
     );
     event(s, 'handoff_fallback_callback', { handoffId: r.handoffId });
     tl(s, { type: 'handoff.no_agent', stage: 'handoff', title: 'No agent available — callback requested instead', detail: 'Nothing is described as transferred. The case holds everything for the callback.', status: 'failed', source: 'agent desk', ref: r.handoffId });
     return endCall(s, 'ended_unresolved');
   }
+}
+
+/**
+ * The agent on the call asked for a passcode. The digits the caller types answer that check and
+ * nothing else: they are never stored, and the call's own verification state is left alone.
+ */
+async function answerAgentCheck(s: Session, text: string): Promise<boolean> {
+  const c = s.ctx;
+  const check = readCheck(s.id);
+  if (check?.status !== 'awaiting') return false;
+  const code = text.replace(/\D/g, '');
+  if (code.length < 4) return false;
+  const r = await submitAgentCheck(s.id, code);
+  if (!r) return false;
+  // Keep the result on the context this turn is holding: the turn's own save happens after this
+  // and would otherwise write back the state the turn started with.
+  c.agentCheck = r.check;
+  if (r.outcome === 'passed') say(s, 'Thank you — that passcode matched, and the agent can see the check passed.', 'system');
+  else if (r.outcome === 'locked') say(s, "That passcode didn't match, and we've run out of attempts. The agent will take it from here.", 'system');
+  else say(s, "That passcode didn't match. Please check the message and type it again.", 'system');
+  return true;
 }
 
 async function onWhileInHandoff(s: Session): Promise<void> {
