@@ -204,8 +204,18 @@ function handoverBar(w) {
   if (hd.status === 'connected') {
     const input = h('input', { type: 'text', maxlength: '500', placeholder: mine ? 'Message the customer…' : 'Accepted by another agent', 'aria-label': 'Message to the customer', disabled: !mine });
     const outcome = h('select', { 'aria-label': 'Outcome', disabled: !mine }, h('option', { value: 'resolved' }, 'Resolved'), h('option', { value: 'follow_up_required' }, 'Follow-up needed'), h('option', { value: 'unresolved' }, 'Not resolved'));
+    // Re-checking identity mid-call: the passcode goes to the customer's registered number and they
+    // type it in. The agent sees where it went and whether it matched, never the code itself.
+    const ck = C.ws?.agentCheck ?? null;
+    const checkRow = h('div.idcheck',
+      h('button.btn.sm', { type: 'button', disabled: !mine || ck?.status === 'awaiting', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/identity-check`, { method: 'POST', body: {} }), 'Passcode sent. Ask the customer to type it in.') },
+        K.icon('lock'), ck?.status === 'awaiting' ? 'Passcode sent — waiting' : 'Send a passcode to verify'),
+      ck
+        ? h(`span.ck.${ck.status}`, ck.status === 'passed' ? `Verified by passcode (${ck.deliveredTo})` : ck.status === 'failed' ? `Passcode check failed after ${ck.attempts} attempts` : `Sent to ${ck.deliveredTo} — ask them to read nothing out, just type it`)
+        : h('span.ck', 'For anything sensitive, check who you are speaking to.'));
     return h('section.crm-hand.on', K.icon('headset'),
       h('div', h('b', `You’re with the customer${hd.agentName && !mine ? ` (${hd.agentName})` : ''}`), h('span', 'Messages you send appear in the customer’s conversation.'),
+        checkRow,
         h('form.row3', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (!v) return; act(e.submitter, () => api(`/api/handoffs/${hd.id}/message`, { method: 'POST', body: { text: v } }), 'Message sent.'); } }, input, h('button.btn', { type: 'submit', disabled: !mine }, 'Send'))),
       h('div.row3', outcome, h('button.btn.dark', { type: 'button', disabled: !mine, onclick: async (e) => { const b = e.currentTarget; if (await confirmBox({ title: 'Finish this handover?', body: 'The outcome you chose is recorded on the case.', confirmLabel: 'Finish' })) act(b, () => api(`/api/handoffs/${hd.id}/complete`, { method: 'POST', body: { outcome: outcome.value, notes: '', customerRepeatedIssue: false } }), 'Handover completed.'); } }, 'Finish')));
   }

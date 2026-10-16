@@ -64,8 +64,8 @@ function header(active) {
     h('a.brand', { href: '#/' }, h('span.mk', icon('wave')), h('b', 'Hear It Once')),
     h('span.badge.lav.bank', S.bank),
     h('nav.tabs', { 'aria-label': 'Screens' },
-      h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Talk to Lily'),
-      h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Agent CRM')),
+      h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Bank customer'),
+      h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Bank agent')),
     h('span.grow'),
   );
 }
@@ -503,7 +503,9 @@ function callScreen(c) {
     const bits = [];
     const cc = v.cardCapture;
     if (cc) bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.cap', 'What Lily heard'), h('b.num', group4(String(cc.digits ?? '').replace(/ /g, '').padEnd(16, '•'))), h('p', cc.confirming ? 'All 16 digits heard. Say “yes” if this is right, or say the correct digits.' : `${cc.count ?? 0} of 16 digits. Keep reading the card number from the test-data panel.`)));
-    if (v.demoDevice) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Test passcode: '), 'read this to Lily'), h('b.mono', v.demoDevice.code)));
+    // During an agent's own check the code is typed into the private box, never read out loud.
+    const forAgent = v.agentCheck?.status === 'awaiting';
+    if (v.demoDevice) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Test passcode: '), forAgent ? `type this in the box below for ${v.agentCheck.requestedByName}` : 'read this to Lily'), h('b.mono', v.demoDevice.code)));
     extras.replaceChildren(...bits);
     // Consent (buttons work in typing mode; in voice mode just say yes or no).
     if (v.proposal && v.pending?.kind === 'consent') {
@@ -527,6 +529,7 @@ function callScreen(c) {
         h('div', h('b', acc ? `Agent connected${hd.agentName ? ' · ' + hd.agentName : ''}` : hd.status === 'no_agent' ? 'No agent available' : 'Waiting for a human agent'),
           h('span', acc ? 'A person accepted the handover and can see everything so far.' : hd.status === 'no_agent' ? 'Your details are saved for a callback.' : 'Your case is with the agent team. Open the Agent CRM to accept it as the agent.')),
         !acc && hd.status !== 'no_agent' ? h('a.btn.sm.primary.cta', { href: `/#/crm/call/${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null),
+        hd.reference ? h('p.ref', h('span', 'Your reference'), h('b', hd.reference)) : null,
         acc && c.agentJump && !c.jumpCancelled
           ? h('div.jump', { role: 'status' },
               h('p', h('b', 'Switching to the agent’s screen'), h('span', `You are about to see this same call from the agent’s side — in ${Math.max(0, Math.ceil((c.agentJump.at - Date.now()) / 1000))}s.`)),

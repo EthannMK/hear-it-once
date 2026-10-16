@@ -104,3 +104,41 @@ describe('the handover is spoken, not just shown (C-01)', () => {
     expect(said[0].text).toMatch(/won't need to repeat anything/i);
   });
 });
+
+describe('more ways of saying yes (from judge testing)', () => {
+  it('"uu" is a yes wherever "oo" is', () => {
+    expect(parseYesNo('uu')).toBe('yes');
+    expect(parseYesNo('uu po')).toBe('yes');
+  });
+
+  it('"right" answers a question Lily just asked, but is not an answer on its own', () => {
+    expect(parseYesNo('right')).toBeNull();
+    expect(parseYesNo('right', { answeringPrompt: true })).toBe('yes');
+    expect(parseYesNo('exactly', { answeringPrompt: true })).toBe('yes');
+    // Still not a yes when it is the caller thinking aloud.
+    expect(parseYesNo('right, so what happened was my card got declined')).toBeNull();
+  });
+
+  it('"right" confirms the card read-back', async () => {
+    const { allProfileCards } = await import('../../src/live/profiles.ts');
+    const pan = allProfileCards().find((p) => p.id === 'jamie-tan')!.cardNumber!.replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1 ');
+    const c = new Caller(app);
+    await c.start(undefined, { channel: 'voice_browser' });
+    await c.say('I lost my card');
+    await c.say(pan);
+    expect(c.lastAssistant()).toMatch(/1 1 3 3/);
+    await c.say('right');
+    const { get } = await import('../../src/db/db.ts');
+    expect(get<any>('SELECT verification_status FROM call_sessions WHERE id = ?', [c.sessionId]).verification_status).toBe('verified');
+  });
+
+  it('a soft word never stands in for agreeing to be transferred', async () => {
+    const c = new Caller(app);
+    await c.start('S09');
+    await c.say('Something is off with my stuff');
+    await c.say("It's the thing from before, you know");
+    await c.say('hmm');
+    const { all } = await import('../../src/db/db.ts');
+    expect(all<any>('SELECT id FROM handoffs WHERE session_id = ?', [c.sessionId])).toHaveLength(0);
+  });
+});

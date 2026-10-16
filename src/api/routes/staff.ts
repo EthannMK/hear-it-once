@@ -1,6 +1,7 @@
 /** Staff API: demo sign-in, agent console, cases, calls, audit, KPIs, QA review. */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { startAgentCheck } from '../../verification/agent-check.ts';
 import { env } from '../../config/env.ts';
 import { policy } from '../../config/policy.ts';
 import { PILOT_TARGETS } from '../../config/targets.ts';
@@ -89,6 +90,19 @@ export function registerStaffRoutes(app: FastifyInstance): void {
   app.post<{ Params: { id: string } }>('/api/handoffs/:id/accept', async (req) => {
     const p = requirePermission(req.staff, 'handoff.accept');
     return acceptHandoff(req.params.id, { ...staffActor(p), id: p.userId });
+  });
+
+  /**
+   * Send a one-time passcode to the customer and ask them to type it in. The reply says where it
+   * went, masked; the code is never returned to staff.
+   */
+  app.post<{ Params: { id: string } }>('/api/handoffs/:id/identity-check', async (req) => {
+    const p = requirePermission(req.staff, 'handoff.message');
+    const h = get<{ session_id: string }>('SELECT session_id FROM handoffs WHERE id = ?', [req.params.id]);
+    if (!h) throw new AppError('NOT_FOUND', 'Handoff not found.');
+    const name = get<{ display_name: string }>('SELECT display_name FROM staff_users WHERE id = ?', [p.userId])?.display_name ?? 'The agent';
+    const check = await startAgentCheck(h.session_id, { ...staffActor(p), id: p.userId }, name.replace(/ \(demo agent\)$/, ''));
+    return { deliveredTo: check.deliveredTo, status: check.status, requestedAt: check.requestedAt };
   });
 
   app.post<{ Params: { id: string } }>('/api/handoffs/:id/message', async (req) => {

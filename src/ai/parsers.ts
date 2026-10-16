@@ -139,7 +139,7 @@ const COURTESY = /[\s,]*\b(please|thanks|thank you|thank you so much|thanks a lo
 /** "That is everything", said in the many ways callers say it, is a no to "anything else?". */
 const NOTHING_MORE = /^(none|nothing|nothing else|nothing more|that'?s (all|it|everything)|that is (all|it|everything)|i'?m (all )?(done|good|set)|we'?re (done|good|all set)|all (good|set|done)|no more|not (right now|at the moment|for now))\b/;
 /** Clear affirmatives, including the ones callers use in Tagalog and Burmese on a mixed-language call. */
-const AFFIRM = /^(yes|yeah|yep|yup|ya|sure|ok|okay|please do|please|go ahead|go on|carry on|continue|proceed|proceed please|do it|correct|that'?s (right|correct)|that is (right|correct)|right that'?s it|confirm(ed)?|confirm it|absolutely|definitely|of course|affirmative|y|i agree|agreed|i consent|block it|sounds good|oo|opo|sige|tama|tama po|oo nga|ho?pe?ly)\b|^(ဟုတ်|ဟုတ်ကဲ့|ရပါတယ်|လုပ်ပါ)/;
+const AFFIRM = /^(yes|yeah|yep|yup|ya|sure|ok|okay|please do|please|go ahead|go on|carry on|continue|proceed|proceed please|do it|correct|that'?s (right|correct)|that is (right|correct)|right that'?s it|confirm(ed)?|confirm it|absolutely|definitely|of course|affirmative|y|i agree|agreed|i consent|block it|sounds good|oo|uu|oo po|opo|sige|tama|tama po|oo nga|ho?pe?ly)\b|^(ဟုတ်|ဟုတ်ကဲ့|ရပါတယ်|လုပ်ပါ)/;
 /** Clear negatives, same idea. "Hindi" is Tagalog for no; it is only read that way on its own. */
 const DENY = /^(no|nope|nah|don'?t|do not|not now|not yet|cancel|stop|never ?mind|i decline|decline|negative|no thanks|no thank you|hindi|hindi po|ayaw|wag|huwag)\b|^(မဟုတ်|မလုပ်ပါနဲ့|မလိုပါ)/;
 
@@ -148,13 +148,26 @@ const DENY = /^(no|nope|nah|don'?t|do not|not now|not yet|cancel|stop|never ?min
  * ways of saying "that is everything" are all understood; anything genuinely unclear returns null so
  * the caller is asked again rather than acted upon.
  */
-export function parseYesNo(text: string): YesNo {
+/**
+ * Words that mean yes only in answer to a question. On their own they are usually the caller
+ * thinking aloud ("right..., so what happened was"), which is why they are not in AFFIRM. They
+ * count where a yes/no question is on the table and the answer is not a consent to act.
+ */
+const SOFT_AFFIRM = /^(right|that'?s? right|alright|all right|aye|mm ?hmm|uh ?huh|exactly|indeed|spot on)\b/;
+
+/**
+ * Read a caller's answer to a yes/no question. `answeringPrompt` is set where the back end has just
+ * asked one and the answer only confirms what was read back; it is never set for consent to an
+ * action or for the offer of a person, where a deliberate yes is the point.
+ */
+export function parseYesNo(text: string, opts: { answeringPrompt?: boolean } = {}): YesNo {
   if (LET_ME_TALK.test(text)) return null;
   let t = text.trim().toLowerCase().replace(/[.!]+$/, '');
   for (let i = 0; i < 3 && COURTESY.test(t); i++) t = t.replace(COURTESY, '').trim();
   if (!t) return null;
   if (NOTHING_MORE.test(t) || DENY.test(t)) return 'no';
   if (AFFIRM.test(t)) return 'yes';
+  if (opts.answeringPrompt && SOFT_AFFIRM.test(t)) return 'yes';
   return null;
 }
 

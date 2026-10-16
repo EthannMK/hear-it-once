@@ -3,6 +3,7 @@
  * the demo OTP is shown only to the caller and only in DEMO_MODE.
  */
 import { env } from '../config/env.ts';
+import { readCheck } from '../verification/agent-check.ts';
 import { all, get, parseJson } from '../db/db.ts';
 import { nowIso } from '../lib/clock.ts';
 import { ACTION_LABELS, ISSUE_LABELS, OP_STATUS_LABELS, HANDOFF_REASON_LABELS } from '../conversation/format.ts';
@@ -53,15 +54,21 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
   const facts = (k: string) => [...new Set(events.filter((e) => e.event_type === `fact_${k}`).map((e) => parseJson<{ text: string; source: string }>(e.detail_json, { text: '', source: '' })))].filter((v, i, a) => a.findIndex((x) => x.text === v.text) === i);
 
   let demoDevice: Record<string, unknown> | null = null;
-  if (opts.audience === 'caller' && env().DEMO_MODE && ctx.stage === 'awaiting_otp') {
-    const otp = get<{ demo_display: string | null; expires_at: string }>(
-      'SELECT demo_display, expires_at FROM otp_challenges WHERE session_id = ? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1',
-      [sessionId],
-    );
+  const agentCheck = readCheck(sessionId);
+  const awaitingAgentCode = agentCheck?.status === 'awaiting';
+  if (opts.audience === 'caller' && env().DEMO_MODE && (ctx.stage === 'awaiting_otp' || awaitingAgentCode)) {
+    // The challenge this screen is actually waiting on. Two passcodes issued in the same second
+    // sort equally by time, so an agent's new code could otherwise be shown as the old one.
+    const otp = awaitingAgentCode
+      ? get<{ demo_display: string | null; expires_at: string }>('SELECT demo_display, expires_at FROM otp_challenges WHERE id = ? AND consumed_at IS NULL', [agentCheck!.challengeId])
+      : get<{ demo_display: string | null; expires_at: string }>(
+          'SELECT demo_display, expires_at FROM otp_challenges WHERE session_id = ? AND consumed_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1',
+          [sessionId],
+        );
     if (otp?.demo_display && otp.expires_at > nowIso()) demoDevice = { label: 'SIMULATED registered phone — demo only', message: `Your Northstar Bank passcode is ${otp.demo_display}. Never share it with anyone who calls you.`, code: otp.demo_display, expiresAt: otp.expires_at };
   }
   // Private entry: the screen offers a box that types straight to the back end, never into the transcript.
-  const secureEntry = ctx.stage === 'awaiting_card' ? { kind: 'card', label: 'Card number', hint: '16 digits', maxLength: 24 } : ctx.stage === 'stepup' ? { kind: 'nrc', label: 'NRC last 4 digits', hint: '4 digits', maxLength: 20 } : null;
+  const secureEntry = awaitingAgentCode ? { kind: 'agent_otp', label: 'Passcode from the agent', hint: '6 digits', maxLength: 8 } : ctx.stage === 'awaiting_card' ? { kind: 'card', label: 'Card number', hint: '16 digits', maxLength: 24 } : ctx.stage === 'stepup' ? { kind: 'nrc', label: 'NRC last 4 digits', hint: '4 digits', maxLength: 20 } : null;
   const choices = ctx.pending?.kind === 'choice' ? ctx.pending.options : ctx.pending?.kind === 'yes_no' ? [{ id: '__yes', label: 'Yes' }, { id: '__no', label: 'No' }] : [];
 
   const handedOff = !!h && h.status !== 'cancelled';
@@ -130,7 +137,8 @@ export function buildCallView(sessionId: string, opts: { audience: 'caller' | 's
     case: c
       ? { id: c.id, status: c.status, resolutionStatus: c.resolution_status, summary: verified || opts.audience === 'staff' ? c.summary : null, nextSteps: c.next_steps, riskFlags: parseJson(c.risk_flags_json, []), recurring: !!c.recurring_issue, previousCaseIds: parseJson(c.previous_case_ids_json, []) }
       : null,
-    handoff: h ? { id: h.id, status: h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[String(h.reason)] ?? h.reason, agentName: h.agent_name ?? null, requestedAt: h.requested_at, connectedAt: h.connected_at, fallback: h.fallback, simulated: true } : null,
+    handoff: h ? { id: h.id, status: h.status, reason: h.reason, reasonLabel: HANDOFF_REASON_LABELS[String(h.reason)] ?? h.reason, agentName: h.agent_name ?? null, requestedAt: h.requested_at, connectedAt: h.connected_at, fallback: h.fallback, reference: ctx.escalationRef ?? null, simulated: true } : null,
+    agentCheck: agentCheck ? { status: agentCheck.status, deliveredTo: agentCheck.deliveredTo, requestedByName: agentCheck.requestedByName, attempts: agentCheck.attempts } : null,
     demoDevice,
     secureEntry,
     // What the caller's own words were heard as, so they can see whether the number was captured correctly. Caller view only; never stored.
