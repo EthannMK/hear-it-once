@@ -7,3 +7,4 @@ coverage/
 
 # Saved fuzz failures (replay with FUZZ_ONLY=<seed>)
 tests/fuzz/failures/seed-*.json
+__pycache__/
