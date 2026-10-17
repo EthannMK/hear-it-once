@@ -6,7 +6,9 @@
 # wrote during calls are kept (set RESET_EVENTS=1 to clear them).
 #
 # Optional inputs:
-#   Kaggle:  put your API token in ~/.kaggle/kaggle.json (kaggle.com > Settings > Create New Token).
+#   Kaggle:  kaggle.com > Settings > API Tokens > Generate New Token, then save it with
+#              echo 'YOUR_TOKEN' > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
+#            (a legacy ~/.kaggle/kaggle.json also works).
 #            Without it the Kaggle history step is skipped and everything else still works.
 #   SKIP_EMBEDDINGS=1  skip the Vertex AI embedding model (knowledge search then uses keywords).
 set -euo pipefail
@@ -44,8 +46,8 @@ step "3/8 Exporting the synthetic Northstar seed"
 
 step "4/8 Kaggle card transactions (Sparkov, CC0)"
 KAGGLE_OK=0
-if [ -f "$HOME/.kaggle/kaggle.json" ] || [ -n "${KAGGLE_USERNAME:-}" ]; then
-  python3 -m pip install --user --quiet kaggle
+if [ -f "$HOME/.kaggle/access_token" ] || [ -f "$HOME/.kaggle/access_token.txt" ] || [ -n "${KAGGLE_API_TOKEN:-}" ] || [ -f "$HOME/.kaggle/kaggle.json" ] || [ -n "${KAGGLE_USERNAME:-}" ]; then
+  python3 -m pip install --user --quiet --upgrade "kaggle>=1.8.0"
   if [ ! -f "$WORK/fraudTrain.csv" ]; then
     KAGGLE_BIN="$(python3 -m site --user-base)/bin/kaggle"; command -v kaggle >/dev/null && KAGGLE_BIN=kaggle
     "$KAGGLE_BIN" datasets download kartik2112/fraud-detection -f fraudTrain.csv -p "$WORK" --force
@@ -53,7 +55,7 @@ if [ -f "$HOME/.kaggle/kaggle.json" ] || [ -n "${KAGGLE_USERNAME:-}" ]; then
   fi
   python3 -I "$HERE/prepare_kaggle.py" "$WORK/fraudTrain.csv" "$WORK/export" && KAGGLE_OK=1
 else
-  echo "No Kaggle token found (~/.kaggle/kaggle.json). Skipping Kaggle history."
+  echo "No Kaggle token found (~/.kaggle/access_token or ~/.kaggle/kaggle.json). Skipping Kaggle history."
 fi
 
 step "5/8 Bitext retail-banking FAQ (Hugging Face, CDLA-Sharing-1.0)"

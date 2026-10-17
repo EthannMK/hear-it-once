@@ -68,7 +68,9 @@ What is never loaded:
 
 ## Set it up (Cloud Shell, about 10 minutes)
 
-1. Optional: put your Kaggle API token in `~/.kaggle/kaggle.json` (kaggle.com → Settings → Create New Token).
+1. Optional: on kaggle.com → Settings → **API Tokens → Generate New Token**, copy it, and in Cloud Shell run
+   `mkdir -p ~/.kaggle && echo 'YOUR_TOKEN' > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token`
+   (a legacy `kaggle.json` in `~/.kaggle/` also works).
    Without it, the Kaggle step is skipped.
 2. From the repository root:
    ```bash
