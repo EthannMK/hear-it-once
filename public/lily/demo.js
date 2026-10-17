@@ -67,14 +67,23 @@ function draw() {
       h('p.dm-foot', 'Pick an account above and press ', h('b', 'Start a call as this persona'), '. This page stays open behind it.')));
 }
 
-/** One demo account: who they are, what is true of them, and their transactions behind a fold. */
-function person(x) {
+/**
+ * One demo account: who they are, what is true of them, and their transactions behind a fold.
+ *
+ * The same card is used twice — on this page, and pinned beside the live call once a persona has
+ * been chosen (see personaRail in app.js). Keeping it one function is deliberate: a judge who has
+ * memorised the layout here should not have to re-read a different one during the call, and the
+ * card number has to be copyable in both places.
+ *
+ * `compact` drops the launch button and tightens the spacing for the narrow rail.
+ */
+export function person(x, { compact = false } = {}) {
   const txns = x.recentTransactions ?? [];
   const extra = [
     ...(x.declines ?? []).map((d) => `Declined: ${d.merchant} ${d.amount} on ${d.at} — ${d.reason}`),
     ...(x.fees ?? []).map((f) => `Fee: ${f.type} ${f.amount} on ${f.at}${f.reversed ? ' (reversed)' : ''}`),
   ];
-  return h('article.dm-card',
+  return h(`article.dm-card${compact ? '.compact' : ''}`,
     h('div.dm-top',
       h('div', h('h3', x.name), h('p.small.muted', x.blurb)),
       h(`span.badge.${x.cardStatus === 'active' ? 'mint' : 'coral'}`, `Card ${x.cardStatus}`)),
@@ -86,14 +95,16 @@ function person(x) {
     h('p.dm-sit', h('b', 'What is true of this account: '), x.situation),
     x.tryPhrase ? h('p.dm-try', h('span', 'Try saying'), h('q', x.tryPhrase), copy(x.tryPhrase, `${x.name} phrase`)) : null,
     extra.length ? h('ul.dm-extra', extra.map((e) => h('li', e))) : null,
-    h('button.btn.dark.dm-go', {
+    compact ? null : h('button.btn.dark.dm-go', {
       type: 'button',
-      title: 'Copies the card number and opens the customer screen in a new tab',
+      title: 'Copies the card number and opens the call in a new tab, with this account pinned beside it',
       onclick: async (e) => {
         const btn = e.currentTarget;
         try { await navigator.clipboard.writeText(x.cardNumber); btn.replaceChildren(K.icon('check'), 'Card number copied — opening…'); }
         catch { btn.replaceChildren(K.icon('phone'), 'Opening…'); K.toast('Copy is not available here; copy the card number by hand.'); }
-        window.open('/#/', '_blank', 'noopener');
+        // The persona travels with the call, so the new tab shows this account beside Lily and
+        // nobody has to keep a second tab open to read their own card number back.
+        window.open(`/?persona=${encodeURIComponent(x.id)}#/`, '_blank', 'noopener');
         setTimeout(() => btn.replaceChildren(K.icon('phone'), 'Start a call as this persona'), 2200);
       },
     }, K.icon('phone'), 'Start a call as this persona'),
