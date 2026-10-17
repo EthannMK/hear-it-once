@@ -7,7 +7,7 @@ import { customerHistory } from '../../adapters/bigquery/replica.ts';
 import { requirePermission, staffActor } from '../../auth/rbac.ts';
 import { audit } from '../../audit/audit.ts';
 import { ask, backOfficeEngine, draftReply, draftWrapUp, insights } from '../../backoffice/backoffice.ts';
-import { caseIdForSession, caseWorkspace, latestCaseId, createTicket, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
+import { addCallTag, caseIdForSession, caseKnowledge, caseWorkspace, latestCaseId, createTicket, removeCallTag, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
 
 const Id = z.string().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/);
 
@@ -88,6 +88,11 @@ export function registerCrmRoutes(app: FastifyInstance): void {
     return history ? { ...w, history } : w;
   });
 
+  app.get<{ Params: { id: string } }>('/api/crm/cases/:id/knowledge', async (req) => {
+    const p = requirePermission(req.staff, 'case.read');
+    return caseKnowledge(Id.parse(req.params.id), staffActor(p));
+  });
+
   app.patch<{ Params: { id: string } }>('/api/crm/cases/:id', async (req) => {
     const p = requirePermission(req.staff, 'case.update');
     return editCase(Id.parse(req.params.id), { ...staffActor(p), id: p.userId }, req.body ?? {});
@@ -103,6 +108,16 @@ export function registerCrmRoutes(app: FastifyInstance): void {
     const r = createTicket(Id.parse(req.params.id), { ...staffActor(p), id: p.userId }, req.body ?? {});
     reply.code(r.duplicate ? 200 : 201);
     return r;
+  });
+
+  app.post<{ Params: { id: string } }>('/api/crm/cases/:id/tags', async (req) => {
+    const p = requirePermission(req.staff, 'case.update');
+    return addCallTag(Id.parse(req.params.id), { ...staffActor(p), id: p.userId }, req.body ?? {});
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/crm/cases/:id/tags', async (req) => {
+    const p = requirePermission(req.staff, 'case.update');
+    return removeCallTag(Id.parse(req.params.id), { ...staffActor(p), id: p.userId }, req.body ?? {});
   });
 
   app.patch<{ Params: { id: string } }>('/api/crm/tickets/:id', async (req) => {

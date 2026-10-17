@@ -608,10 +608,12 @@ describe('virtual agents by language (Lily, Hnin, Maya)', () => {
     await sleep(60);
   }
 
-  it('every call starts in English with Lily and the default voice', async () => {
+  it('every call starts in English with Lily and her own voice', async () => {
     const { session } = await connect('S01');
     expect(session.opts.systemInstruction).toMatch(/^You are Lily,/);
-    expect(session.opts.voice).toBeUndefined();
+    // English is named explicitly like every other language: a model that is not told which voice
+    // to use falls back to its own default, which on several Live models is a different speaker.
+    expect(session.opts.voice).toBe('Aoede');
     expect(session.opts.systemInstruction).toMatch(/do NOT switch by yourself/);
     expect(session.opts.tools.map((t) => t.name)).toContain(TOOL.switch);
   });
@@ -705,7 +707,7 @@ describe('virtual agents by language (Lily, Hnin, Maya)', () => {
     await moveTo(session, 'my');
     await moveTo(ScriptedProvider.last, 'en');
     expect(ScriptedProvider.last.opts.systemInstruction).toMatch(/^You are Lily,/);
-    expect(ScriptedProvider.last.opts.voice).toBeUndefined();
+    expect(ScriptedProvider.last.opts.voice).toBe('Aoede');
   });
 
   it('the other agents keep Lily by name only where she is a team member', async () => {
