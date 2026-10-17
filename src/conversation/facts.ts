@@ -36,6 +36,7 @@ export type FactKey =
   | 'date'
   | 'transaction'
   | 'consent'
+  | 'contact_reachable'
   | 'resolution';
 
 export interface Fact {
@@ -63,6 +64,7 @@ export const FACT_LABELS: Record<FactKey, string> = {
   date: 'Date',
   transaction: 'Transaction',
   consent: 'Consent',
+  contact_reachable: 'Contact reachable',
   resolution: 'Outcome',
 };
 

@@ -44,6 +44,16 @@ export const ASK_CARD = "To confirm it's you, I need your 16-digit card number. 
 export const askCardKnowing = (last4: string) => `Thanks, I've noted it's the card ending ${[...last4].join(' ')}. To confirm it's you, could you read me the full 16-digit card number? A few digits at a time is fine.`;
 /** The customer gave the full number before the security step: confirm it rather than asking again. */
 export const cardReadbackEarlier = (last4: string) => `You gave me your card number a moment ago, the one ending in ${[...last4].join(' ')}. Shall I use that one?`;
+/** The card number cannot be read out: the second approved route, said plainly and without blame. */
+export const OFFER_ALT_CHECK =
+  "That's all right — you don't need the card in front of you. I can check it's you another way: your 8-digit customer number, then your date of birth, and a passcode I'll text to the phone number on your account. What's your customer number? If you don't have it to hand, just say so and I'll bring in a colleague.";
+/** Neither route can work on this call: a person takes it from here, with everything already captured. */
+export const ALT_NOT_POSSIBLE =
+  "Thanks for telling me. Without the card to read from, and with no way to text you a passcode, I can't confirm it's you safely on this line — and I won't cut that corner with your account. I'm bringing in a colleague who can verify you another way. They'll have everything you've told me, so you won't need to go through it again.";
+/** Lost card and lost phone together: say what is being done and what is not, with nothing claimed. */
+export const LOST_CARD_AND_PHONE =
+  "I'm sorry — losing both at once is horrible. Here's what I can do. I can't block the card until I know it's you, and I can't text a passcode to a phone you no longer have, so I'm passing you to a colleague now, as a priority, to verify you and stop the card. Meanwhile, if you can get to the app on another device you can freeze the card yourself under Cards, and the helpline takes lost-card reports at any hour.";
+
 export const ASK_CUSTOMER_NUMBER = "I couldn't match the number you're calling from to an account. Please tell me your 8-digit customer number.";
 export const otpSent = (to: string) => `Thank you. I've sent a 6-digit passcode by text message to your registered phone (${to}). Please read me the code when it arrives.`;
 export const VERIFIED = "Thanks, you're verified. Let me take a look.";

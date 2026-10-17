@@ -716,3 +716,90 @@ describe('virtual agents by language (Lily, Hnin, Maya)', () => {
     expect(p).not.toMatch(/You are Lily/);
   });
 });
+
+/**
+ * One spoken answer, one line in the transcript. Lily says the back end's words aloud in her own
+ * phrasing, so while a tool that writes the transcript is running, what she says is not stored as
+ * well: that is what put every line in twice.
+ */
+describe('a turn is recorded once', () => {
+  const assistantTexts = (sessionId: string) =>
+    all<{ text: string }>("SELECT text FROM conversation_turns WHERE session_id = ? AND speaker IN ('assistant','system') ORDER BY seq", [sessionId]).map((r) => r.text);
+  const duplicates = (texts: string[]) => {
+    const seen = new Map<string, number>();
+    for (const t of texts) { const k = t.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 60); if (k.length > 12) seen.set(k, (seen.get(k) ?? 0) + 1); }
+    return [...seen.entries()].filter(([, n]) => n > 1);
+  };
+
+  it('does not store Lily speaking while the banking tool is still running', async () => {
+    const { client, sessionId, session } = await connect('S02');
+    session.heard('I lost my card');
+    const call = session.toolCall(TOOL.banking, { topic: 'lost card' });
+    // She acknowledges out loud and her turn completes before the back end has answered.
+    session.said('I am sorry, that is stressful. Let us get the card blocked quickly. First I just need to check it is you.');
+    session.turnComplete();
+    await client.waitFor((m) => m.type === 'turns' && m.turns.some((t: any) => /date of birth/i.test(t.text)), 6000);
+    expect(session.toolResponses.some((r) => r.id === call.id)).toBe(true);
+    const texts = assistantTexts(sessionId);
+    expect(duplicates(texts), `duplicates: ${JSON.stringify(duplicates(texts))}`).toHaveLength(0);
+    expect(texts.filter((t) => /stressful/i.test(t))).toHaveLength(1);
+  });
+
+  it('does not store her spoken version of the back end’s reply after the tool returns', async () => {
+    const { client, sessionId, session } = await connect('S02');
+    await customerSaysThenTool(client, session, 'I lost my card');
+    session.said('Okay, first I need to check it is you. What is your date of birth?');
+    session.turnComplete();
+    await sleep(60);
+    const texts = assistantTexts(sessionId);
+    expect(duplicates(texts)).toHaveLength(0);
+    expect(texts.filter((t) => /date of birth/i.test(t))).toHaveLength(1);
+  });
+
+  it('keeps what she says when a tool failed and wrote nothing, so there is no silent gap', async () => {
+    const { sessionId, session } = await connect('S02');
+    session.toolCall('unknown_tool_name', {});
+    const start = Date.now();
+    while (!session.toolResponses.length && Date.now() - start < 4000) await sleep(25);
+    expect((session.toolResponses.at(-1)!.response as any).ok).toBe(false);
+    session.said('Sorry, I could not complete that. Let me get a colleague for you.');
+    session.turnComplete();
+    await sleep(80);
+    expect(assistantTexts(sessionId).some((t) => /could not complete that/i.test(t))).toBe(true);
+  });
+
+  it('keeps what she says on her own, with no tool behind it', async () => {
+    const { sessionId, session } = await connect('S02');
+    session.said('Hello, you are through to Northstar Bank. I am Lily, an AI assistant. How can I help?');
+    session.turnComplete();
+    await sleep(60);
+    expect(assistantTexts(sessionId).some((t) => /AI assistant/i.test(t))).toBe(true);
+  });
+
+  it('a second tool call for the same turn does not repeat the back end’s words', async () => {
+    const { client, sessionId, session } = await connect('S02');
+    await customerSaysThenTool(client, session, 'I lost my card');
+    const before = assistantTexts(sessionId).length;
+    // A repeated call with nothing new to act on must not produce another copy of the prompt.
+    const n = session.toolResponses.length;
+    session.toolCall(TOOL.banking, { topic: 'lost card' });
+    const start = Date.now();
+    while (session.toolResponses.length === n && Date.now() - start < 6000) await sleep(25);
+    await sleep(60);
+    expect(assistantTexts(sessionId)).toHaveLength(before);
+    expect(duplicates(assistantTexts(sessionId))).toHaveLength(0);
+  });
+
+  it('a barge-in over the back end’s reply leaves one copy of it', async () => {
+    const { client, sessionId, session } = await connect('S02');
+    await customerSaysThenTool(client, session, 'I lost my card');
+    // She starts saying the back end's reply aloud and the customer talks over her.
+    session.said('Okay, first I need to check it is you. What is your');
+    session.interrupt();
+    // The barge-in is recorded through the orchestrator; let that finish before the test ends.
+    await client.waitFor((m) => m.type === 'interrupted', 3000);
+    await sleep(500);
+    expect(duplicates(assistantTexts(sessionId))).toHaveLength(0);
+    expect(assistantTexts(sessionId).filter((t) => /date of birth/i.test(t))).toHaveLength(1);
+  });
+});

@@ -45,6 +45,7 @@ export const HANDOFF_REASON_LABELS: Record<string, string> = {
   communication_breakdown: 'Communication breakdown / distress',
   assistant_unavailable: 'Assistant unavailable (fallback)',
   customer_accepted_offer: 'Customer accepted offer of an agent',
+  credential_unavailable: 'Customer cannot supply the security credential',
 };
 
 export function formatMoney(minor: number, currency = 'USD'): string {
