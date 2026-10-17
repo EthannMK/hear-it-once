@@ -64,19 +64,32 @@ function icon(name) {
 }
 
 /* ------------------------------------------------------------------ chrome */
+/**
+ * The header carries two names, and they are not the same kind of thing: Hear It Once is the
+ * product, Northstar Bank is the bank running it. They are set apart by size, weight and the word
+ * "for" rather than sitting side by side as equals, so nobody reads the demo as a bank's own app or
+ * the product as belonging to one bank.
+ */
 function header(active) {
   const callLive = S.call && !S.call.ended;
   return h('header.top',
-    h('a.brand', { href: '#/' }, h('img.mk', { src: '/brand/hear-it-once.svg', alt: '', width: '32', height: '32' }), h('b', 'Hear It Once')),
-    h('span.badge.lav.bank', h('img.bankmk', { src: '/brand/northstar.svg', alt: '', width: '16', height: '16' }), S.bank),
+    h('a.brand', { href: '#/', title: 'Hear It Once — the product' },
+      h('img.mk', { src: '/brand/hear-it-once.svg', alt: '', width: '34', height: '34' }),
+      h('b', 'Hear It Once')),
+    h('span.forbank', { title: `${S.bank} is the bank in this demo. It is fictional.` },
+      h('span.fw', 'for'),
+      h('img.bankmk', { src: '/brand/northstar.svg', alt: '' }),
+      h('span.bn', S.bank)),
     h('nav.tabs', { 'aria-label': 'Screens' },
       h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Bank customer'),
       h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Bank agent'),
-      h('a', { href: '#/safety', 'aria-current': active === 'safety' ? 'page' : null, title: 'The off switch, the audit log and what the policy is built against' }, '3 · Safety')),
+      h('a', { href: '#/guardrails', 'aria-current': active === 'guardrails' ? 'page' : null, title: 'How the safeguards are built, as a walkthrough' }, '3 · Guardrails')),
     h('span.grow'),
   );
 }
 function render(active, ...nodes) {
+  // Anything still animating on the screen being replaced is stopped first.
+  for (const el of root.querySelectorAll('[data-loop]')) el.stopLoop?.();
   root.replaceChildren(header(active), ...nodes.flat().filter(Boolean));
 }
 let toastT = 0;
@@ -148,100 +161,142 @@ function demoMini() {
     h('ul', S.cards.map((x) => h('li', h('b', x.name), h('span.pan', group4(x.cardNumber)), one(x.cardNumber, `${x.name} card number`), h('span.sit', x.situation), h('span.nrc', `NRC last 4: ${x.nrcLast4}`), one(x.nrcLast4, `${x.name} NRC digits`)))));
 }
 
-/** The three things a judge does, read beside the animation rather than below the page. */
-function steps() {
-  return h('div.flow',
-    h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. For card matters Lily asks for your card number.')),
-    h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each step as it happens: checks, decisions, actions and handover.')),
-    h('div.card', h('b', h('span', '3'), 'Agent CRM'), h('p', 'Ask for a person or end the call and the screen moves to the agent’s case workspace: summary, verified facts, suggested next step and tickets.')));
-}
-
 /**
- * The hero animation: a statement, one row of which is the reason for the call. It lifts, is
- * checked, and is settled with a tick, over and over. It is drawn rather than written because the
- * same drawing runs on the call itself, from the real state: idle, listening, working, done.
+ * THE HERO: one call, played out.
  *
- * Everything is a rounded rectangle, a line or a circle, so it stays sharp at any size and costs
- * almost nothing to run.
+ * Three stages — understand, act, connect — are what the product actually does, so the animation
+ * shows a conversation reaching each one rather than describing them. The card plays the messages,
+ * the waveform follows the voice, and the stage reached lights up in the rail beside it.
+ *
+ * It is interactive because a judge watching a loop has no way to go back to the part they missed:
+ * hovering a stage previews it, clicking pins it until clicked again, and the loop picks up where it
+ * was left. Keyboard works the same way. Honouring prefers-reduced-motion means no loop at all — the
+ * first stage is shown and the rail still works.
  */
-function heroLedger() {
-  const cv = h('canvas.ledger', { role: 'img', 'aria-label': 'A statement row is found, checked and settled' });
-  const ctx = cv.getContext('2d');
-  const PHASES = ['idle', 'listening', 'working', 'done'];
-  const DUR = 2600;
-  // Start part-way through, so the page opens on the row being checked rather than on four grey
-  // lines: the first impression is the product working.
-  const start = performance.now() - 2600 * 2.2;
-  let raf = 0;
-  const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
-  function frame(now) {
-    const dpr = Math.min(2, devicePixelRatio || 1);
-    const w = cv.clientWidth, hh = cv.clientHeight;
-    if (!w || !hh) { raf = requestAnimationFrame(frame); return; }
-    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(hh * dpr); }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, hh);
-    // On a live call the phase comes from the call itself; on the home page it cycles.
-    const live = S.call && !S.call.ended ? S.call.phase : null;
-    const t = (now - start) % (DUR * PHASES.length);
-    const phase = live ? (live === 'speaking' ? 'done' : live === 'processing' ? 'working' : live === 'hearing' || live === 'listening' ? 'listening' : 'idle') : PHASES[Math.floor(t / DUR)];
-    const p = (t % DUR) / DUR;
-    drawLedger(ctx, w, hh, phase, p, now, ease);
-    raf = requestAnimationFrame(frame);
-  }
-  raf = requestAnimationFrame(frame);
-  cv.addEventListener('DOMNodeRemovedFromDocument', () => cancelAnimationFrame(raf));
-  return h('div.ledger-wrap', cv);
-}
+const HERO_STAGES = [
+  {
+    id: 'understand',
+    title: 'Understand',
+    sub: 'You speak, Lily listens',
+    icon: 'wave',
+    status: 'Listening',
+    lines: [
+      { who: 'lily', text: 'Hi, I’m Lily. How can I help today?' },
+      { who: 'cust', text: 'There’s a charge on my card I don’t recognise.' },
+      { who: 'lily', text: 'I can look at that with you. First, a quick security check.' },
+    ],
+  },
+  {
+    id: 'act',
+    title: 'Act',
+    sub: 'Lily checks, then does it',
+    icon: 'activity',
+    status: 'Working',
+    lines: [
+      { who: 'lily', text: 'Thanks, you’re verified. I can see the charge.' },
+      { who: 'note', text: 'Card ending 4821 blocked' },
+      { who: 'note', text: 'Dispute raised · DISPUT-GRX7WR' },
+      { who: 'lily', text: 'Both are confirmed by our systems. Nothing more will go out.' },
+    ],
+  },
+  {
+    id: 'connect',
+    title: 'Connect',
+    sub: 'A person, already briefed',
+    icon: 'headset',
+    status: 'Handing over',
+    lines: [
+      { who: 'cust', text: 'Can I speak to someone about the refund?' },
+      { who: 'lily', text: 'Of course. I’m passing you to Jordan with everything from this call.' },
+      { who: 'note', text: 'Jordan has the whole case. Nothing to repeat.' },
+    ],
+  },
+];
 
-/** One frame of the statement animation. */
-function drawLedger(ctx, w, h0, phase, p, now, ease) {
-  const AUB = '#29263d', VIOLET = '#7565e8', VIOLET_D = '#5846c9', MINT = '#bfe8d5', HAIR = '#e7e4ec', ROW = '#fbfafd';
-  const cardW = Math.min(w * 0.9, 440), cardH = 150, x = (w - cardW) / 2, y = Math.max(8, (h0 - cardH) / 2 - 14);
-  ctx.save();
-  ctx.shadowColor = 'rgba(41,38,61,0.10)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 8;
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.roundRect(x, y, cardW, cardH, 16); ctx.fill();
-  ctx.restore();
-  ctx.strokeStyle = HAIR; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.roundRect(x, y, cardW, cardH, 16); ctx.stroke();
-  const rows = 4, rh = 27, top = y + 18, pick = 2;
-  for (let i = 0; i < rows; i++) {
-    const ry = top + i * (rh + 6), isPick = i === pick;
-    const lift = isPick && phase !== 'idle' ? (phase === 'listening' ? ease(p) * 6 : 6) : 0;
-    const on = isPick && (phase === 'working' || phase === 'done');
-    ctx.fillStyle = on ? 'rgba(117,101,232,0.10)' : ROW;
-    ctx.beginPath(); ctx.roundRect(x + 14, ry - lift, cardW - 28, rh, 9); ctx.fill();
-    if (on) { ctx.strokeStyle = VIOLET; ctx.lineWidth = 1.5; ctx.stroke(); }
-    const barW = on ? 122 : 84 + (i % 3) * 20;
-    ctx.fillStyle = on ? VIOLET : '#ddd9e6';
-    ctx.beginPath(); ctx.roundRect(x + 26, ry + rh / 2 - 4 - lift, barW, 7, 4); ctx.fill();
-    ctx.fillStyle = on ? VIOLET_D : '#ddd9e6';
-    ctx.beginPath(); ctx.roundRect(x + cardW - 26 - 48, ry + rh / 2 - 4 - lift, 48, 7, 4); ctx.fill();
-    // Being checked: a line sweeps the row, the way a system reads it.
-    if (isPick && phase === 'working') {
-      const sx = x + 14 + (cardW - 28) * ((now / 900) % 1);
-      ctx.strokeStyle = 'rgba(117,101,232,0.45)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(sx, ry - lift + 3); ctx.lineTo(sx, ry - lift + rh - 3); ctx.stroke();
-    }
-    if (isPick && phase === 'done') {
-      const tx = x + cardW - 16, ty = ry + rh / 2 - lift;
-      ctx.beginPath(); ctx.arc(tx, ty, 10, 0, Math.PI * 2); ctx.fillStyle = MINT; ctx.fill();
-      ctx.strokeStyle = '#1a4b36'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(tx - 4.5, ty); ctx.lineTo(tx - 1, ty + 3.5); ctx.lineTo(tx + 4.5, ty - 3.5); ctx.stroke();
-    }
+const HERO_HOLD = 5200;
+
+function hero() {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const card = h('div.hc-card');
+  const bubbles = h('div.hc-msgs', { 'aria-live': 'off' });
+  const statusTx = h('span.hc-stx', HERO_STAGES[0].status);
+  const wave = h('div.hc-wave', { 'aria-hidden': 'true' }, Array.from({ length: 22 }, (_, i) => h('i', { style: `--i:${i}` })));
+  const rail = h('div.hc-rail', { role: 'tablist', 'aria-label': 'What happens on the call' });
+
+  let at = 0;          // the stage playing
+  let pinned = null;   // a stage the viewer chose; the loop waits while this is set
+  let timer = 0;
+  let lineTimer = 0;
+
+  const pills = HERO_STAGES.map((st, i) => {
+    const pill = h('button.hc-pill', {
+      type: 'button', role: 'tab', id: `hc-tab-${st.id}`, 'aria-selected': 'false', 'aria-controls': 'hc-card',
+      onclick: () => { pinned = pinned === i ? null : i; show(i); if (pinned === null) queue(); },
+      onmouseenter: () => { if (pinned === null) show(i, true); },
+      onmouseleave: () => { if (pinned === null) show(at); },
+      onfocus: () => { if (pinned === null) show(i, true); },
+    },
+      h('span.n', String(i + 1)),
+      h('span.t', h('b', st.title), h('small', st.sub)),
+      h('span.ic', icon(st.icon)));
+    return pill;
+  });
+  rail.append(...pills);
+
+  /** Put one stage on the card. `preview` means the loop has not moved, only the view. */
+  function show(i, preview = false) {
+    if (!preview) at = i;
+    const st = HERO_STAGES[i];
+    card.dataset.stage = st.id;
+    statusTx.textContent = st.status;
+    pills.forEach((p, n) => {
+      p.classList.toggle('on', n === i);
+      p.classList.toggle('pin', pinned === n);
+      p.setAttribute('aria-selected', n === i ? 'true' : 'false');
+    });
+    clearTimeout(lineTimer);
+    bubbles.replaceChildren();
+    // The messages arrive one after another, the way they would on a real call. Reduced motion gets
+    // them all at once instead.
+    const add = (n) => {
+      const m = st.lines[n];
+      if (!m) return;
+      bubbles.append(m.who === 'note'
+        ? h('div.hc-note', icon('check'), h('span', m.text))
+        : h(`div.hc-b.${m.who}`, h('p', m.text), h('time', '10:2' + (4 + n))));
+      if (n + 1 < st.lines.length) lineTimer = setTimeout(() => add(n + 1), reduced ? 0 : 700);
+    };
+    if (reduced) st.lines.forEach((_, n) => add(n));
+    else add(0);
   }
-  // The caller's voice under the statement: the thing that started it.
-  const bars = 9, bw = 5, gap = 7, total = bars * bw + (bars - 1) * gap, by = y + cardH + 22;
-  const loud = S.call?.player?.speaking ? 1 : S.call?.mic ? Math.min(1, (S.call.mic.level ?? 0) * 1.6) : 0;
-  for (let i = 0; i < bars; i++) {
-    const amp = phase === 'listening'
-      ? 6 + Math.abs(Math.sin(now / 180 + i * 0.7)) * (14 + loud * 16)
-      : phase === 'idle' ? 6 : 8;
-    ctx.fillStyle = i % 3 === 1 ? MINT : VIOLET;
-    ctx.beginPath(); ctx.roundRect(x + (cardW - total) / 2 + i * (bw + gap), by - amp / 2, bw, amp, 3); ctx.fill();
+
+  function queue() {
+    clearTimeout(timer);
+    if (reduced) return;
+    timer = setTimeout(() => {
+      if (pinned !== null) return;
+      show((at + 1) % HERO_STAGES.length);
+      queue();
+    }, HERO_HOLD);
   }
-  void AUB;
+
+  show(0);
+  queue();
+
+  card.id = 'hc-card';
+  card.setAttribute('role', 'tabpanel');
+  card.append(
+    h('div.hc-top', h('span.hc-who', h('span.hc-av', icon('wave')), 'Lily'), h('span.hc-status', h('i'), statusTx)),
+    bubbles);
+
+  // The loop stops when the element leaves the page. The stop function is kept ON the element and
+  // found by `data-loop`, not in a shared variable: this function runs while render's arguments are
+  // being built, so anything stored centrally would be torn down by the very render that is putting
+  // it on screen. A timer left running on a removed node only shows up as a slow page an hour into
+  // a demo, which is the worst time to find it.
+  const wrap = h('div.hero-cv', { 'data-loop': 'hero' }, h('div.hc-stage', card, wave), rail);
+  wrap.stopLoop = () => { clearTimeout(timer); clearTimeout(lineTimer); };
+  return wrap;
 }
 
 function drawHome() {
@@ -260,7 +315,7 @@ function drawHome() {
           h('div.subs',
             h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
             h('p', icon('info'), h('span', 'You are speaking with an AI. Your browser will ask for the microphone and no audio is stored. No microphone? Start anyway and type.')))),
-        h('div.pod-wrap', heroLedger(), steps())),
+        hero()),
       !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
       // Demo data panel removed for now (demoTable() is kept below to bring it back).
       h('div.card.asks', h('span.cap', 'Or just ask'), h('div.chips', ['Where is your nearest branch?', 'How do I make a deposit?', 'What is APR and how is it calculated?', 'How do I spot a card scam?', 'I want to speak to a person', 'How are you today?'].map((x) => h('span', `“${x}”`)))),

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 180" role="img" aria-label="Northstar Bank">
+  <!--
+    The bank's full lockup — mark plus wordmark — for the places with room for it: the agent
+    workspace header and the guardrails slides. The small badge in the product header uses
+    northstar.svg instead, because the wordmark is unreadable below about 90px wide.
+
+    The wordmark is drawn as paths rather than <text>, so it renders the same whether or not
+    Helvetica is installed and survives being exported to a slide or a PDF.
+  -->
+  <polygon points="100,10 116,84 160,100 116,116 100,170 84,116 40,100 84,84" fill="#00008F"/>
+  <polygon points="100,10 116,84 100,100 84,84" fill="#FF1721"/>
+  <circle cx="100" cy="100" r="7" fill="#FFFFFF"/>
+  <text x="200" y="104" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="58" font-weight="700" fill="#00008F" letter-spacing="-1">Northstar</text>
+  <text x="203" y="148" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#FF1721" letter-spacing="10">BANK</text>
+</svg>

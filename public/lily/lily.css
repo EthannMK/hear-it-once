@@ -77,10 +77,14 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 
 /* ---------------------------------------------------------------- header */
 .top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px; padding: 12px 28px; background: rgba(248, 246, 241, 0.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--hair); flex-wrap: wrap; }
-.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--aub); }
-.brand .mk { width: 32px; height: 32px; border-radius: 9px; display: block; }
-/* Northstar's own mark, beside the bank's name in the header. */
-.bankmk { width: 18px; height: 18px; display: block; flex: 0 0 auto; }
+.brand { display: flex; align-items: center; gap: 9px; text-decoration: none; color: var(--aub); }
+.brand .mk { width: 34px; height: 34px; display: block; }
+/* The client bank, deliberately quieter than the product: smaller, lighter, and introduced by
+   "for". The mark keeps the bank's own navy and red rather than being recoloured to our palette. */
+.forbank { display: flex; align-items: center; gap: 7px; padding-left: 14px; border-left: 1px solid var(--hair-2); }
+.forbank .fw { font-size: 0.78rem; color: var(--muted); }
+.forbank .bankmk { height: 19px; width: auto; display: block; flex: none; }
+.forbank .bn { font: 600 0.84rem var(--label); letter-spacing: 0.02em; color: #00008F; white-space: nowrap; }
 .brand b { font: 400 1.4rem var(--serif); }
 .top .tabs { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--white); border: 1px solid var(--hair); }
 .top .tabs a { text-decoration: none; padding: 7px 14px; border-radius: 999px; font-weight: 600; font-size: 0.9rem; color: var(--text-2); }
@@ -116,7 +120,65 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .subs p { display: flex; gap: 6px; color: var(--muted); }
 .subs p svg.i { width: 15px; height: 15px; margin-top: 2px; }
 /* The animation on the left, the three steps stacked to its right. */
-.pod-wrap { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 38px; min-height: 380px; }
+/* ---------------------------------------------------------------- the hero animation
+   One call playing out: the card on the left, the three stages on the right. The rail is a
+   tablist, so a judge can go back to the stage they missed instead of waiting for the loop. */
+.hero-cv { position: relative; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(250px, 0.85fr); align-items: center; gap: 34px; min-height: 380px; }
+.hc-stage { position: relative; display: grid; gap: 14px; justify-items: center; min-width: 0; }
+.hc-card { width: min(440px, 100%); background: var(--white); border: 1px solid var(--hair); border-radius: 20px; box-shadow: 0 14px 40px -12px rgba(41, 38, 61, 0.16); padding: 15px 17px 17px; display: grid; gap: 10px; min-height: 236px; align-content: start; }
+.hc-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hc-who { display: flex; align-items: center; gap: 8px; font: 600 0.92rem var(--sans); color: var(--aub); }
+.hc-av { width: 26px; height: 26px; border-radius: 50%; background: var(--lav); color: var(--violet-d); display: grid; place-items: center; }
+.hc-av svg.i { width: 15px; height: 15px; }
+.hc-status { display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: var(--muted); }
+.hc-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--violet); animation: hcpulse 1.5s ease-in-out infinite; }
+.hc-card[data-stage='act'] .hc-status i { background: var(--amber-ink); }
+.hc-card[data-stage='connect'] .hc-status i { background: var(--mint-ink); }
+@keyframes hcpulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.75); } }
+
+.hc-msgs { display: grid; gap: 7px; align-content: start; }
+.hc-b { max-width: 86%; padding: 9px 12px; border-radius: 14px; position: relative; animation: hcin 0.34s ease both; }
+.hc-b p { margin: 0; font-size: 0.84rem; line-height: 1.45; }
+.hc-b time { display: block; font-size: 0.66rem; color: var(--muted); margin-top: 3px; }
+.hc-b.lily { background: var(--lav); color: var(--aub); border-bottom-left-radius: 5px; justify-self: start; }
+.hc-b.cust { background: #fdf0e9; color: #5c3524; border-bottom-right-radius: 5px; justify-self: end; text-align: left; }
+.hc-note { display: flex; gap: 8px; align-items: center; padding: 7px 11px; border-radius: 11px; background: rgba(191, 232, 213, 0.4); border: 1px solid var(--mint); color: var(--mint-ink); font-size: 0.78rem; animation: hcin 0.34s ease both; }
+.hc-note svg.i { width: 14px; height: 14px; flex: none; }
+@keyframes hcin { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+
+/* The caller's voice under the card. The bars run from the middle outwards, so it reads as one
+   voice rather than a row of unrelated meters. */
+.hc-wave { display: flex; align-items: center; justify-content: center; gap: 4px; height: 44px; width: min(240px, 70%); }
+.hc-wave i { width: 4px; border-radius: 3px; background: var(--violet); opacity: 0.75; height: 8px; animation: hcwave 1.1s ease-in-out infinite; animation-delay: calc(var(--i) * -0.07s); }
+.hc-wave i:nth-child(3n) { background: var(--mint); }
+@keyframes hcwave { 0%, 100% { height: 7px; } 50% { height: 30px; } }
+.hero-cv:has(.hc-card[data-stage='act']) .hc-wave i { animation-duration: 2.4s; opacity: 0.45; }
+.hero-cv:has(.hc-card[data-stage='connect']) .hc-wave i { animation-duration: 1.8s; opacity: 0.55; }
+
+/* The three stages. A connector runs behind them so they read as one sequence. */
+.hc-rail { display: grid; gap: 14px; position: relative; }
+/* A short link between one stage and the next, so the three read as a sequence rather than a
+   menu. It sits in the gap, lined up with the numbers. */
+.hc-pill + .hc-pill::before { content: ''; position: absolute; left: 27px; top: -15px; width: 2px; height: 14px; background: var(--hair-2); border-radius: 2px; }
+.hc-pill.on + .hc-pill::before, .hc-pill + .hc-pill.on::before { background: var(--violet); }
+.hc-pill { position: relative; display: flex; align-items: center; gap: 11px; width: 100%; text-align: left; padding: 12px 14px; border-radius: 999px; border: 1px solid var(--hair); background: var(--white); cursor: pointer; font: inherit; transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; }
+.hc-pill:hover { border-color: var(--violet); }
+.hc-pill .n { width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--lav); color: var(--violet-d); display: grid; place-items: center; font: 700 0.78rem var(--label); transition: background 0.2s, color 0.2s; }
+.hc-pill .t { flex: 1 1 auto; min-width: 0; display: grid; }
+.hc-pill .t b { font: 600 0.95rem var(--sans); color: var(--aub); }
+.hc-pill .t small { font-size: 0.76rem; color: var(--text-2); }
+.hc-pill .ic { flex: none; color: var(--muted); display: grid; place-items: center; }
+.hc-pill .ic svg.i { width: 18px; height: 18px; }
+.hc-pill.on { border-color: var(--violet); box-shadow: 0 8px 22px -10px rgba(117, 101, 232, 0.6); transform: translateX(4px); }
+.hc-pill.on .n { background: var(--violet); color: var(--white); }
+.hc-pill.on .ic { color: var(--violet); }
+.hc-pill.pin { border-width: 2px; }
+.hc-pill.pin::after { content: 'pinned'; position: absolute; right: 44px; font: 600 0.62rem var(--label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--violet-d); }
+.hc-pill:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .hc-wave i, .hc-status i { animation: none; }
+  .hc-b, .hc-note { animation: none; }
+}
 .pod { position: relative; width: min(340px, 78vw); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #fff 0%, #f6f4fb 62%, #efedf7 100%); box-shadow: 0 30px 80px -30px rgba(41, 38, 61, 0.3), inset 0 0 0 1px rgba(41, 38, 61, 0.05); display: grid; place-items: center; text-align: center; }
 .pod::before, .pod::after { content: ''; position: absolute; border-radius: 50%; border: 1px solid rgba(117, 101, 232, 0.14); inset: -22px; animation: breathe 6s ease-in-out infinite; }
 .pod::after { inset: -46px; border-color: rgba(117, 101, 232, 0.08); animation-delay: -3s; }
@@ -138,11 +200,6 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .asks { margin-top: 28px; padding: 18px 20px; display: grid; gap: 10px; }
 .asks .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .asks .chips span { font: italic 400 0.98rem var(--serif); color: var(--text-2); background: var(--ivory); border: 1px solid var(--hair); border-radius: 999px; padding: 6px 14px; }
-.flow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.flow > div { padding: 13px 16px; }
-.flow b { display: flex; gap: 8px; align-items: center; color: var(--aub); font-size: 0.98rem; margin-bottom: 4px; }
-.flow b span { width: 24px; height: 24px; border-radius: 50%; background: var(--lav); color: var(--violet-d); display: grid; place-items: center; font: 700 0.75rem var(--label); }
-.flow p { font-size: 0.85rem; color: var(--text-2); line-height: 1.55; }
 .banner { padding: 11px 14px; border-radius: 14px; font-size: 0.9rem; background: var(--lav); color: var(--aub); }
 .banner.warn { background: var(--amber-soft); color: var(--amber-ink); }
 .banner.bad { background: rgba(241, 138, 114, 0.15); color: #6e2311; border: 1px solid rgba(241, 138, 114, 0.5); }
@@ -452,10 +509,9 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
   .judge.in-call .btc { order: 2; }
   .hero { grid-template-columns: minmax(0, 1fr); }
   /* The steps now travel with the animation, so both read after the headline on a narrow screen. */
-  .pod-wrap { min-height: 300px; }
+  .hero-cv { min-height: 320px; gap: 22px; }
   .pod { width: min(260px, 72vw); }
-  .flow { grid-template-columns: minmax(0, 1fr); }
-  .top { padding: 10px 16px; }
+    .top { padding: 10px 16px; }
   .ch .cust { margin-left: 0; width: 100%; }
   .b { max-width: 94%; }
   .controls .sp { display: none; }
@@ -503,7 +559,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
   .judge.in-call > .dmini { order: 3; }
   .judge { gap: 14px; padding: 12px 16px 28px; }
   .hero { gap: 6px; padding-top: 4px; }
-  .pod-wrap { min-height: 190px; }
+  .hero-cv { min-height: 0; }
   .pod { width: min(180px, 50vw); }
   .float { display: none; }
   .hero h1 { margin: 6px 0 10px; }
@@ -524,10 +580,12 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
   .controls .human .short { display: inline; }
   /* Header: brand and language on one row, screens below. */
   .top { flex-wrap: wrap; row-gap: 8px; }
-  .top .bank { display: none; }
+  /* On a phone the bank's name goes; its mark stays, so the client is still present. */
+  .forbank { padding-left: 10px; }
+  .forbank .fw, .forbank .bn { display: none; }
   .top .grow { flex: 1; }
-  .top .brand { order: 1; } .top .grow { order: 2; } .top .langwrap { order: 3; }
-  .top .tabs { order: 4; width: 100%; display: grid; grid-template-columns: 1fr 1fr; text-align: center; }
+  .top .brand { order: 1; } .forbank { order: 2; } .top .grow { order: 3; } .top .langwrap { order: 4; }
+  .top .tabs { order: 5; width: 100%; display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
   .top .tabs a { padding: 9px 8px; }
 }
 @media (max-width: 760px) {
@@ -599,12 +657,10 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .copy.done { background: var(--mint); color: var(--mint-ink); }
 .dnote { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
 .hero-t { animation: rise 0.5s both; }
-.pod-wrap { animation: rise 0.6s 0.1s both; }
+.hero-cv { animation: rise 0.6s 0.1s both; }
 .pod .bars i { transform-origin: center; animation: eq 1.6s ease-in-out infinite; animation-delay: var(--d, 0ms); }
 @keyframes eq { 0%, 100% { transform: scaleY(0.55); } 50% { transform: scaleY(1.08); } }
-.flow > div, .asks { animation: rise 0.5s both; }
-.flow > div:nth-child(2) { animation-delay: 0.08s; }
-.flow > div:nth-child(3) { animation-delay: 0.16s; }
+.asks { animation: rise 0.5s both; }
 .connect { transition: transform 0.18s, box-shadow 0.25s; }
 .connect:hover { transform: translateY(-2px); }
 .connect:active { transform: translateY(0) scale(0.98); }
@@ -701,8 +757,8 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 @media (max-width: 900px) {
   /* On a phone the steps read under the animation, one after another. The rings reach 46px past
      the circle, so the block keeps room for them rather than overlapping the text above. */
-  .pod-wrap { grid-template-columns: minmax(0, 1fr); gap: 20px; min-height: 0; padding: 56px 0 8px; }
-  .pod-wrap .pod { margin: 0 auto; }
+  .hero-cv { grid-template-columns: minmax(0, 1fr); gap: 18px; min-height: 0; padding: 8px 0; }
+  .hc-rail::before { display: none; }
 }
 
 /* The escalation reference the caller was just given out loud, so they can write it down. */
@@ -738,7 +794,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
   .judge:not(.in-call) > section { min-height: 0; display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto; }
   .judge:not(.in-call) .hero { min-height: 0; padding: 0; overflow: hidden; }
   .judge:not(.in-call) .hero h1 { font-size: clamp(2.2rem, 3.8vw, 3.5rem); margin: 0 0 14px; }
-  .judge:not(.in-call) .pod-wrap { min-height: 0; }
+  .judge:not(.in-call) .hero-cv { min-height: 0; }
   .judge:not(.in-call) .pod { width: clamp(180px, 34vh, 320px); }
   .judge:not(.in-call) .asks { margin: 0; padding: 12px 16px; gap: 8px; }
   /* Screen 1, on the call: three full-height columns; the transcript takes whatever is left. */
@@ -776,8 +832,8 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
   .call-main .stage .sub { font-size: 0.82rem; }
   .judge:not(.in-call) .subs p, .judge:not(.in-call) .langnote { display: none; }
   .judge:not(.in-call) .hero h1 { font-size: clamp(1.9rem, 3vw, 2.6rem); }
-  .judge:not(.in-call) .flow p { display: none; }
-  .judge:not(.in-call) .flow b { margin: 0; font-size: 0.9rem; }
+  .judge:not(.in-call) .hc-pill .t small { display: none; }
+  .judge:not(.in-call) .hc-card { min-height: 190px; }
 }
 /* Between 1101 and 1240 px the call keeps its three columns, a little narrower. */
 @media (min-width: 1101px) and (max-width: 1240px) and (min-height: 600px) {
@@ -1004,8 +1060,6 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .scene .row { align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* The hero animation: a statement row found, checked and settled. */
-.ledger-wrap { display: grid; place-items: center; width: 100%; }
-canvas.ledger { width: min(460px, 100%); height: 230px; display: block; }
 
 /* The customer's side is one tabbed panel: account, transactions, history. */
 .cx-cust.card { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden; }
