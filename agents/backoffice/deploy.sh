@@ -47,6 +47,13 @@ python3 -m venv "$HOME/.venv-backoffice" && . "$HOME/.venv-backoffice/bin/activa
 pip install -q -r "$HERE/requirements.txt"
 OUT="$(cd "$HERE" && python3 deploy.py --project "$PROJECT" --location "$AGENT_LOCATION" --bucket "$BUCKET" --dataset "$DATASET" --bq-location "$BQ_LOCATION" | tee /dev/stderr)"
 RES="$(echo "$OUT" | sed -n 's/^AGENT_ENGINE_RESOURCE=//p' | tail -1)"
+if [ -z "$RES" ]; then
+  echo
+  echo "The agent did not come up. Its own logs say why:" >&2
+  gcloud logging read 'resource.type="aiplatform.googleapis.com/ReasoningEngine" severity>=WARNING' \
+    --project="$PROJECT" --limit=30 --freshness=2h --format='value(timestamp,severity,textPayload,jsonPayload.message)' >&2 || true
+  exit 1
+fi
 for role in roles/bigquery.jobUser roles/bigquery.dataViewer; do
   gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:$AE_SA" --role="$role" --condition=None --quiet >/dev/null || true
 done
