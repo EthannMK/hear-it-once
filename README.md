@@ -6,19 +6,25 @@ Hear It Once answers a credit-card services call without an IVR menu, discloses 
 
 > **One conversation. Every action handled. Nothing lost.**
 
-It has two screens on one backend:
+Four screens on one backend:
 
 | Screen | Path | Who |
 |---|---|---|
-| Customer page — test identities with dummy card and phone numbers beside a live voice call with Lily, with a picker for the call language (English, Burmese or Tagalog) | `/` | Anyone |
-| Agent CRM — customer search and profile, case summary built from the call, key facts (verified vs. customer-said), suggested next step, editable tags and status, complaint / escalation tickets, timeline | `/#/crm` (the call page flips here when a call ends) | Demo agent role (signed in automatically in demo mode) |
+| Demo instructions — how to drive the demo, and the five test accounts with their card and phone numbers ready to copy | `/#/demo` | Anyone |
+| Customer page — a live voice call with Lily, with the chosen account beside it | `/` | Anyone |
+| Agent workspace — overview, transactions, conversation, case and requests, timeline, knowledge, and an AI copilot alongside | `/#/crm` (the call page flips here when a call is handed over) | Demo agent role, signed in automatically |
+| Guardrails — how each safeguard is built, then the evidence: the off switch, the audit log checked against its own hashes, the last accuracy run, the fraud patterns | `/#/guardrails` | Anyone |
+
+English and Tagalog take calls. Burmese is built — prompt, voice and agent name — but switched off
+until its quality is good enough to put in front of a customer; the switch to it is refused in the
+bridge rather than discouraged in the prompt.
 
 ### What's real and what's simulated
 
 | Real (the application) | Simulated (replaceable adapters) |
 |---|---|
 | Conversation state machine, verification flow, policy/eligibility engine, consent, idempotency, timeout → unknown → reconciliation, cases, handoff briefs, audit, timeline events, SSE stream, KPIs | All 9 bank systems, the identity passcode (shown on a simulated phone), the 9-article knowledge base (synthetic guidance, not bank policy), the agent desk, and the seeded illustrative history |
-| Browser speech recognition / synthesis where the browser supports it (Chrome, Edge); text input always works and is the fallback when the microphone is denied or unsupported | No audio is recorded or sent to the server — only recognised text |
+| The voice itself runs on the Gemini Live API: speech to speech in one model, with barge-in. Typing always works and is the fallback when the microphone is denied or the model is unavailable | Nothing is recorded; audio is streamed, and only the transcript is stored |
 
 Sentiment is an indicative keyword rule, labelled as such; it is never used to authorise anything.
 
@@ -64,7 +70,7 @@ npm start               # http://127.0.0.1:3000
 | `npm run db:migrate` | Apply pending SQL migrations |
 | `npm run db:seed` | Seed synthetic data (no-op if already seeded) |
 | `npm run db:reset` | **Wipe and re-seed** all synthetic demo data (also available in the dashboard as an admin) |
-| `npm test` | Run all 117 automated tests (unit, integration, API end-to-end) |
+| `npm test` | Run the test suite (unit, integration, API end-to-end; 647 at the last count) |
 | `npm run typecheck` | TypeScript type check |
 | `npm run check:secrets` | Fail if source contains secrets or full card numbers |
 | `npm run audit:deps` | `npm audit` of runtime dependencies |
@@ -116,8 +122,8 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 
 1. Open `/`, pick a test identity and press **Start talking to Lily**.
 2. Ask anything about banking. For questions about the test account, read the full dummy card number shown on screen when Lily asks. A wrong number gets a retry, three wrong ones prepare a handover.
-3. End the call: the page switches to the Agent CRM case for it. Or say "I want to speak to a person", open **Agent CRM** from the waiting banner and accept the handover.
-4. Open **3 · Safety** for the controls: the off switch (choose a position, say why, and the next caller is treated differently), the audit log checked against its own hashes while you watch, the last accuracy run, and the fraud patterns the call policy answers.
+3. Say "I want to speak to a person" and the screen hands over by itself: the agent workspace opens on that case with everything Lily found already on it. Accept the handover and carry on talking. Ending the call normally takes you to the same case.
+4. Open **3 · Guardrails**: the seven things that hold the system together in plain sentences, then the evidence behind them — where the off switch stands, the audit log checked against its own hashes while you watch, the last accuracy run, and the ten fraud patterns the call policy answers with the file that enforces each.
 
 `npm run db:reset` resets all demo data. `npm run scorecard` plays every scenario and rewrites
 [docs/ACCURACY.md](docs/ACCURACY.md).
@@ -140,6 +146,12 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deployment guide for this stack |
 | [docs/PILOT_READINESS.md](docs/PILOT_READINESS.md) | What must be true before a controlled pilot |
 
+## Licence
+
+MIT — see [LICENSE](LICENSE). The third-party datasets behind the BigQuery mode keep their own
+terms: the Sparkov transaction history from Kaggle is CC0 and the Bitext retail-banking FAQ is
+CDLA-Sharing-1.0. Both are listed with their sources in [docs/BIGQUERY.md](docs/BIGQUERY.md).
+
 ## Project layout
 
 ```
@@ -158,7 +170,8 @@ src/
   config/         env, central policy, BRD pilot targets
   db/             migrations, seed, scenarios, illustrative history, CLI
   events/ kb/     live timeline events + SSE bus; synthetic knowledge base adapter
-public/           HTML/CSS/JS (no build step): index.html + lily/app.js (Talk to Lily) + lily/crm.js (Agent CRM)
+public/           HTML/CSS/JS, no build step: index.html, lily/app.js (the call), lily/crm.js
+                  (the agent workspace), lily/demo.js (instructions), lily/safety.js (guardrails)
 tests/            unit, integration, e2e (all 18 scenarios through the HTTP API)
 docs/             everything above
 ```

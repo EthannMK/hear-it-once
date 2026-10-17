@@ -2,6 +2,7 @@
   "name": "hear-it-once",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Hear It Once — AI-assisted credit card service line prototype (SIMULATED, synthetic data only)",
   "type": "module",
   "engines": {
