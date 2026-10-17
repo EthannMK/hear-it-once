@@ -10,12 +10,21 @@ DATASET="${DATASET:-northstar_bank}"
 SERVICE="${SERVICE:-hear-it-once}"; RUN_REGION="${RUN_REGION:-asia-southeast1}"
 BUCKET="${BUCKET:-gs://${PROJECT}-agent-staging}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
 if [ "$PROJECT" = "ulink-claimflow" ]; then echo "Refusing to touch project ulink-claimflow." >&2; exit 1; fi
 gcloud config set project "$PROJECT" >/dev/null
 NUM="$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')"
 
 echo "== 1/5 APIs"; gcloud services enable aiplatform.googleapis.com bigquery.googleapis.com storage.googleapis.com
 echo "== 2/5 Read-only views for the agent"
+# The views read columns the app's schema adds over time. Applying the schema first (every
+# statement in it creates or alters only if needed, and nothing is dropped or emptied) means this
+# works on a dataset built by an older setup.sh, rather than failing on a column that is not there.
+SCHEMA="$ROOT/scripts/bigquery/schema.sql"
+if [ -f "$SCHEMA" ]; then
+  sed "s/PROJECT_ID/$PROJECT/g; s/\.DATASET\./.$DATASET./g" "$SCHEMA" | bq query --location="$BQ_LOCATION" --use_legacy_sql=false --quiet \
+    || { echo "The dataset could not be brought up to date. Run: bash scripts/bigquery/setup.sh" >&2; exit 1; }
+fi
 sed "s/PROJECT_ID/$PROJECT/g; s/\.DATASET\./.$DATASET./g" "$HERE/views.sql" | bq query --location="$BQ_LOCATION" --use_legacy_sql=false --quiet
 echo "== 3/5 Staging bucket $BUCKET"
 gsutil ls -b "$BUCKET" >/dev/null 2>&1 || gsutil mb -l "$AGENT_LOCATION" "$BUCKET"
