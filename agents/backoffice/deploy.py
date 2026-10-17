@@ -28,13 +28,16 @@ def main() -> None:
         sys.exit("Refusing to touch project ulink-claimflow.")
 
     os.environ.update(BQ_PROJECT=a.project, BQ_DATASET=a.dataset, BQ_LOCATION=a.bq_location, AGENT_MODEL=a.model)
+    # The agent's own package travels as a relative path: it is unpacked beside the app on the
+    # server and imported by that name, so an absolute path from this machine would not be found.
+    os.chdir(HERE)
     vertexai.init(project=a.project, location=a.location, staging_bucket=a.bucket)
     from northstar_backoffice.agent import root_agent  # noqa: E402  (reads the env above)
 
     app = agent_engines.AdkApp(agent=root_agent, enable_tracing=True)
     kwargs = dict(
-        requirements=[l.strip() for l in open(os.path.join(HERE, "requirements.txt")) if l.strip() and not l.startswith("#")],
-        extra_packages=[os.path.join(HERE, "northstar_backoffice")],
+        requirements=[l.strip() for l in open("requirements.txt") if l.strip() and not l.startswith("#")],
+        extra_packages=["northstar_backoffice"],
         display_name=DISPLAY_NAME,
         description="Read-only back-office analyst over the Northstar Bank BigQuery dataset (Hear It Once).",
         env_vars={"BQ_PROJECT": a.project, "BQ_DATASET": a.dataset, "BQ_LOCATION": a.bq_location, "AGENT_MODEL": a.model},
