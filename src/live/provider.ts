@@ -38,6 +38,13 @@ export interface LiveEvents {
 }
 
 export interface LiveSession {
+  /**
+   * The model entry this session actually opened on, and the voice it was asked for. The bridge
+   * carries the entry into every later connection on the same call so the caller is not handed a
+   * different voice halfway through — see GeminiLiveProvider.connect.
+   */
+  entry?: string;
+  voice?: string;
   sendAudio(pcm16kBase64: string): void;
   /** A short system-originated instruction, e.g. to greet or to announce a confirmed event. */
   sendText(text: string): void;
@@ -47,8 +54,16 @@ export interface LiveSession {
 
 export interface LiveConnectOptions {
   systemInstruction: string;
-  /** Prebuilt voice for this agent; the provider default is used when absent. */
+  /**
+   * The prebuilt voice for this agent. Always set by the bridge: left unset the provider picks its
+   * own default, and the defaults are not all the same person, let alone the same gender.
+   */
   voice?: string;
+  /**
+   * The model entry an earlier connection on this call succeeded with. Tried first, so a mid-call
+   * reconnect keeps the voice the caller has been listening to.
+   */
+  pinnedEntry?: string;
   tools: LiveToolDecl[];
   events: LiveEvents;
 }

@@ -29,6 +29,13 @@ const unusable = new Set<string>();
 /** 3.x Live models call tools asynchronously by default. This app waits for each tool result, so ask for blocking calls. */
 const needsBlocking = (model: string) => /(^|[-/])3[.-]\d/.test(model);
 
+/**
+ * The voice to ask for. Resolved in one place so the voice that is sent and the voice that is
+ * logged can never disagree — the whole point of the log line is to answer "who was speaking?"
+ * after the fact.
+ */
+const voiceFor = (opts: LiveConnectOptions) => opts.voice ?? env().LIVE_VOICE;
+
 export class GeminiLiveProvider implements LiveProvider {
   readonly name = 'gemini-live-vertex';
   /** The model that last opened a session (or the first candidate before any call). */
@@ -52,8 +59,20 @@ export class GeminiLiveProvider implements LiveProvider {
     return c;
   }
 
+  /**
+   * Open a session, trying the configured models in order.
+   *
+   * `opts.pinnedEntry`, when set, is the entry an earlier connection on this same call succeeded
+   * with, and it is tried first and on its own before anything else. That matters for one reason:
+   * the models in the list do not share a voice catalogue. A model that does not recognise the voice
+   * we ask for falls back to ITS default, and the default on several Live models is a male voice —
+   * which is how a caller ends up halfway through a call with Lily and finishing it with somebody
+   * else. Falling back to a different model is the right thing to do when a call cannot start at
+   * all; doing it silently in the middle of a call is not.
+   */
   async connect(opts: LiveConnectOptions): Promise<LiveSession> {
-    const order = [...this.candidates.filter((m) => !unusable.has(m)), ...this.candidates.filter((m) => unusable.has(m))];
+    const rest = [...this.candidates.filter((m) => !unusable.has(m)), ...this.candidates.filter((m) => unusable.has(m))];
+    const order = opts.pinnedEntry ? [opts.pinnedEntry, ...rest.filter((m) => m !== opts.pinnedEntry)] : rest;
     let lastError: Error | null = null;
     for (const entry of order) {
       const [model, loc] = entry.split('@');
@@ -63,7 +82,12 @@ export class GeminiLiveProvider implements LiveProvider {
         try {
           const s = await this.open(model, location, opts, rich);
           this.model = model;
+          s.entry = entry;
+          s.voice = voiceFor(opts);
           unusable.delete(entry);
+          if (opts.pinnedEntry && entry !== opts.pinnedEntry) {
+            log.warn('reconnected on a different Live model; the voice may not match the rest of the call', { was: opts.pinnedEntry, now: entry, voice: s.voice });
+          }
           return s;
         } catch (err) {
           lastError = err as Error;
@@ -91,7 +115,7 @@ export class GeminiLiveProvider implements LiveProvider {
         // Transcripts of both sides drive the on-screen conversation and consent checks.
         inputAudioTranscription: {},
         outputAudioTranscription: {},
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice ?? env().LIVE_VOICE } } },
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceFor(opts) } } },
         // Callers pause between groups of digits. A longer silence window stops Lily cutting in mid-number.
         realtimeInputConfig: { automaticActivityDetection: { endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW, silenceDurationMs: 1100 } },
         ...(rich ? { sessionResumption: {}, contextWindowCompression: { slidingWindow: {} } } : {}),
