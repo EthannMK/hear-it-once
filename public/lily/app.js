@@ -20,6 +20,8 @@ const group4 = (d) => String(d ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/g,
 /** How long the caller's screen stays up after an agent accepts, before the demo moves to the agent's side. */
 // Seconds of notice before the screen moves to the agent's seat, once Lily has stopped speaking.
 const JUMP_MS = 4000;
+/** How long the seat-change scene holds before the agent's screen takes over. */
+const SCENE_MS = 10000;
 const JUMP_AFTER_SPEECH_MS = 1500;
 const JUMP_MAX_HOLD_MS = 20000;
 const STAGES = ['understand', 'verify', 'investigate', 'explain', 'confirm', 'act', 'record', 'resolve', 'handoff'];
@@ -64,8 +66,8 @@ function icon(name) {
 function header(active) {
   const callLive = S.call && !S.call.ended;
   return h('header.top',
-    h('a.brand', { href: '#/' }, h('span.mk', icon('wave')), h('b', 'Hear It Once')),
-    h('span.badge.lav.bank', S.bank),
+    h('a.brand', { href: '#/' }, h('img.mk', { src: '/brand/hear-it-once.svg', alt: '', width: '32', height: '32' }), h('b', 'Hear It Once')),
+    h('span.badge.lav.bank', h('img.bankmk', { src: '/brand/northstar.svg', alt: '', width: '16', height: '16' }), S.bank),
     h('nav.tabs', { 'aria-label': 'Screens' },
       h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Bank customer'),
       h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Bank agent')),
@@ -147,6 +149,94 @@ function steps() {
     h('div.card', h('b', h('span', '3'), 'Agent CRM'), h('p', 'Ask for a person or end the call and the screen moves to the agent’s case workspace: summary, verified facts, suggested next step and tickets.')));
 }
 
+/**
+ * The hero animation: a statement, one row of which is the reason for the call. It lifts, is
+ * checked, and is settled with a tick, over and over. It is drawn rather than written because the
+ * same drawing runs on the call itself, from the real state: idle, listening, working, done.
+ *
+ * Everything is a rounded rectangle, a line or a circle, so it stays sharp at any size and costs
+ * almost nothing to run.
+ */
+function heroLedger() {
+  const cv = h('canvas.ledger', { role: 'img', 'aria-label': 'A statement row is found, checked and settled' });
+  const ctx = cv.getContext('2d');
+  const PHASES = ['idle', 'listening', 'working', 'done'];
+  const DUR = 2600;
+  // Start part-way through, so the page opens on the row being checked rather than on four grey
+  // lines: the first impression is the product working.
+  const start = performance.now() - 2600 * 2.2;
+  let raf = 0;
+  const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2);
+  function frame(now) {
+    const dpr = Math.min(2, devicePixelRatio || 1);
+    const w = cv.clientWidth, hh = cv.clientHeight;
+    if (!w || !hh) { raf = requestAnimationFrame(frame); return; }
+    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(hh * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, hh);
+    // On a live call the phase comes from the call itself; on the home page it cycles.
+    const live = S.call && !S.call.ended ? S.call.phase : null;
+    const t = (now - start) % (DUR * PHASES.length);
+    const phase = live ? (live === 'speaking' ? 'done' : live === 'processing' ? 'working' : live === 'hearing' || live === 'listening' ? 'listening' : 'idle') : PHASES[Math.floor(t / DUR)];
+    const p = (t % DUR) / DUR;
+    drawLedger(ctx, w, hh, phase, p, now, ease);
+    raf = requestAnimationFrame(frame);
+  }
+  raf = requestAnimationFrame(frame);
+  cv.addEventListener('DOMNodeRemovedFromDocument', () => cancelAnimationFrame(raf));
+  return h('div.ledger-wrap', cv);
+}
+
+/** One frame of the statement animation. */
+function drawLedger(ctx, w, h0, phase, p, now, ease) {
+  const AUB = '#29263d', VIOLET = '#7565e8', VIOLET_D = '#5846c9', MINT = '#bfe8d5', HAIR = '#e7e4ec', ROW = '#fbfafd';
+  const cardW = Math.min(w * 0.9, 440), cardH = 150, x = (w - cardW) / 2, y = Math.max(8, (h0 - cardH) / 2 - 14);
+  ctx.save();
+  ctx.shadowColor = 'rgba(41,38,61,0.10)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 8;
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.roundRect(x, y, cardW, cardH, 16); ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = HAIR; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.roundRect(x, y, cardW, cardH, 16); ctx.stroke();
+  const rows = 4, rh = 27, top = y + 18, pick = 2;
+  for (let i = 0; i < rows; i++) {
+    const ry = top + i * (rh + 6), isPick = i === pick;
+    const lift = isPick && phase !== 'idle' ? (phase === 'listening' ? ease(p) * 6 : 6) : 0;
+    const on = isPick && (phase === 'working' || phase === 'done');
+    ctx.fillStyle = on ? 'rgba(117,101,232,0.10)' : ROW;
+    ctx.beginPath(); ctx.roundRect(x + 14, ry - lift, cardW - 28, rh, 9); ctx.fill();
+    if (on) { ctx.strokeStyle = VIOLET; ctx.lineWidth = 1.5; ctx.stroke(); }
+    const barW = on ? 122 : 84 + (i % 3) * 20;
+    ctx.fillStyle = on ? VIOLET : '#ddd9e6';
+    ctx.beginPath(); ctx.roundRect(x + 26, ry + rh / 2 - 4 - lift, barW, 7, 4); ctx.fill();
+    ctx.fillStyle = on ? VIOLET_D : '#ddd9e6';
+    ctx.beginPath(); ctx.roundRect(x + cardW - 26 - 48, ry + rh / 2 - 4 - lift, 48, 7, 4); ctx.fill();
+    // Being checked: a line sweeps the row, the way a system reads it.
+    if (isPick && phase === 'working') {
+      const sx = x + 14 + (cardW - 28) * ((now / 900) % 1);
+      ctx.strokeStyle = 'rgba(117,101,232,0.45)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(sx, ry - lift + 3); ctx.lineTo(sx, ry - lift + rh - 3); ctx.stroke();
+    }
+    if (isPick && phase === 'done') {
+      const tx = x + cardW - 16, ty = ry + rh / 2 - lift;
+      ctx.beginPath(); ctx.arc(tx, ty, 10, 0, Math.PI * 2); ctx.fillStyle = MINT; ctx.fill();
+      ctx.strokeStyle = '#1a4b36'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(tx - 4.5, ty); ctx.lineTo(tx - 1, ty + 3.5); ctx.lineTo(tx + 4.5, ty - 3.5); ctx.stroke();
+    }
+  }
+  // The caller's voice under the statement: the thing that started it.
+  const bars = 9, bw = 5, gap = 7, total = bars * bw + (bars - 1) * gap, by = y + cardH + 22;
+  const loud = S.call?.player?.speaking ? 1 : S.call?.mic ? Math.min(1, (S.call.mic.level ?? 0) * 1.6) : 0;
+  for (let i = 0; i < bars; i++) {
+    const amp = phase === 'listening'
+      ? 6 + Math.abs(Math.sin(now / 180 + i * 0.7)) * (14 + loud * 16)
+      : phase === 'idle' ? 6 : 8;
+    ctx.fillStyle = i % 3 === 1 ? MINT : VIOLET;
+    ctx.beginPath(); ctx.roundRect(x + (cardW - total) / 2 + i * (bw + gap), by - amp / 2, bw, amp, 3); ctx.fill();
+  }
+  void AUB;
+}
+
 function drawHome() {
   const ready = !!S.status?.available;
   const bars = h('div.bars', { 'aria-hidden': 'true' }, [14, 26, 38, 48, 34, 44, 24, 16].map((n, i) => h('i', { style: `height:${n}px;--d:${i * 90}ms` })));
@@ -163,10 +253,7 @@ function drawHome() {
           h('div.subs',
             h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
             h('p', icon('info'), h('span', 'You are speaking with an AI. Your browser will ask for the microphone and no audio is stored. No microphone? Start anyway and type.')))),
-        h('div.pod-wrap',
-          // The pod is the voice: a ring travelling round the wave while it waits.
-          h('div.pod', h('span.spin', { 'aria-hidden': 'true' }), h('div', bars, h('div.mic', icon('wave')))),
-          steps())),
+        h('div.pod-wrap', heroLedger(), steps())),
       !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
       // Demo data panel removed for now (demoTable() is kept below to bring it back).
       h('div.card.asks', h('span.cap', 'Or just ask'), h('div.chips', ['Where is your nearest branch?', 'How do I make a deposit?', 'What is APR and how is it calculated?', 'How do I spot a card scam?', 'I want to speak to a person', 'How are you today?'].map((x) => h('span', `“${x}”`)))),
@@ -250,7 +337,8 @@ function handoverScene(kind, v) {
     ['headset', v?.handoff?.reference ? `Reference ${v.handoff.reference}` : v?.case?.id ? `Case ${v.case.id}` : 'The full case record'],
   ];
   let timer = 0;
-  const close = () => { clearTimeout(timer); ov.classList.add('out'); setTimeout(() => { ov.remove(); document.querySelector('.cx-hand.wait button')?.focus({ preventScroll: true }); }, 450); document.removeEventListener('keydown', onKey); };
+  let tick = 0;
+  const close = () => { clearTimeout(timer); clearInterval(tick); ov.classList.add('out'); setTimeout(() => { ov.remove(); document.querySelector('.cx-hand.wait button')?.focus({ preventScroll: true }); }, 450); document.removeEventListener('keydown', onKey); };
   const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') close(); };
   const ov = h('div.scene', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'scene-t' },
     h('div.scene-in',
@@ -263,11 +351,28 @@ function handoverScene(kind, v) {
       h('p.scene-pov', transfer
         ? [h('b', 'Now you are the bank agent. '), 'Next is what the agent sees when the call arrives: the caller, their account and Lily’s notes. Accept the handover to keep talking to the customer, without asking them to repeat anything.']
         : [h('b', 'Now you see the bank’s side. '), 'This is the case the agent team receives: what was said, what was checked and what was done.']),
-      h('div.row', h('button.btn.primary', { type: 'button', onclick: close }, transfer ? 'Show me the agent’s screen' : 'Show me the case'))));
+      h('div.row',
+        h('button.btn.primary', { type: 'button', onclick: close }, transfer ? 'Show me the agent’s screen' : 'Show me the case'),
+        h('button.btn.ghost.scene-hold', { type: 'button', onclick: () => hold() }, 'Stay on this'),
+        h('span.scene-cd', { 'aria-live': 'off' }, ''))));
   document.body.append(ov);
   document.addEventListener('keydown', onKey);
   ov.querySelector('button')?.focus({ preventScroll: true });
-  timer = setTimeout(close, transfer ? 6500 : 4000);
+  // Ten seconds, counted down on screen, so a judge can read the brief. "Stay on this" holds it
+  // until they are ready, and the button or Enter moves on at once.
+  const ends = Date.now() + SCENE_MS;
+  const cd = ov.querySelector('.scene-cd');
+  tick = setInterval(() => {
+    const left = Math.max(0, Math.ceil((ends - Date.now()) / 1000));
+    cd.textContent = `moving on in ${left}s`;
+    if (left <= 0) clearInterval(tick);
+  }, 250);
+  const hold = () => {
+    clearTimeout(timer); clearInterval(tick);
+    cd.textContent = 'paused — take your time';
+    ov.querySelector('.scene-hold')?.remove();
+  };
+  timer = setTimeout(close, SCENE_MS);
 }
 
 /* ------------------------------------------------------------------ call controller */

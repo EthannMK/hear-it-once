@@ -101,3 +101,36 @@ describe('optional LLM adapter', () => {
     await expect(new AnthropicIntentModel('k', 'm', badFetch).classify('hi')).rejects.toThrow();
   });
 });
+
+describe('transaction detail references', () => {
+  it('an acquirer reference is 23 plain digits and never reads as a card number', async () => {
+    const { txnDetail } = await import('../../src/db/txn-detail.ts');
+    const { containsProhibitedCardData } = await import('../../src/lib/redact.ts');
+    for (let i = 0; i < 400; i++) {
+      const d = txnDetail({ id: `TXN-${i}-${(i * 7919) % 97}`, kind: 'purchase', category: 'groceries', entryMode: 'chip', merchant: 'Greenway Grocers' });
+      expect(d.networkRef, String(i)).toMatch(/^\d{23}$/);
+      expect(containsProhibitedCardData(JSON.stringify(d)), d.networkRef!).toBe(false);
+      expect(d.acquirer).toBeTruthy();
+    }
+  });
+
+  it('the same transaction always gets the same references', async () => {
+    const { txnDetail, authCodeFor } = await import('../../src/db/txn-detail.ts');
+    const a = txnDetail({ id: 'TXN-STABLE', kind: 'purchase', category: 'dining', entryMode: 'chip', merchant: 'Harbor Grill' });
+    const b = txnDetail({ id: 'TXN-STABLE', kind: 'purchase', category: 'dining', entryMode: 'chip', merchant: 'Harbor Grill' });
+    expect(a).toEqual(b);
+    expect(authCodeFor('TXN-STABLE')).toBe(authCodeFor('TXN-STABLE'));
+    expect(authCodeFor('TXN-STABLE')).toMatch(/^\d{6}$/);
+  });
+
+  it('a payment or a fee carries no merchant location, acquirer or dispute reference', async () => {
+    const { txnDetail } = await import('../../src/db/txn-detail.ts');
+    for (const kind of ['payment', 'fee']) {
+      const d = txnDetail({ id: `TXN-${kind}`, kind, merchant: null });
+      expect(d.merchantCity).toBeNull();
+      expect(d.acquirer).toBeNull();
+      expect(d.networkRef).toBeNull();
+      expect(d.mcc).toBe('6012');
+    }
+  });
+});
