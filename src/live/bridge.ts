@@ -60,6 +60,11 @@ export class LiveBridge {
    * already speaking, so two voices play over each other.
    */
   private epoch = 0;
+  /**
+   * The Live model this call opened on. Every later session on the same call asks for it first, so
+   * a reconnect cannot quietly move the caller onto a model with a different voice catalogue.
+   */
+  private modelEntry: string | null = null;
   private closed = false;
   private muted = false;
   private reconnects = 0;
@@ -130,7 +135,12 @@ export class LiveBridge {
     const current = () => this.epoch === mine && !this.closed;
     const opts: LiveConnectOptions = {
       systemInstruction: lilySystemInstruction({ recap: resumed ? this.recap() : null, language: this.language, joinedFrom }),
-      voice: this.language === 'en' ? undefined : LANGUAGES[this.language].voice,
+      // Named on every path, English included. Leaving it to the provider's default is how a caller
+      // ends up listening to somebody other than the agent they were introduced to.
+      voice: LANGUAGES[this.language].voice,
+      // Reconnects and language switches stay on the model this call opened with, because the
+      // models do not share a voice catalogue.
+      pinnedEntry: this.modelEntry ?? undefined,
       tools: LILY_TOOLS,
       events: {
         onAudio: (b64) => {
@@ -151,6 +161,9 @@ export class LiveBridge {
       },
     };
     this.session = await this.provider.connect(opts);
+    // Remembered from the first successful connection and reused for the rest of the call.
+    this.modelEntry ??= this.session.entry ?? null;
+    log.info('live session open', { sessionId: this.sessionId, agent: LANGUAGES[this.language].agent, voice: this.session.voice ?? opts.voice, model: this.session.entry ?? this.provider.model });
   }
 
   /** Stop the provider session. The call itself stays open so the caller can reconnect. */
