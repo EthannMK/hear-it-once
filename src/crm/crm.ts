@@ -150,10 +150,82 @@ export function customerProfile(customerId: string, actor: Actor) {
   audit({ actor, event: 'crm.customer_viewed', status: 'ok', resourceType: 'customer', resourceId: customerId });
   return {
     customer: b,
+    account: accountOverview(customerId),
     transactions: txns.map((t) => ({ ...t, disputed: disputedTxns.has(t.id) })),
     cases,
     tickets: all<TicketRow>('SELECT * FROM case_tickets WHERE customer_id = ? ORDER BY created_at DESC', [customerId]).map(ticketBrief),
   };
+}
+
+/**
+ * The card account at a glance: balance, available credit, last payment, and how the card is used.
+ * Balance and usage are worked out from the bank's own records on every read (posted purchases,
+ * fees not reversed, payments received), so a fee reversal on the call shows here at once. The
+ * synthetic data has no credit limit, so one is set per customer: where a recent decline was for
+ * low available credit, the limit is set so that this is still true.
+ */
+export function accountOverview(customerId: string) {
+  const DAY = 86_400_000;
+  const now = Date.now();
+  const since = (days: number) => new Date(now - days * DAY).toISOString();
+  const seed = [...customerId].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
+  const sum = (sql: string, args: unknown[]) => get<{ n: number | null }>(sql, args)?.n ?? 0;
+  const cycle = since(30);
+  const spent = sum("SELECT SUM(amount_minor) n FROM bank_transactions WHERE customer_id = ? AND status = 'posted' AND kind NOT IN ('payment','fee') AND txn_at >= ?", [customerId, cycle]);
+  const fees = sum('SELECT SUM(amount_minor) n FROM bank_fees WHERE customer_id = ? AND reversed_at IS NULL AND charged_at >= ?', [customerId, since(60)]);
+  const paid = sum("SELECT SUM(amount_minor) n FROM bank_payments WHERE customer_id = ? AND status = 'posted' AND COALESCE(posted_at, initiated_at) >= ?", [customerId, cycle]);
+  const pending = sum("SELECT SUM(amount_minor) n FROM bank_transactions WHERE customer_id = ? AND status = 'pending' AND kind NOT IN ('payment')", [customerId]);
+  const carried = 15_000 + (seed % 60) * 1_500; // $150 to $1,035 brought forward from the last statement
+  const balance = Math.max(0, carried + spent + fees - paid);
+  const lowCredit = get<{ amount_minor: number }>("SELECT amount_minor FROM bank_declines WHERE customer_id = ? AND reason_code = 'insufficient_available_credit' AND declined_at >= ? ORDER BY declined_at DESC LIMIT 1", [customerId, cycle]);
+  const limit = lowCredit
+    ? Math.ceil((balance + pending + Math.round(lowCredit.amount_minor * 0.4)) / 1000) * 1000
+    : [200_000, 300_000, 500_000, 750_000][seed % 4];
+  const available = Math.max(0, limit - balance - pending);
+  const lastPayment = get<{ amount_minor: number; at: string; status: string }>("SELECT amount_minor, COALESCE(posted_at, initiated_at) at, status FROM bank_payments WHERE customer_id = ? ORDER BY initiated_at DESC LIMIT 1", [customerId]);
+  const cats = all<{ category: string | null; n: number; total: number }>(
+    "SELECT merchant_category category, COUNT(*) n, SUM(amount_minor) total FROM bank_transactions WHERE customer_id = ? AND kind = 'purchase' AND status != 'reversed' AND txn_at >= ? GROUP BY merchant_category ORDER BY total DESC LIMIT 4",
+    [customerId, since(90)],
+  );
+  const spend = (from: number, to: number) => sum("SELECT SUM(amount_minor) n FROM bank_transactions WHERE customer_id = ? AND kind = 'purchase' AND status != 'reversed' AND txn_at >= ? AND txn_at < ?", [customerId, since(from), since(to)]);
+  const months = [spend(30, 0), spend(60, 30), spend(90, 60)];
+  const count30 = sum("SELECT COUNT(*) n FROM bank_transactions WHERE customer_id = ? AND kind = 'purchase' AND txn_at >= ?", [customerId, cycle]);
+  return {
+    currency: 'USD',
+    balance: formatMoney(balance),
+    available: formatMoney(available),
+    limit: formatMoney(limit),
+    pending: pending ? formatMoney(pending) : null,
+    utilisation: limit ? Math.min(100, Math.round(((balance + pending) / limit) * 100)) : 0,
+    lowCredit: !!lowCredit,
+    lastPayment: lastPayment ? { amount: formatMoney(lastPayment.amount_minor), at: lastPayment.at, status: lastPayment.status } : null,
+    usage: {
+      last30: formatMoney(months[0]),
+      purchases30: count30,
+      months: [['Last 30 days', months[0]], ['30–60 days ago', months[1]], ['60–90 days ago', months[2]]].map(([label, v]) => ({ label: label as string, amount: formatMoney(v as number), minor: v as number })),
+      categories: cats.map((c) => ({ category: String(c.category ?? 'other').replace(/_/g, ' '), count: c.n, amount: formatMoney(c.total), minor: c.total })),
+    },
+    note: 'Balance and usage are worked out from the bank records; the credit limit is a demo figure.',
+  };
+}
+
+/** Up to 6 recent transactions, with the ones this case is about always included and marked. */
+function recentTransactions(customerId: string, cards: { ref: string; masked: string }[], focusIds: string[]) {
+  type T = { id: string; kind: string; merchant_name: string | null; amount_minor: number; currency: string; txn_at: string; status: string; card_id: string | null };
+  const cols = 'SELECT id, kind, merchant_name, amount_minor, currency, txn_at, status, card_id FROM bank_transactions';
+  const recent = all<T>(`${cols} WHERE customer_id = ? ORDER BY txn_at DESC LIMIT 6`, [customerId]);
+  const focus = focusIds.length ? all<T>(`${cols} WHERE customer_id = ? AND id IN (${focusIds.map(() => '?').join(',')})`, [customerId, ...focusIds]) : [];
+  const disputed = new Set(all<{ transaction_id: string }>('SELECT transaction_id FROM disputes WHERE customer_id = ?', [customerId]).map((d) => d.transaction_id));
+  const rows = [...focus, ...recent.filter((t) => !focus.some((f) => f.id === t.id))].slice(0, Math.max(6, focus.length));
+  return rows.map((t) => ({ id: t.id, kind: t.kind, merchant: t.merchant_name ?? (t.kind === 'payment' ? 'Payment received' : '—'), amount: formatMoney(t.amount_minor, t.currency), at: t.txn_at, status: t.status, card: cards.find((k) => k.ref === t.card_id)?.masked ?? null, disputed: disputed.has(t.id), focus: focusIds.includes(t.id) }));
+}
+
+/** The case to open when the agent's screen is opened without one: a call still waiting or live first, then the newest. */
+export function latestCaseId(): string | null {
+  const waiting = get<{ id: string }>("SELECT c.id FROM cases c JOIN handoffs h ON h.session_id = c.session_id WHERE h.status IN ('requested','queued','connected') ORDER BY h.updated_at DESC LIMIT 1");
+  if (waiting) return waiting.id;
+  const live = get<{ id: string }>("SELECT c.id FROM cases c JOIN call_sessions s ON s.id = c.session_id WHERE s.ended_at IS NULL AND s.data_origin = 'demo_session' ORDER BY c.updated_at DESC LIMIT 1");
+  return live?.id ?? get<{ id: string }>("SELECT id FROM cases WHERE data_origin = 'demo_session' ORDER BY created_at DESC LIMIT 1")?.id ?? get<{ id: string }>('SELECT id FROM cases ORDER BY created_at DESC LIMIT 1')?.id ?? null;
 }
 
 function casesForCustomer(customerId: string) {
@@ -425,8 +497,27 @@ export function caseWorkspace(caseId: string, actor: Actor) {
   const transcript = rawTurns.filter((x) => !spokenIn.has(x.seq)).map((t) => ({ seq: t.seq, speaker: t.speaker, kind: t.kind, text: t.text, at: t.created_at, hidden: !!t.sensitive_redacted }));
   const previous = cust.id ? casesForCustomer(cust.id).filter((x) => x.id !== c.id).slice(0, 6) : [];
 
+  // The one card and the charges this call is about, so the agent sees those first.
+  const txnRefs = parseJson<string[]>(c.transaction_refs_json, []);
+  const opTargets = all<{ action_type: string; target_ref: string }>('SELECT action_type, target_ref FROM action_operations WHERE session_id = ? ORDER BY requested_at', [c.session_id]);
+  const focusTxnIds = [...new Set([...txnRefs, ...opTargets.filter((o) => o.action_type === 'submit_dispute' || o.action_type === 'reverse_fee').map((o) => o.target_ref)])];
+  let focusCard: string | null = null;
+  if (customer) {
+    const refs = new Set(customer.cards.map((k) => k.ref));
+    focusCard = opTargets.map((o) => o.target_ref).find((r) => refs.has(r)) ?? null;
+    if (!focusCard && focusTxnIds.length) focusCard = get<{ card_id: string | null }>(`SELECT card_id FROM bank_transactions WHERE id IN (${focusTxnIds.map(() => '?').join(',')}) AND card_id IS NOT NULL LIMIT 1`, focusTxnIds)?.card_id ?? null;
+    if (!focusCard && cardFact?.value) focusCard = customer.cards.find((k) => String(cardFact.value).includes(k.last4))?.ref ?? null;
+    if (!focusCard) focusCard = (customer.cards.find((k) => k.holder === 'primary') ?? customer.cards[0])?.ref ?? null;
+  }
+  // Account detail only once identity is verified: an identified-but-unverified caller sees no transactions.
+  const transactions = customer && cust.verified ? recentTransactions(customer.id, customer.cards, focusTxnIds) : [];
+
   audit({ actor, event: 'crm.case_viewed', status: 'ok', resourceType: 'case', resourceId: c.id, sessionId: c.session_id });
   return {
+    focus: { cardRef: focusCard, transactionIds: focusTxnIds },
+    transactions,
+    account: customer && cust.verified ? accountOverview(customer.id) : null,
+    customerTickets: customer && cust.verified ? all<TicketRow>('SELECT * FROM case_tickets WHERE customer_id = ? AND case_id != ? ORDER BY created_at DESC LIMIT 5', [customer.id, c.id]).map(ticketBrief) : [],
     case: {
       id: c.id,
       sessionId: c.session_id,

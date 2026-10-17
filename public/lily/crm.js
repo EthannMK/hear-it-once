@@ -1,32 +1,26 @@
-// Screen 2 — the human agent's CRM case workspace.
-//   #/crm                    case list + customer search
-//   #/crm/case/:id           one case: customer, key information, suggested next step, summary,
-//                            facts, tags, tickets, actions, timeline, conversation
-//   #/crm/customer/:id       customer profile: cards, transactions, cases, tickets
-//   #/crm/call/:sessionId    the case for a call (where the page lands when a call ends)
-// Everything shown comes from /api/crm/*. Every change goes back through the API, which checks
-// permissions, validates, saves and audits it. Accepting a suggestion records the agent's plan;
-// it never changes the account.
+// Screen 2: the bank agent's workspace for ONE caller at a time.
+//   #/crm                    opens the latest call (a waiting or live one first)
+//   #/crm/case/:id           the case: caller, account, balance, usage, case, tickets, AI back office
+//   #/crm/customer/:id       any customer, found with the search box (same layout, no call)
+//   #/crm/call/:sessionId    the case for a call (where the call screen hands over)
+// Everything shown comes from the API (bank records, case store, back-office agent). Every change
+// goes back through the API, which checks permissions, validates, saves and audits it.
 import { api, h, uid } from '/js/lib.js';
 
 let K = null; // { render, icon, toast }
 export function initCrm(kit) { K = kit; }
 
-const C = { me: null, view: 'attention', q: '', list: null, timer: null, ws: null, dirty: false, openTicketForm: null, openRec: null };
+const C = { me: null, timer: null, ws: null, dirty: false, openTicketForm: null, openRec: null, side: 'ai', ai: {}, joined: null, joinedFor: null, lastCall: null };
 const fmtWhen = (iso) => { try { const d = new Date(iso); const today = new Date().toDateString() === d.toDateString(); return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }); } catch { return ''; } };
 const fmtFull = (iso) => { try { return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
 const initials = (n) => String(n ?? '?').split(' ').map((x) => x[0]).join('').slice(0, 2).toUpperCase();
 const PRI = { urgent: ['coral', 'Urgent'], high: ['amber', 'High'], normal: ['lav', 'Normal'] };
 const ST = { new: 'lav', in_progress: 'violet', awaiting_customer: 'amber', awaiting_bank: 'amber', escalated: 'coral', resolved: 'mint' };
-const FACT = { verified: ['mint', 'Verified'], confirmed: ['mint', 'Confirmed by bank'], provided: ['amber', 'Customer said'], conflicting: ['coral', 'Conflict'], needs_clarification: ['lav', 'Needs attention'], unknown: ['lav', 'Unknown'] };
 const ACT = { completed: 'mint', awaiting_customer: 'lav', awaiting_approval: 'amber', in_progress: 'amber', failed: 'coral', unknown: 'coral', declined: 'lav' };
 const badge = (tone, text) => h(`span.badge.${tone}`, text);
+const cap = (s) => String(s ?? '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
-
-/**
- * A small in-page confirmation box (a native <dialog>), used instead of the browser's own pop-ups.
- * Resolves true / false, or the typed text when `ask` is set and the person confirms.
- */
+/** A small in-page confirmation box (a native <dialog>). Resolves true / false, or the typed text when `ask` is set. */
 function confirmBox({ title, body, confirmLabel = 'Confirm', ask = null, tone = 'dark' }) {
   return new Promise((resolve) => {
     const dlg = h('dialog.crm-dlg', { 'aria-labelledby': 'crm-dlg-title' });
@@ -47,158 +41,130 @@ function stop() { clearInterval(C.timer); C.timer = null; }
 
 /** Demo sign-in: the CRM is a staff screen, so the judge is signed in as the demo agent. */
 async function ensureAgent() {
-  try {
-    let me = await api('/api/auth/me');
-    if (!me.authenticated || me.role !== 'agent') {
-      await api('/api/auth/demo-login', { method: 'POST', body: { userId: 'STF-AGENT-1' } });
-      me = await api('/api/auth/me');
-    }
-    C.me = me;
-  } catch (e) { C.me = null; throw e; }
+  let me = await api('/api/auth/me');
+  if (!me.authenticated || me.role !== 'agent') {
+    await api('/api/auth/demo-login', { method: 'POST', body: { userId: 'STF-AGENT-1' } });
+    me = await api('/api/auth/me');
+  }
+  C.me = me;
 }
 
 export async function crmRoute(hash) {
   stop();
   const m = hash.match(/^#\/crm(?:\/(case|customer|call)\/([^/?#]+))?/);
   const kind = m?.[1]; const id = m?.[2] ? decodeURIComponent(m[2]) : null;
-  K.render('crm', h('main.crm', h('div.crm-main', h('section.card.crm-empty', h('p.muted', 'Loading the agent workspace…')))));
-  try { await ensureAgent(); } catch (e) { return frame(null, errorBox('The agent workspace could not sign in.', e)); }
+  if (!document.querySelector('main.cx')) K.render('crm', h('main.cx', h('section.card.cx-empty', h('p.muted', 'Loading the agent workspace…'))));
+  try { await ensureAgent(); } catch (e) { return shell(null, errorBox('The agent workspace could not sign in.', e)); }
   if (kind === 'call') {
     try { const r = await api(`/api/crm/calls/${encodeURIComponent(id)}`); location.replace(`#/crm/case/${encodeURIComponent(r.caseId)}`); }
-    catch { frame(null, h('section.card.crm-empty', h('h2', 'No case for that call'), h('p', 'Lily didn’t get as far as recording an issue on that call, so no case was opened. Every call that reaches an issue appears in the list on the left.'), h('a.btn.dark', { href: '#/' }, K.icon('phone'), 'Start another call'))); }
+    catch { shell(null, h('section.card.cx-empty', h('h2', 'No case for that call'), h('p', 'Lily didn’t get as far as recording an issue on that call, so no case was opened. Search for a customer above, or start another call.'), h('a.btn.dark', { href: '#/' }, K.icon('phone'), 'Start another call'))); }
     return;
   }
   if (kind === 'case') return casePage(id);
   if (kind === 'customer') return customerPage(id);
-  return homePage();
+  try {
+    const r = await api('/api/crm/latest');
+    if (r.caseId) return location.replace(`#/crm/case/${encodeURIComponent(r.caseId)}`);
+  } catch { /* fall through to the empty state */ }
+  shell(null, h('section.card.cx-empty',
+    h('span.badge.dark', K.icon('headset'), 'Agent workspace'),
+    h('h1', 'No calls yet.'),
+    h('p', 'When a customer talks to Lily and asks for a person, their case opens here with everything already filled in. You can also search for any customer above.'),
+    h('a.btn.dark', { href: '#/' }, K.icon('phone'), 'Talk to Lily')));
 }
 
 /* ------------------------------------------------------------------ layout */
-function frame(activeId, ...content) {
-  const rail = h('aside.crm-rail', { 'aria-label': 'Cases and customers' });
-  drawRail(rail, activeId);
-  const back = activeId ? h('a.crm-back', { href: '#/crm' }, K.icon('arrow'), 'All cases') : null;
-  K.render('crm', h('main.crm' + (activeId ? '.has-case' : ''), rail, h('div.crm-main', back, ...content)));
-}
 
-async function drawRail(rail, activeId) {
-  const search = h('input', { type: 'search', placeholder: 'Search customers or cases', 'aria-label': 'Search customers by name, account reference, phone or case reference', value: C.q, maxlength: '120' });
-  const results = h('div.crm-list', { role: 'list' });
-  const tabs = h('div.crm-tabs', { role: 'tablist', 'aria-label': 'Case views' },
-    [['attention', 'Needs attention'], ['open', 'Open'], ['resolved', 'Resolved'], ['customers', 'Customers']].map(([k, label]) =>
-      h('button', { type: 'button', role: 'tab', 'aria-selected': String(C.view === k), onclick: () => { C.view = k; drawRail(rail, activeId); } }, label)));
-  let t = 0;
-  search.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { C.q = search.value.trim(); load(); }, 220); });
-  rail.replaceChildren(h('div.crm-search', K.icon('search'), search), tabs, results,
-    h('p.crm-me', K.icon('person'), C.me?.authenticated ? `Signed in as ${String(C.me.displayName ?? '').replace(/ \(demo agent\)/, '')}` : 'Not signed in'));
-  async function load() {
-    results.replaceChildren(h('p.small.muted.pad', 'Loading…'));
-    try {
-      if (C.view === 'customers' || (C.q && !/^case-/i.test(C.q))) {
-        const r = await api(`/api/crm/customers?q=${encodeURIComponent(C.q)}`);
-        const cases = C.q && C.view !== 'customers' ? (await api(`/api/crm/cases?view=all&q=${encodeURIComponent(C.q)}`)).items : [];
-        const items = [
-          ...r.items.map((c) => h('a.crm-item', { role: 'listitem', href: `#/crm/customer/${encodeURIComponent(c.id)}`, 'aria-current': c.id === activeId ? 'page' : null },
-            h('span.av2', initials(c.name)), h('div', h('b', c.name), h('span', `${c.accountRef} · ${c.cards[0]?.masked ?? 'no card'}`), h('span', c.openCases ? `${c.openCases} open case${c.openCases > 1 ? 's' : ''}` : c.totalCases ? `${c.totalCases} earlier case${c.totalCases > 1 ? 's' : ''}` : 'No cases')))),
-          ...cases.map(caseItem(activeId)),
-        ];
-        results.replaceChildren(...(items.length ? items : [h('p.small.muted.pad', C.q ? `Nothing matches “${C.q}”.` : 'No customers yet.')]));
-      } else {
-        const r = await api(`/api/crm/cases?view=${C.view}${C.q ? `&q=${encodeURIComponent(C.q)}` : ''}`);
-        results.replaceChildren(...(r.items.length ? r.items.map(caseItem(activeId)) : [h('p.small.muted.pad', C.view === 'attention' ? 'Nothing needs attention. Cases from new calls appear here first.' : 'No cases in this view.')]));
-      }
-    } catch (e) { results.replaceChildren(h('p.banner.bad', { role: 'alert' }, `Couldn’t load the list. ${e.message}`)); }
-  }
-  load();
+/** The page frame: who is on the line and a search box on top, then the content. */
+function shell(head, ...content) {
+  K.render('crm', h('main.cx', h('div.cx-bar', head ?? h('div.cx-who', h('div', h('div.nm', h('span', 'Agent workspace')))), search()), ...content));
 }
-const caseItem = (activeId) => (c) => h('a.crm-item', { role: 'listitem', href: `#/crm/case/${encodeURIComponent(c.id)}`, 'aria-current': c.id === activeId ? 'page' : null },
-  h(`span.dot.${c.live ? 'live' : c.waitingForAgent ? 'wait' : c.priority}`, { title: c.live ? 'Call in progress' : c.waitingForAgent ? 'Waiting for an agent' : `${c.priority} priority` }),
-  h('div', h('b', c.customer ?? 'Unidentified caller'), h('span', `${c.issueType} · ${fmtWhen(c.updatedAt)}`), h('span.chips2', badge(ST[c.status] ?? 'lav', c.statusLabel), c.priority !== 'normal' ? badge(PRI[c.priority][0], PRI[c.priority][1]) : null, c.live ? badge('mint', 'Live') : null)));
 
 function errorBox(title, e) {
-  return h('section.card.crm-empty', { role: 'alert' }, h('h2', title), h('p', e?.status === 404 ? 'It may have been removed when the demo data was reset.' : 'Please try again in a moment.'), h('button.btn', { type: 'button', onclick: () => crmRoute(location.hash) }, K.icon('retry'), 'Try again'));
+  return h('section.card.cx-empty', { role: 'alert' }, h('h2', title), h('p', e?.status === 404 ? 'It may have been removed when the demo data was reset.' : 'Please try again in a moment.'), h('button.btn', { type: 'button', onclick: () => crmRoute(location.hash) }, K.icon('retry'), 'Try again'));
 }
 
-/* ------------------------------------------------------------------ home */
-async function homePage() {
-  frame(null, h('section.card.crm-empty',
-    h('span.badge.dark', K.icon('headset'), 'Agent workspace'),
-    h('h1', 'Every case, ready before the agent picks up.'),
-    h('p', 'Pick a case on the left or search for a customer. Each case is written while the customer talks to Lily: what they said, what was verified, what the bank’s systems confirmed, what was done, and the suggested next step.'),
-    h('div.acts', h('a.btn.dark', { href: '#/' }, K.icon('phone'), 'Talk to Lily to create a case'))));
+/** Find any customer or case: the judge can look beyond the caller. */
+function search() {
+  const input = h('input', { type: 'search', placeholder: 'Find a customer or case', 'aria-label': 'Search customers by name, account reference, phone or case reference', maxlength: '120', autocomplete: 'off' });
+  const out = h('div.cx-results', { role: 'listbox', hidden: true });
+  let t = 0;
+  const close = () => { out.hidden = true; };
+  const load = async () => {
+    const q = input.value.trim();
+    if (!q) { out.replaceChildren(); return close(); }
+    try {
+      const [cu, cs] = await Promise.all([api(`/api/crm/customers?q=${encodeURIComponent(q)}`), api(`/api/crm/cases?view=all&q=${encodeURIComponent(q)}&limit=6`)]);
+      const items = [
+        ...cu.items.slice(0, 6).map((c) => h('a.cx-hit', { role: 'option', href: `#/crm/customer/${encodeURIComponent(c.id)}`, onclick: close },
+          h('span.av2', initials(c.name)), h('div', h('b', c.name), h('span', `${c.accountRef} · ${c.cards[0]?.masked ?? 'no card'} · ${c.totalCases ? `${c.totalCases} case${c.totalCases > 1 ? 's' : ''}` : 'no cases'}`)))),
+        ...cs.items.slice(0, 4).map((c) => h('a.cx-hit', { role: 'option', href: `#/crm/case/${encodeURIComponent(c.id)}`, onclick: close },
+          h('span.av2.case', K.icon('headset')), h('div', h('b', `${c.id} · ${c.customer ?? 'Unidentified caller'}`), h('span', `${c.issueType} · ${c.statusLabel} · ${fmtWhen(c.updatedAt)}`)))),
+      ];
+      out.replaceChildren(...(items.length ? items : [h('p.small.muted.pad', `Nothing matches “${q}”.`)]));
+    } catch (e) { out.replaceChildren(h('p.small.pad', e.message)); }
+    out.hidden = false;
+  };
+  input.addEventListener('input', () => { clearTimeout(t); t = setTimeout(load, 220); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { input.value = ''; close(); } });
+  input.addEventListener('blur', () => setTimeout(close, 200));
+  input.addEventListener('focus', () => { if (input.value.trim()) out.hidden = false; });
+  return h('div.cx-search', K.icon('search'), input, out);
+}
+
+/** Keep each panel's scroll position across a refresh. */
+function keepScroll(fn) {
+  const sel = ['.cx-cust', '.cx-case', '.cx-side .cx-pane'];
+  const pos = sel.map((s) => document.querySelector(s)?.scrollTop ?? 0);
+  fn();
+  sel.forEach((s, i) => { const el = document.querySelector(s); if (el) el.scrollTop = pos[i]; });
 }
 
 /* ------------------------------------------------------------------ case page */
+
 async function casePage(id, opts = {}) {
   let w;
   try { w = await api(`/api/crm/cases/${encodeURIComponent(id)}`); }
-  catch (e) { return frame(id, errorBox('This case couldn’t be loaded.', e)); }
+  catch (e) { return shell(null, errorBox('This case couldn’t be loaded.', e)); }
   C.ws = w;
-  if (!opts.keepScroll) window.scrollTo({ top: 0 });
-  const y = window.scrollY;
-  if (C.joinedCase !== id) { C.joinedCase = id; C.joined = null; }
-  frame(id, ...caseView(w));
-  if (opts.keepScroll) window.scrollTo({ top: y });
-  // Arriving from the caller's screen: the one thing to do next has the focus.
-  if (!opts.keepScroll && C.joined) document.querySelector('.crm-hand.wait button')?.focus({ preventScroll: true });
+  if (C.joinedFor !== id) { C.joinedFor = id; C.joined = null; C.openTicketForm = null; C.openRec = null; }
+  if (w.case.live || ['requested', 'queued', 'connected'].includes(w.handoff?.status)) C.lastCall = id;
+  keepScroll(() => shell(caseHead(w), joinedNote(w), handoverBar(w), h('div.cx-grid', customerCol(w), caseCol(w), sideCol({ caseId: id }, w))));
+  if (!opts.refresh && C.joined) document.querySelector('.cx-hand.wait button')?.focus({ preventScroll: true });
   // A live call or a waiting customer keeps the page current; edits in progress are never overwritten.
   if (w.case.live || ['requested', 'queued', 'connected'].includes(w.handoff?.status)) {
     C.timer = setInterval(async () => {
-      if (C.dirty || document.activeElement?.closest?.('form, .crm-rec, .crm-tickets')) return;
+      if (C.dirty || document.querySelector('dialog[open]') || document.activeElement?.closest?.('form, .cx-search, .cx-rec')) return;
       try {
         const n = await api(`/api/crm/cases/${encodeURIComponent(id)}`);
-        if (n.case.updatedAt !== C.ws.case.updatedAt || n.case.live !== C.ws.case.live || n.handoff?.status !== C.ws.handoff?.status) casePage(id, { keepScroll: true });
+        if (n.case.updatedAt !== C.ws.case.updatedAt || n.case.live !== C.ws.case.live || n.handoff?.status !== C.ws.handoff?.status || n.transcript.length !== C.ws.transcript.length) { stop(); casePage(id, { refresh: true }); }
       } catch { /* next tick */ }
     }, 4000);
   }
 }
 
-/**
- * Shown once, when the viewer arrives here straight from a call that was just handed over: it says
- * plainly whose seat they are now in, because the screen changed under them by design.
- */
-function justJoinedBanner(w) {
-  const sessionId = w.case.sessionId ?? w.case.session_id ?? null;
-  let flag = null;
-  try { flag = sessionStorage.getItem('hio_joined_as_agent'); sessionStorage.removeItem('hio_joined_as_agent'); } catch { /* private mode */ }
-  // Kept for this page (not just the first draw), so the 4-second refresh doesn't make it vanish.
-  if (flag && flag === sessionId) C.joined = sessionId;
-  if (!sessionId || C.joined !== sessionId) return null;
-  const st = w.handoff?.status;
-  if (st === 'completed' || st === 'cancelled' || st === 'no_agent' || st === 'failed') return null;
-  const waiting = st === 'requested' || st === 'queued';
-  return h('section.card.joined', { role: 'status' },
-    h('span.badge.dark', K.icon('headset'), 'You are now the agent'),
-    h('p', waiting
-      ? 'The caller asked for a person. They are on hold and Lily has given them their reference. Read the case, then press “Accept handover” to join them.'
-      : 'You joined the caller. Everything below was written while they were talking to Lily: verified identity, what the bank’s systems returned and what was already done.'));
+function caseHead(w) {
+  const cu = w.customer; const eff = w.tags.effective;
+  return h('div.cx-who',
+    h('span.av3', initials(cu?.name)),
+    h('div',
+      h('div.nm', cu ? h('a', { href: `#/crm/customer/${encodeURIComponent(cu.id)}` }, cu.name) : h('span', 'Unidentified caller'),
+        cu ? (cu.identityVerified ? badge('mint', 'Identity verified') : badge('amber', 'Not verified')) : null,
+        w.case.live ? badge('mint', '● On the line') : null),
+      h('div.meta2', h('span.mono', w.case.id), h('span', `${eff.category} · ${eff.issueType}`), h('span', `Opened ${fmtFull(w.case.createdAt)}`),
+        badge(ST[eff.status] ?? 'lav', eff.statusLabel), badge(PRI[eff.priority][0], `${PRI[eff.priority][1]} priority`),
+        ...w.tickets.slice(0, 1).map((t) => h('span.mono', `Ref ${t.id}`)))));
 }
 
-function caseView(w) {
-  const cu = w.customer;
-  const eff = w.tags.effective;
-  const head = h('section.card.crm-head',
-    h('div.who2', h('span.av3', initials(cu?.name)),
-      h('div',
-        h('div.nm', cu ? h('a', { href: `#/crm/customer/${encodeURIComponent(cu.id)}` }, cu.name) : h('span', 'Unidentified caller'),
-          cu ? (cu.identityVerified ? badge('mint', 'Identity verified') : badge('amber', 'Not verified')) : null),
-        h('div.meta2', cu ? [h('span.mono', cu.accountRef), h('span', cu.cards[0] ? `${cu.cards[0].masked} · ${cu.cards[0].network} · ${cu.cards[0].status}` : 'No card'), h('span', `Standing: ${cu.standing}`), h('span', cu.phone)] : h('span', 'The caller was not identified.')))),
-    h('div.caseid',
-      h('div.row2', badge(ST[eff.status] ?? 'lav', eff.statusLabel), badge(PRI[eff.priority][0], `${PRI[eff.priority][1]} priority`), w.case.live ? badge('mint', '● Call in progress') : null),
-      h('div.meta2', h('span.mono', w.case.id), h('span', w.case.channel), h('span', `Opened ${fmtFull(w.case.createdAt)}`)),
-      h('div.meta2', h('span', `${eff.category} · ${eff.issueType}`))));
-
-  return [
-    justJoinedBanner(w),
-    head,
-    handoverBar(w),
-    h('div.crm-grid2.lead', keyInfo(w), recommendation(w)),
-    summaryCard(w),
-    h('div.crm-grid2', factsCard(w), tagsCard(w)),
-    actionsCard(w),
-    ticketsCard(w),
-    h('div.crm-grid2', timelineCard(w), h('div', conversationCard(w), previousCard(w))),
-  ];
+/** Arriving from the caller's screen: says plainly whose seat the viewer is now in, until the handover is accepted. */
+function joinedNote(w) {
+  const sessionId = w.case.sessionId;
+  let flag = null;
+  try { flag = sessionStorage.getItem('hio_joined_as_agent'); sessionStorage.removeItem('hio_joined_as_agent'); } catch { /* private mode */ }
+  if (flag && flag === sessionId) C.joined = sessionId;
+  if (C.joined !== sessionId) return null;
+  if (!['requested', 'queued'].includes(w.handoff?.status)) return null;
+  return h('p.cx-joined', { role: 'status' }, K.icon('headset'), h('span', h('b', 'You are now the bank agent. '), 'The customer is on hold and everything Lily found is below. Read it, then accept the handover to talk to them.'));
 }
 
 function handoverBar(w) {
@@ -206,215 +172,316 @@ function handoverBar(w) {
   if (!hd || hd.status === 'cancelled') return null;
   const mine = hd.agent_id === C.me?.userId;
   if (hd.status === 'queued' || hd.status === 'requested') {
-    return h('section.crm-hand.wait', { role: 'status' }, K.icon('headset'),
-      h('div', h('b', 'The customer is waiting for an agent'), h('span', `${hd.reasonLabel}. Lily has told them a colleague will pick up with the full case, so they won’t repeat anything.`)),
+    return h('section.cx-hand.wait', { role: 'status' }, K.icon('headset'),
+      h('div.grow', h('b', 'The customer is waiting for you'), h('span', `${hd.reasonLabel}. Lily told them a colleague will pick up with the full case, so they won’t repeat anything.`)),
       h('button.btn.dark.cta', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/accept`, { method: 'POST', body: {} }), 'Handover accepted. The customer has been told you joined.') }, 'Accept handover'));
   }
   if (hd.status === 'connected') {
     const input = h('input', { type: 'text', maxlength: '500', placeholder: mine ? 'Message the customer…' : 'Accepted by another agent', 'aria-label': 'Message to the customer', disabled: !mine });
-    const outcome = h('select', { 'aria-label': 'Outcome', disabled: !mine }, h('option', { value: 'resolved' }, 'Resolved'), h('option', { value: 'follow_up_required' }, 'Follow-up needed'), h('option', { value: 'unresolved' }, 'Not resolved'));
-    // Re-checking identity mid-call: the passcode goes to the customer's registered number and they
-    // type it in. The agent sees where it went and whether it matched, never the code itself.
-    const ck = C.ws?.agentCheck ?? null;
-    const checkRow = h('div.idcheck',
-      h('button.btn.sm', { type: 'button', disabled: !mine || ck?.status === 'awaiting', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/identity-check`, { method: 'POST', body: {} }), 'Passcode sent. Ask the customer to type it in.') },
-        K.icon('lock'), ck?.status === 'awaiting' ? 'Passcode sent — waiting' : 'Send a passcode to verify'),
-      ck
-        ? h(`span.ck.${ck.status}`, ck.status === 'passed' ? `Verified by passcode (${ck.deliveredTo})` : ck.status === 'failed' ? `Passcode check failed after ${ck.attempts} attempts` : `Sent to ${ck.deliveredTo} — ask them to read nothing out, just type it`)
-        : h('span.ck', 'For anything sensitive, check who you are speaking to.'));
-    return h('section.crm-hand.on', K.icon('headset'),
-      h('div', h('b', `You’re with the customer${hd.agentName && !mine ? ` (${hd.agentName})` : ''}`), h('span', 'Messages you send appear in the customer’s conversation.'),
-        checkRow,
+    const ck = w.agentCheck ?? null;
+    return h('section.cx-hand.on', K.icon('headset'),
+      h('div.grow', h('b', `You’re with the customer${hd.agentName && !mine ? ` (${hd.agentName})` : ''}`),
         h('form.row3', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (!v) return; act(e.submitter, () => api(`/api/handoffs/${hd.id}/message`, { method: 'POST', body: { text: v } }), 'Message sent.'); } }, input, h('button.btn', { type: 'submit', disabled: !mine }, 'Send'))),
-      h('div.row3', outcome, h('button.btn.dark', { type: 'button', disabled: !mine, onclick: async (e) => { const b = e.currentTarget; if (await confirmBox({ title: 'Finish this handover?', body: 'The outcome you chose is recorded on the case.', confirmLabel: 'Finish' })) act(b, () => api(`/api/handoffs/${hd.id}/complete`, { method: 'POST', body: { outcome: outcome.value, notes: '', customerRepeatedIssue: false } }), 'Handover completed.'); } }, 'Finish')));
+      h('div.row3',
+        h('button.btn.sm', { type: 'button', disabled: !mine || ck?.status === 'awaiting' || ck?.status === 'passed', title: 'A passcode goes to the registered phone; the customer types it in.', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/identity-check`, { method: 'POST', body: {} }), 'Passcode sent. Ask the customer to type it in.') },
+          K.icon('lock'), ck?.status === 'awaiting' ? 'Passcode sent' : ck?.status === 'passed' ? 'Verified by passcode' : ck?.status === 'failed' ? 'Passcode failed' : 'Verify by passcode'),
+        h('button.btn.dark', { type: 'button', disabled: !mine, onclick: (e) => finishHandover(e.currentTarget, hd) }, 'Finish call')));
   }
-  return h('section.crm-hand', K.icon('headset'), h('div', h('b', hd.status === 'completed' ? `Handled by ${hd.agentName ?? 'an agent'}` : 'No agent was available'), h('span', hd.status === 'completed' ? `Outcome: ${String(hd.outcome ?? '').replace(/_/g, ' ')}` : 'A callback was requested.')));
+  return h('section.cx-hand', K.icon('headset'), h('div.grow', h('b', hd.status === 'completed' ? `Handled by ${hd.agentName ?? 'an agent'}` : 'No agent was available'), h('span', hd.status === 'completed' ? `Outcome: ${cap(hd.outcome)}` : 'A callback was requested.')));
 }
 
-/** Run a change, then reload the case. Buttons are disabled while it runs, so a double click can’t send it twice. */
+async function finishHandover(btn, hd) {
+  const outcome = h('select', { 'aria-label': 'Outcome' }, h('option', { value: 'resolved' }, 'Resolved'), h('option', { value: 'follow_up_required' }, 'Follow-up needed'), h('option', { value: 'unresolved' }, 'Not resolved'));
+  const notes = h('textarea', { rows: '3', maxlength: '1000', 'aria-label': 'Notes for the case', placeholder: 'Notes for the case (optional)' });
+  const ok = await new Promise((resolve) => {
+    const dlg = h('dialog.crm-dlg', { 'aria-labelledby': 'fin-t' });
+    const done = (v) => { dlg.close(); dlg.remove(); resolve(v); };
+    dlg.append(h('form', { onsubmit: (e) => { e.preventDefault(); done(true); } },
+      h('h2#fin-t', 'Finish this call'), h('p', 'The outcome and your notes are saved on the case.'),
+      h('label.fld', h('span', 'Outcome'), outcome), h('label.fld', h('span', 'Notes'), notes),
+      h('div.row3', h('button.btn.dark', { type: 'submit' }, 'Finish'), h('button.btn', { type: 'button', onclick: () => done(false) }, 'Cancel'))));
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(false); });
+    document.body.append(dlg); dlg.showModal(); outcome.focus();
+  });
+  if (ok) act(btn, () => api(`/api/handoffs/${hd.id}/complete`, { method: 'POST', body: { outcome: outcome.value, notes: notes.value.trim(), customerRepeatedIssue: false } }), 'Call finished and saved on the case.');
+}
+
+/** Run a change, then reload. Buttons are disabled while it runs, so a double click can’t send it twice. */
 async function act(btn, fn, okMsg) {
   if (btn) btn.disabled = true;
-  try { await fn(); if (okMsg) K.toast(okMsg); C.dirty = false; await casePage(C.ws.case.id, { keepScroll: true }); }
-  catch (e) { K.toast(e.status === 409 ? e.message : `That didn’t go through: ${e.message}`); if (btn) btn.disabled = false; }
+  try {
+    await fn();
+    if (okMsg) K.toast(okMsg);
+    C.dirty = false;
+    stop();
+    if (location.hash.startsWith('#/crm/case/') && C.ws?.case) await casePage(C.ws.case.id, { refresh: true });
+    else await crmRoute(location.hash);
+  } catch (e) { K.toast(e.status === 409 ? e.message : `That didn’t go through: ${e.message}`); if (btn) btn.disabled = false; }
 }
 
-function keyInfo(w) {
-  const ic = { ok: 'check', warn: 'alert', bad: 'x', unknown: 'info' };
-  return h('section.card.crm-sec', h('h2', 'Key information'),
-    h('ul.keys', w.keyInfo.map((k) => h(`li.${k.state}`, h('span.k', K.icon(ic[k.state])), h('div', h('b', k.label), h('span', k.detail))))));
+/* ------------------------------------------------------------------ left column: the customer */
+
+function customerCol(w) {
+  const cu = w.customer;
+  if (!cu || !w.account) {
+    return h('aside.cx-cust', { 'aria-label': 'Customer' },
+      h('section.card.cx-sec.cx-unver',
+        h('h2', K.icon('lock'), 'Caller not verified'),
+        h('p', cu ? `Lily matched the caller to ${cu.name}, but they have not passed the security check, so the account stays hidden.` : 'Lily could not match the caller to a customer, so no account is shown.'),
+        h('p.small.muted', 'Accept the handover, then use “Verify by passcode” before discussing the account. Or search for the customer above.'),
+        w.summary.reported ? h('p.cx-said', `“${w.summary.reported}”`) : null));
+  }
+  return h('aside.cx-cust', { 'aria-label': 'Customer' }, accountCard(cu, w.focus?.cardRef), balanceCard(w.account), usageCard(w.account, w.history), txCard(w.transactions, cu));
+}
+
+function accountCard(cu, focusRef) {
+  const card = cu.cards.find((k) => k.ref === focusRef) ?? cu.cards[0];
+  const others = cu.cards.filter((k) => k !== card);
+  const tone = (s) => (s === 'active' ? 'mint' : 'coral');
+  return h('section.card.cx-sec',
+    h('h2', 'Account status'),
+    h('div.cx-kv',
+      h('span', 'Standing'), h('b', cu.standing === 'good' ? badge('mint', 'Good standing') : badge('coral', cap(cu.standing))),
+      h('span', focusRef ? 'Card on this call' : 'Card'), h('b', card ? [`${card.network} ${card.masked} `, badge(tone(card.status), cap(card.status) + (card.statusReason ? ` · ${card.statusReason.replace(/_/g, ' ')}` : ''))] : '—'),
+      others.length ? [h('span', 'Other cards'), h('b', others.map((k) => `${k.masked} ${k.status}`).join(', '))] : null,
+      h('span', 'Fraud alerts'), h('b', cu.openFraudAlerts ? badge('coral', `${cu.openFraudAlerts} open`) : badge('mint', 'None open')),
+      h('span', 'Contact'), h('b.small', `${cu.phone} · ${cu.accountRef}`)));
+}
+
+function balanceCard(a) {
+  const bar = h('span.fill');
+  bar.style.width = `${a.utilisation}%`;
+  return h('section.card.cx-sec.cx-bal',
+    h('h2', 'Balance'),
+    h('div.cx-money', h('div', h('span', 'Current balance'), h('b', a.balance)), h('div', h('span', 'Available credit'), h(`b${a.lowCredit || a.utilisation > 90 ? '.warn' : ''}`, a.available))),
+    h(`div.cx-meter${a.utilisation > 90 ? '.hot' : ''}`, { role: 'img', 'aria-label': `${a.utilisation}% of the ${a.limit} limit used` }, bar),
+    h('p.small.muted', `${a.utilisation}% of ${a.limit} limit used${a.pending ? ` · ${a.pending} pending` : ''}${a.lastPayment ? ` · last payment ${a.lastPayment.amount}, ${fmtWhen(a.lastPayment.at)}` : ''}`));
+}
+
+function usageCard(a, history) {
+  const max = Math.max(1, ...a.usage.months.map((m) => m.minor));
+  const cmax = Math.max(1, ...a.usage.categories.map((c) => c.minor));
+  const bars = (items, top, label, value) => h('ul.cx-bars', items.map((x) => { const f = h('i'); f.style.width = `${Math.max(2, Math.round((x.minor / top) * 100))}%`; return h('li', h('span', label(x)), h('span.track', f), h('b', value(x))); }));
+  return h('section.card.cx-sec',
+    h('h2', 'Transaction usage', history ? badge('lav', 'BigQuery') : null),
+    h('p.small', h('b', a.usage.last30), ` spent in the last 30 days · ${a.usage.purchases30} purchase${a.usage.purchases30 === 1 ? '' : 's'}`),
+    bars(a.usage.months, max, (m) => m.label, (m) => m.amount),
+    a.usage.categories.length ? [h('p.cap', 'Top categories · 90 days'), bars(a.usage.categories, cmax, (c) => cap(c.category), (c) => c.amount)] : null,
+    history ? h('p.small.muted', `${history.transactions.toLocaleString()} transactions on file${history.firstAt ? ` since ${fmtWhen(history.firstAt)}` : ''} · live from ${history.source}`) : null);
+}
+
+function txCard(txns, cu) {
+  return h('section.card.cx-sec.cx-tx',
+    h('div.cx-h', h('h2', 'Recent transactions'), location.hash.includes('/customer/') ? null : h('a.small', { href: `#/crm/customer/${encodeURIComponent(cu.id)}` }, 'See all')),
+    txns.length ? h('ul.cx-txl', txns.map((t) => h(`li${t.focus ? '.focus' : ''}`,
+      h('div', h('b', t.merchant), h('span', `${fmtWhen(t.at)} · ${t.kind}${t.status !== 'posted' ? ` · ${t.status}` : ''}`)),
+      h('div.amt', h('b.mono', t.amount), t.focus ? badge('amber', 'This call') : t.disputed ? badge('lav', 'Disputed') : null))))
+      : h('p.small.muted', 'No transactions.'));
+}
+
+/* ------------------------------------------------------------------ middle column: the case */
+
+function caseCol(w) {
+  return h('section.cx-case', { 'aria-label': 'Case' }, summaryCard(w), recommendation(w), actionsCard(w), ticketsCard(w), interactionsCard(w.previousCases, w.case.id));
+}
+
+function summaryCard(w) {
+  const s = w.summary;
+  const li = (items, cls, iconName) => h(`ul.list.${cls}`, items.slice(0, 4).map((x) => h('li', K.icon(iconName), h('span', x))));
+  const tx = w.taxonomy; const ov = w.tags.overrides; const eff = w.tags.effective;
+  const save = (key) => (e) => act(e.currentTarget, () => api(`/api/crm/cases/${w.case.id}`, { method: 'PATCH', body: { version: w.case.version, overrides: { [key]: e.currentTarget.value || null } } }), 'Case updated.');
+  return h('section.card.cx-sec',
+    h('div.cx-h', h('h2', 'Case summary'),
+      h('div.cx-sel',
+        h('select', { 'aria-label': 'Case status', onchange: save('status') }, tx.statuses.map((x) => h('option', { value: x.id, ...(eff.status === x.id ? { selected: '' } : {}) }, x.label))),
+        h('select', { 'aria-label': 'Priority', onchange: save('priority') }, tx.priorities.map((p) => h('option', { value: p, ...(eff.priority === p ? { selected: '' } : {}) }, `${cap(p)} priority`))),
+        ov.status || ov.priority ? h('span.small.muted', 'set by agent') : null)),
+    h('p.prose.clamp', { title: 'Click to show all', onclick: (e) => e.currentTarget.classList.toggle('open') }, w.summaryText),
+    s.confirmed.length || s.unresolved.length ? h('div.cx-two',
+      s.confirmed.length ? h('div', h('h3', 'Confirmed'), li(s.confirmed, 'ok', 'check')) : null,
+      s.unresolved.length ? h('div', h('h3', 'Still open'), li(s.unresolved, 'bad', 'alert')) : null) : null);
 }
 
 function recommendation(w) {
   const recs = w.recommendations;
   const top = recs.find((r) => r.status !== 'rejected') ?? recs[0];
+  if (!top) return null;
   const rest = recs.filter((r) => r !== top);
   const stLabel = { suggested: null, accepted: ['mint', 'Accepted'], rejected: ['lav', 'Rejected'], edited: ['violet', 'Edited'] };
   const one = (r, big) => {
     const editing = C.openRec === r.kind;
     const ta = h('textarea', { rows: '2', maxlength: '500', 'aria-label': 'Your version of the next step' }, r.editedText ?? r.title);
-    return h(`div.crm-rec${big ? '.big' : ''}`,
+    const post = (body, msg) => (e) => act(e.currentTarget, () => api(`/api/crm/cases/${w.case.id}/recommendations/${r.kind}`, { method: 'POST', body }), msg);
+    return h(`div.cx-rec${big ? '.big' : ''}`,
       h('div.rt', h('b', r.editedText ?? r.title), stLabel[r.status] ? badge(...stLabel[r.status]) : null),
-      h('p', h('span.why', 'Why: '), r.reason),
-      r.decidedBy ? h('p.small.muted', `${stLabel[r.status]?.[1] ?? ''} by ${r.decidedBy} · ${fmtFull(r.decidedAt)}`) : null,
+      h('p.small', h('span.why', 'Why: '), r.reason),
       editing
-        ? h('form.row3', { onsubmit: (e) => { e.preventDefault(); C.openRec = null; act(e.submitter, () => api(`/api/crm/cases/${w.case.id}/recommendations/${r.kind}`, { method: 'POST', body: { decision: 'edit', text: ta.value.trim() } }), 'Your version is saved.'); } }, ta, h('button.btn.dark', { type: 'submit' }, 'Save'), h('button.btn', { type: 'button', onclick: () => { C.openRec = null; casePage(w.case.id, { keepScroll: true }); } }, 'Cancel'))
+        ? h('form.row3', { onsubmit: (e) => { e.preventDefault(); C.openRec = null; act(e.submitter, () => api(`/api/crm/cases/${w.case.id}/recommendations/${r.kind}`, { method: 'POST', body: { decision: 'edit', text: ta.value.trim() } }), 'Your version is saved.'); } }, ta, h('button.btn.sm.dark', { type: 'submit' }, 'Save'), h('button.btn.sm', { type: 'button', onclick: () => { C.openRec = null; casePage(w.case.id, { refresh: true }); } }, 'Cancel'))
         : h('div.row3',
-          h('button.btn.mint', { type: 'button', disabled: r.status === 'accepted', onclick: (e) => act(e.currentTarget, () => api(`/api/crm/cases/${w.case.id}/recommendations/${r.kind}`, { method: 'POST', body: { decision: 'accept' } }), 'Accepted. Nothing on the account changes until you or the customer act.') }, K.icon('check'), 'Accept'),
-          h('button.btn', { type: 'button', onclick: () => { C.openRec = r.kind; casePage(w.case.id, { keepScroll: true }); } }, 'Edit'),
-          h('button.btn.ghost', { type: 'button', disabled: r.status === 'rejected', onclick: (e) => act(e.currentTarget, () => api(`/api/crm/cases/${w.case.id}/recommendations/${r.kind}`, { method: 'POST', body: { decision: 'reject' } }), 'Suggestion rejected.') }, 'Reject')));
+          h('button.btn.sm.mint', { type: 'button', disabled: r.status === 'accepted', onclick: post({ decision: 'accept' }, 'Accepted. Nothing on the account changes until you or the customer act.') }, K.icon('check'), 'Accept'),
+          h('button.btn.sm', { type: 'button', onclick: () => { C.openRec = r.kind; casePage(w.case.id, { refresh: true }); } }, 'Edit'),
+          h('button.btn.sm.ghost', { type: 'button', disabled: r.status === 'rejected', onclick: post({ decision: 'reject' }, 'Suggestion rejected.') }, 'Reject')));
   };
-  return h('section.card.crm-sec.crm-recs', h('h2', 'Suggested next step', badge('amber', 'Not done yet')),
-    top ? one(top, true) : h('p.muted', 'No suggestion for this case.'),
+  return h('section.card.cx-sec.cx-recs', h('h2', 'Suggested next step', badge('amber', 'Not done yet')),
+    one(top, true),
     rest.length ? h('details', h('summary', `${rest.length} more suggestion${rest.length > 1 ? 's' : ''}`), rest.map((r) => one(r, false))) : null);
-}
-
-function summaryCard(w) {
-  const s = w.summary;
-  const li = (items, cls, iconName, empty) => items.length ? h(`ul.list.${cls}`, items.map((x) => h('li', K.icon(iconName), h('span', x)))) : h('p.small.muted', empty);
-  return h('section.card.crm-sec', h('h2', 'Case summary'),
-    h('p.prose', w.summaryText),
-    h('div.crm-sum',
-      h('div', h('span.cap', 'What the customer reported'), h('p', s.reported ? `“${s.reported}”` : h('span.muted', 'Not captured'))),
-      h('div', h('span.cap', 'What they want (likely)'), h('p', s.intendedOutcome ?? h('span.muted', 'Unknown'))),
-      h('div', h('span.cap', 'Transaction'), h('p', s.transaction ?? h('span.muted', 'Not identified yet'))),
-      h('div', h('span.cap', 'Verification'), h('p', s.verification)),
-      h('div', h('span.cap', 'Outcome so far'), h('p', s.outcome)),
-      h('div', h('span.cap', 'Systems checked'), s.checks.length ? h('div.chips', s.checks.map((c) => h(`span.chip.${c.status === 'ok' ? 'ok' : 'warn'}`, `${c.label}${c.status === 'ok' ? '' : ` · ${c.status}`}${c.stale ? ' · stale' : ''}`))) : h('p.muted', 'None yet'))),
-    h('div.crm-grid3',
-      h('div', h('h3', 'Confirmed findings'), li(s.confirmed, 'ok', 'check', 'Nothing confirmed by bank systems yet.')),
-      h('div', h('h3', 'Still open or unclear'), li(s.unresolved, 'bad', 'alert', 'Nothing outstanding.')),
-      h('div', h('h3', 'Recommended next steps'), li(s.nextSteps, 'next', 'arrow', 'None.'))));
-}
-
-function factsCard(w) {
-  return h('section.card.crm-sec', h('h2', 'What we know'),
-    h('p.small.muted', '“Customer said” means no bank system has checked it yet.'),
-    h('table.crm-facts', h('thead', h('tr', h('th', 'Detail'), h('th', 'Value'), h('th', 'Status'))),
-      h('tbody', w.facts.map((f) => h('tr',
-        h('th', { scope: 'row' }, f.label),
-        h('td', f.value ?? h('span.muted', 'Unknown'), f.customerValue ? h('div.small', `Customer said: ${f.customerValue}`) : null, f.history.filter((x) => x.value !== f.customerValue && x.value !== f.value).length ? h('div.small.muted', `Earlier: ${f.history.filter((x) => x.value !== f.customerValue && x.value !== f.value).map((x) => `${x.value} (${x.why})`).join('; ')}`) : null),
-        h('td', badge(...(FACT[f.status] ?? ['lav', f.status]))))))));
-}
-
-function tagsCard(w) {
-  const tx = w.taxonomy; const ai = w.tags.ai; const ov = w.tags.overrides;
-  const field = (key, label, options, aiVal, fmt = (x) => x) => {
-    const sel = h('select', { name: key, 'aria-label': label, onchange: () => { C.dirty = true; } },
-      h('option', { value: '' }, `${aiVal ? fmt(aiVal) : 'None'} (auto)`),
-      options.map((o) => { const v = typeof o === 'string' ? o : o.id; return h('option', { value: v, ...(ov[key] === v ? { selected: '' } : {}) }, typeof o === 'string' ? fmt(o) : o.label); }));
-    return h('label.fld', h('span', label, ov[key] ? h('em', ' · changed') : null), sel);
-  };
-  const notes = h('textarea', { rows: '3', maxlength: '3000', 'aria-label': 'Case notes', placeholder: 'Notes for the next person who opens this case', oninput: () => { C.dirty = true; } }, w.notes);
-  const form = h('form.crm-tags', { onsubmit: async (e) => {
-    e.preventDefault();
-    const submitter = e.submitter;
-    const fd = new FormData(e.target); const overrides = {};
-    for (const k of ['category', 'issueType', 'priority', 'status', 'resolutionType', 'escalationReason']) { const v = fd.get(k); overrides[k] = v ? v : null; }
-    if (overrides.status === 'resolved' && ai.status !== 'resolved' && !(await confirmBox({ title: 'Mark this case resolved?', body: 'The customer’s case record will show it as resolved too.', confirmLabel: 'Mark resolved' }))) return;
-    act(submitter, () => api(`/api/crm/cases/${w.case.id}`, { method: 'PATCH', body: { version: w.case.version, overrides, notes: notes.value } }), 'Case saved.');
-  } },
-    h('div.fields',
-      field('category', 'Category', tx.categories, ai.category),
-      field('issueType', 'Issue type', tx.issueTypes, ai.issueType),
-      field('priority', 'Priority', tx.priorities, ai.priority, (x) => x[0].toUpperCase() + x.slice(1)),
-      field('status', 'Status', tx.statuses, tx.statuses.find((s) => s.id === ai.status)?.label),
-      field('resolutionType', 'Resolution', tx.resolutionTypes, ai.resolutionType),
-      field('escalationReason', 'Escalation reason', tx.escalationReasons, ai.escalationReason)),
-    h('p.small.muted', `Priority rule: ${ai.priorityReason}${ai.sentiment ? ` · Customer mood: ${ai.sentiment} (indicative only, never used to act)` : ''}`),
-    h('label.fld.wide', h('span', 'Notes'), notes),
-    h('div.row3', h('button.btn.dark', { type: 'submit' }, 'Save changes'), w.tags.editedBy ? h('span.small.muted', `Last changed by ${w.tags.editedBy} · ${fmtFull(w.tags.editedAt)}`) : null));
-  return h('section.card.crm-sec', h('h2', 'Tags and status'), form);
 }
 
 function actionsCard(w) {
   if (!w.actions.length) return null;
-  return h('section.card.crm-sec', h('h2', 'Account actions'),
-    h('ul.crm-acts', w.actions.map((a) => h('li',
+  return h('section.card.cx-sec', h('h2', 'Actions on the account'),
+    h('ul.cx-acts', w.actions.map((a) => h('li',
       h('div', h('b', a.label), h('span', a.reference ? `Ref ${a.reference}` : a.error ?? '')),
       badge(ACT[a.state] ?? 'lav', a.stateLabel),
       a.canApprove ? h('div.row3',
-        h('button.btn.mint', { type: 'button', onclick: async (e) => { const b = e.currentTarget; if (await confirmBox({ title: `Approve “${a.label}”?`, body: 'This sends the request to the bank. It cannot be undone from here.', confirmLabel: 'Approve and send', tone: 'mint' })) act(b, () => api(`/api/actions/${a.id}/approve`, { method: 'POST', body: {} }), 'Approved and sent.'); } }, 'Approve'),
-        h('button.btn.ghost', { type: 'button', onclick: async (e) => { const b = e.currentTarget; const reason = await confirmBox({ title: `Reject “${a.label}”?`, body: 'Nothing will be changed on the account.', ask: 'Why are you rejecting it?', confirmLabel: 'Reject' }); if (reason) act(b, () => api(`/api/actions/${a.id}/reject`, { method: 'POST', body: { reason } }), 'Rejected. Nothing was changed.'); } }, 'Reject')) : null,
-      a.canCheck ? h('button.btn', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/actions/${a.id}/reconcile`, { method: 'POST', body: {} }), 'Status checked with the bank system.') }, K.icon('retry'), 'Check status') : null))));
+        h('button.btn.sm.mint', { type: 'button', onclick: async (e) => { const b = e.currentTarget; if (await confirmBox({ title: `Approve “${a.label}”?`, body: 'This sends the request to the bank. It cannot be undone from here.', confirmLabel: 'Approve and send', tone: 'mint' })) act(b, () => api(`/api/actions/${a.id}/approve`, { method: 'POST', body: {} }), 'Approved and sent.'); } }, 'Approve'),
+        h('button.btn.sm.ghost', { type: 'button', onclick: async (e) => { const b = e.currentTarget; const reason = await confirmBox({ title: `Reject “${a.label}”?`, body: 'Nothing will be changed on the account.', ask: 'Why are you rejecting it?', confirmLabel: 'Reject' }); if (reason) act(b, () => api(`/api/actions/${a.id}/reject`, { method: 'POST', body: { reason } }), 'Rejected. Nothing was changed.'); } }, 'Reject')) : null,
+      a.canCheck ? h('button.btn.sm', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/actions/${a.id}/reconcile`, { method: 'POST', body: {} }), 'Status checked with the bank system.') }, K.icon('retry'), 'Check status') : null))));
+}
+
+const TK_NEXT = { open: [['in_progress', 'Start work']], in_progress: [['resolved', 'Mark resolved']], resolved: [['closed', 'Close']], closed: [] };
+const tkTone = (s) => (s === 'closed' || s === 'resolved' ? 'mint' : s === 'in_progress' ? 'violet' : 'amber');
+
+function ticketRow(t, editable) {
+  return h('li',
+    h('div.rt', h('b', `${t.typeLabel} · ${t.id}`), badge(tkTone(t.status), cap(t.status)), h('span.small.muted', `${t.team ?? ''}${t.owner ? ` · ${t.owner}` : ''} · ${fmtWhen(t.createdAt)}`)),
+    h('p.small', t.reason),
+    editable && TK_NEXT[t.status]?.length ? h('div.row3', TK_NEXT[t.status].map(([s, label]) => h('button.btn.sm', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/crm/tickets/${t.id}`, { method: 'PATCH', body: { status: s } }), `Ticket ${t.id}: ${label.toLowerCase()}.`) }, label))) : null,
+    !editable && t.caseId ? h('a.small', { href: `#/crm/case/${encodeURIComponent(t.caseId)}` }, 'Open its case') : null);
 }
 
 function ticketsCard(w) {
   const open = C.openTicketForm;
+  const rows = [...w.tickets.map((t) => [t, true]), ...(w.customerTickets ?? []).filter((t) => t.status !== 'closed').map((t) => [t, false])];
   const form = () => {
-    const key = open.key;
-    const reason = h('textarea', { rows: '2', maxlength: '300', required: true, 'aria-label': 'Reason', placeholder: open.type === 'complaint' ? 'What is the customer unhappy about?' : 'Why does this need another team?' });
-    const team = h('select', { 'aria-label': 'Team' }, w.taxonomy.teams.map((t) => h('option', { value: t, ...(t === (open.type === 'complaint' ? 'Complaints' : '') ? { selected: '' } : {}) }, t)));
-    const pri = h('select', { 'aria-label': 'Priority' }, h('option', { value: '' }, `Automatic (${w.tags.effective.priority})`), w.taxonomy.priorities.map((p) => h('option', { value: p }, p)));
-    return h('form.crm-tform', { onsubmit: (e) => {
+    const reason = h('textarea', { rows: '2', maxlength: '300', 'aria-label': 'Reason', placeholder: 'What should happen, and why?' });
+    const type = h('select', { 'aria-label': 'Type' }, h('option', { value: 'escalation' }, 'Service request'), h('option', { value: 'complaint' }, 'Complaint'));
+    const team = h('select', { 'aria-label': 'Team' }, w.taxonomy.teams.map((t) => h('option', { value: t }, t)));
+    return h('form.cx-tform', { onsubmit: (e) => {
       e.preventDefault();
       if (reason.value.trim().length < 3) return K.toast('Add a short reason.');
-      act(e.submitter, async () => { const r = await api(`/api/crm/cases/${w.case.id}/tickets`, { method: 'POST', body: { type: open.type, reason: reason.value.trim(), team: team.value, ...(pri.value ? { priority: pri.value } : {}), requestKey: key } }); C.openTicketForm = null; if (r.duplicate) K.toast(`Ticket ${r.ticket.id} already exists for this case, so no new one was made.`); return r; }, null);
+      act(e.submitter, async () => { const r = await api(`/api/crm/cases/${w.case.id}/tickets`, { method: 'POST', body: { type: type.value, reason: reason.value.trim(), team: team.value, requestKey: open.key } }); C.openTicketForm = null; if (r.duplicate) K.toast(`Ticket ${r.ticket.id} already exists for this case.`); return r; }, 'Service request created.');
     } },
-      h('h3', open.type === 'complaint' ? 'New complaint ticket' : 'Escalate to another team'),
-      h('p.small.muted', 'The ticket is filled in from the case: the customer’s words, the summary, confirmed details, steps taken and evidence.'),
-      h('label.fld.wide', h('span', 'Reason'), reason), h('div.fields', h('label.fld', h('span', 'Team'), team), h('label.fld', h('span', 'Priority'), pri)),
-      h('div.row3', h('button.btn.dark', { type: 'submit' }, 'Create ticket'), h('button.btn', { type: 'button', onclick: () => { C.openTicketForm = null; casePage(w.case.id, { keepScroll: true }); } }, 'Cancel')));
+      h('div.row3', type, team), reason,
+      h('div.row3', h('button.btn.sm.dark', { type: 'submit' }, 'Create'), h('button.btn.sm', { type: 'button', onclick: () => { C.openTicketForm = null; casePage(w.case.id, { refresh: true }); } }, 'Cancel')));
   };
-  const next = { open: [['in_progress', 'Start work']], in_progress: [['resolved', 'Mark resolved']], resolved: [['closed', 'Close']], closed: [] };
-  return h('section.card.crm-sec.crm-tickets', h('h2', `Tickets (${w.tickets.length})`),
-    w.tickets.length ? h('ul.crm-tk', w.tickets.map((t) => h('li',
-      h('div.rt', h('b', `${t.typeLabel} · ${t.id}`), badge(t.status === 'closed' || t.status === 'resolved' ? 'mint' : t.status === 'in_progress' ? 'violet' : 'amber', t.status.replace('_', ' ')), badge(PRI[t.priority][0], t.priority), h('span.small.muted', `${t.team ?? ''} · ${t.owner ? `owner ${t.owner}` : 'unassigned'} · created ${fmtFull(t.createdAt)} by ${t.createdBy}`)),
-      h('p', t.reason),
-      h('details', h('summary', 'Ticket details'),
-        h('dl.kv2', h('dt', 'Customer’s concern'), h('dd', t.originalConcern ?? '—'), h('dt', 'Summary'), h('dd', t.summary), h('dt', 'Confirmed details'), h('dd', t.confirmedDetails.join(' · ') || '—'), h('dt', 'Steps taken'), h('dd', t.stepsTaken.join(' · ') || '—'), h('dt', 'Evidence'), h('dd', t.evidence.join(' · ') || '—'), h('dt', 'Outstanding'), h('dd', t.outstandingAction ?? '—')),
-        h('ol.did', t.events.map((e) => h('li', h('span.small', `${fmtFull(e.at)} · ${e.event.replace('status_', 'moved to ').replace(/_/g, ' ')} · ${e.by}${e.detail ? ` — ${e.detail}` : ''}`))))),
-      next[t.status]?.length ? h('div.row3', next[t.status].map(([s, label]) => h('button.btn', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/crm/tickets/${t.id}`, { method: 'PATCH', body: { status: s } }), `Ticket ${t.id}: ${label.toLowerCase()}.`) }, label))) : null))) : h('p.small.muted', 'No tickets. Create one if the customer wants to complain or another team must act.'),
-    open ? form() : h('div.row3',
-      h('button.btn', { type: 'button', onclick: () => { C.openTicketForm = { type: 'complaint', key: `ui-${uid()}` }; casePage(w.case.id, { keepScroll: true }); } }, 'Create complaint ticket'),
-      h('button.btn', { type: 'button', onclick: () => { C.openTicketForm = { type: 'escalation', key: `ui-${uid()}` }; casePage(w.case.id, { keepScroll: true }); } }, 'Escalate')));
+  return h('section.card.cx-sec.cx-tickets',
+    h('div.cx-h', h('h2', `Service requests (${rows.length})`), open ? null : h('button.btn.sm', { type: 'button', onclick: () => { C.openTicketForm = { key: `ui-${uid()}` }; casePage(w.case.id, { refresh: true }); } }, '+ New')),
+    open ? form() : null,
+    rows.length ? h('ul.cx-tk', rows.map(([t, mine]) => ticketRow(t, mine))) : open ? null : h('p.small.muted', 'No service requests for this customer.'));
 }
 
-function timelineCard(w) {
+function interactionsCard(items, currentId) {
+  const list = items.filter((x) => x.id !== currentId);
+  return h('section.card.cx-sec',
+    h('h2', `Earlier interactions (${list.length})`),
+    list.length ? h('ul.cx-int', list.slice(0, 6).map((c) => h('li', h('a', { href: `#/crm/case/${encodeURIComponent(c.id)}` },
+      h('span.d', fmtWhen(c.createdAt)), h('span.t', c.headline ?? c.issueType), badge(ST[c.status] ?? 'lav', c.statusLabel)))))
+      : h('p.small.muted', 'First contact: no earlier calls or cases.'));
+}
+
+/* ------------------------------------------------------------------ right column: AI back office, timeline, conversation */
+
+const SUGGEST_CASE = ['Has this customer disputed before?', 'Is anyone else reporting this merchant?', 'Any fees we could reverse?', 'How does the customer use the card?'];
+const SUGGEST_CUST = ['Summarise this customer', 'Any fees we could reverse?', 'How does the customer use the card?', 'Has this customer disputed before?'];
+
+function sideCol(target, w) {
+  const key = target.caseId ?? target.customerId;
+  const tabs = [['ai', 'AI back office'], ...(w ? [['timeline', `Timeline (${w.timeline.length})`], ['talk', `Conversation (${w.transcript.length})`]] : [])];
+  if (!tabs.some(([k]) => k === C.side)) C.side = 'ai';
+  const pane = h('div.cx-pane');
+  const btns = tabs.map(([k, label]) => h('button', { type: 'button', role: 'tab', 'data-k': k, onclick: () => { C.side = k; draw(); } }, label));
+  function draw() {
+    for (const b of btns) b.setAttribute('aria-selected', String(b.dataset.k === C.side));
+    pane.replaceChildren(C.side === 'timeline' ? timeline(w) : C.side === 'talk' ? conversation(w) : aiPane(target, key));
+  }
+  draw();
+  return h('aside.card.cx-side', { 'aria-label': 'Back office, timeline and conversation' }, h('div.cx-tabs', { role: 'tablist' }, btns), pane);
+}
+
+function aiPane(target, key) {
+  const st = (C.ai[key] ??= { insights: null, loading: false, thread: [], busy: false });
+  const insightsEl = h('div.cx-ins');
+  const thread = h('div.cx-thread', { 'aria-live': 'polite' });
+  const input = h('input', { type: 'text', maxlength: '500', placeholder: 'Ask the back office…', 'aria-label': 'Question for the back-office agent', autocomplete: 'off' });
+  const send = async (q) => {
+    q = q.trim(); if (!q || st.busy) return;
+    st.busy = true; input.value = '';
+    const item = { q, a: null };
+    st.thread.push(item); drawThread();
+    try { item.a = await api('/api/backoffice/ask', { method: 'POST', body: { ...target, question: q } }); }
+    catch (e) { item.a = { error: e.message }; }
+    st.busy = false; if (thread.isConnected) drawThread();
+  };
+  function answerView(a) {
+    if (!a) return h('p.small.muted.cx-think', 'Looking it up in the bank records…');
+    if (a.error) return h('p.small.bad', a.error);
+    return h('div.cx-ans',
+      a.text ? h('p', a.text) : null,
+      a.bullets?.length ? h('ul', a.bullets.map((b) => h('li', b))) : null,
+      h('details.cx-how', h('summary', `${a.mode === 'adk' ? 'ADK agent' : 'Built-in'} · ${(a.ms / 1000).toFixed(1)} s · how it found this`),
+        a.fallbackReason ? h('p.small', a.fallbackReason) : null,
+        a.steps?.length ? h('ol', a.steps.map((s) => h('li', h('b', s.tool), s.detail ? (s.detail.length > 60 ? h('pre', s.detail) : h('span', ` ${s.detail}`)) : null))) : null,
+        a.sources?.length ? h('p.small.muted', `Sources: ${a.sources.join(', ')}`) : null));
+  }
+  function drawThread() {
+    thread.replaceChildren(...st.thread.map((x) => h('div.cx-qa', h('p.q', x.q), answerView(x.a))));
+    thread.lastElementChild?.scrollIntoView({ block: 'nearest' });
+  }
+  function drawInsights() {
+    const v = st.insights;
+    insightsEl.replaceChildren(
+      h('div.cx-h', h('h3', K.icon('activity'), 'Before you talk'), v && !v.error ? badge(v.mode === 'adk' ? 'violet' : 'lav', v.mode === 'adk' ? 'ADK · Agent Engine' : 'Built-in') : null),
+      v?.error ? h('p.small.bad', v.error)
+        : v ? h('ul', v.bullets.map((b) => h('li', b)))
+        : h('ul.skel', [1, 2, 3].map(() => h('li', h('span')))),
+      ...(v?.fallbackReason ? [h('p.small.muted', v.fallbackReason)] : []));
+  }
+  if (!st.insights && !st.loading) {
+    st.loading = true;
+    api(`/api/backoffice/insights?${new URLSearchParams(target)}`).then((v) => { st.insights = v; }).catch((e) => { st.insights = { error: e.message, bullets: [] }; })
+      .finally(() => { st.loading = false; if (insightsEl.isConnected) drawInsights(); });
+  }
+  drawInsights(); drawThread();
+  return h('div.cx-ai', insightsEl,
+    h('div.cx-chips', (target.caseId ? SUGGEST_CASE : SUGGEST_CUST).map((q) => h('button.chip', { type: 'button', onclick: () => send(q) }, q))),
+    thread,
+    h('form.cx-ask', { onsubmit: (e) => { e.preventDefault(); send(input.value); } }, input, h('button.btn.sm.primary', { type: 'submit' }, 'Ask')),
+    h('p.small.muted.cx-ro', 'Read-only: the back office looks things up; it never changes an account.'));
+}
+
+function timeline(w) {
   const tone = { ok: 'ok', failed: 'failed', blocked: 'blocked', warn: 'warn', pending: 'pending', running: 'pending', info: 'info' };
-  return h('section.card.crm-sec', h('h2', `Timeline (${w.timeline.length})`),
-    h('ol.crm-tl', w.timeline.map((e) => h('li', h(`span.n.${tone[e.status] ?? 'info'}`), h('div', h('b', e.title), h('span.small.muted', fmtFull(e.at)), e.detail ? h('p.small', e.detail) : null)))));
+  return h('ol.crm-tl', [...w.timeline].reverse().map((e) => h('li', h(`span.n.${tone[e.status] ?? 'info'}`), h('div', h('b', e.title), h('span.small.muted', fmtFull(e.at)), e.detail ? h('p.small', e.detail) : null))));
 }
 
-function conversationCard(w) {
-  const turns = w.transcript;
+function conversation(w) {
   let agentNow = 'Lily';
-  return h('section.card.crm-sec', h('details', h('summary', h('h2', `Conversation (${turns.length})`), h('span.small.muted', 'Supporting detail, the summary above is enough to act on')),
-    h('div.convo', turns.map((tr) => {
-      if (tr.kind?.startsWith('agent_switch:')) agentNow = tr.kind.slice(13);
-      if (tr.speaker === 'system') return h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim());
-      const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
-      return h(`div.b.${cls}`, h('div.wl', h('b', cls === 'cust' ? 'Customer' : cls === 'lily' ? `${agentNow} (AI)` : 'Agent'), h('span', fmtFull(tr.at))), h('div.txt', tr.hidden ? 'Security answer given (not stored)' : tr.text));
-    }))));
+  return h('div.convo', w.transcript.map((tr) => {
+    if (tr.kind?.startsWith('agent_switch:')) agentNow = tr.kind.slice(13);
+    if (tr.speaker === 'system') return h('div.note', tr.text.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim());
+    const cls = tr.speaker === 'customer' ? 'cust' : tr.speaker === 'assistant' ? 'lily' : 'agent';
+    return h(`div.b.${cls}`, h('div.wl', h('b', cls === 'cust' ? 'Customer' : cls === 'lily' ? `${agentNow} (AI)` : 'Agent'), h('span', fmtFull(tr.at))), h('div.txt', tr.hidden ? 'Security answer given (not stored)' : tr.text));
+  }));
 }
 
-function previousCard(w) {
-  return h('section.card.crm-sec', h('h2', 'Other cases for this customer'),
-    w.previousCases.length ? h('div.crm-list.flat', w.previousCases.map(caseItem(null))) : h('p.small.muted', 'No other cases for this customer.'));
-}
-
-/* ------------------------------------------------------------------ customer page */
-const money = (minor) => `$${(Number(minor) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/* ------------------------------------------------------------------ customer page (found with search) */
 
 async function customerPage(id) {
   let p;
   try { p = await api(`/api/crm/customers/${encodeURIComponent(id)}`); }
-  catch (e) { return frame(id, errorBox('This customer couldn’t be loaded.', e)); }
+  catch (e) { return shell(null, errorBox('This customer couldn’t be loaded.', e)); }
   const cu = p.customer;
-  window.scrollTo({ top: 0 });
-  frame(id,
-    h('section.card.crm-head',
-      h('div.who2', h('span.av3', initials(cu.name)), h('div', h('div.nm', h('span', cu.name), cu.standing === 'good' ? badge('mint', 'Good standing') : badge('coral', cu.standing)),
-        h('div.meta2', h('span.mono', cu.accountRef), h('span', cu.phone), h('span', cu.email ?? ''), h('span', `${cu.segment} customer`)))),
-      h('div.caseid', h('div.row2', cu.openFraudAlerts ? badge('coral', `${cu.openFraudAlerts} open fraud alert${cu.openFraudAlerts > 1 ? 's' : ''}`) : badge('mint', 'No open fraud alerts')))),
-    h('div.crm-grid2',
-      h('section.card.crm-sec', h('h2', 'Cards'), h('ul.crm-acts', cu.cards.map((k) => h('li', h('div', h('b', `${k.network} ${k.product}`), h('span', `${k.masked} · ${k.holder}`)), badge(k.status === 'active' ? 'mint' : 'coral', k.status + (k.statusReason ? ` · ${k.statusReason}` : '')))))),
-      h('section.card.crm-sec', h('h2', `Cases (${p.cases.length})`), p.cases.length ? h('div.crm-list.flat', p.cases.map(caseItem(null))) : h('p.small.muted', 'No cases yet.'))),
-    p.history ? h('section.card.crm-sec', h('h2', 'Account history', badge('lav', 'Live from BigQuery')),
-      h('p', `${p.history.transactions.toLocaleString()} transactions${p.history.firstAt ? ` since ${fmtWhen(p.history.firstAt)}` : ''}, ${money(p.history.spendMinor)} in card purchases.`),
-      p.history.topCategories.length ? h('div.chips', p.history.topCategories.map((c) => h('span.chip', `${c.category} · ${c.count} · ${money(c.spendMinor)}`))) : null,
-      h('p.small.muted', p.history.source)) : null,
-    h('section.card.crm-sec', h('h2', 'Recent transactions'),
-      h('table.crm-facts', h('thead', h('tr', h('th', 'Date'), h('th', 'Merchant'), h('th', 'Amount'), h('th', 'Status'))),
-        h('tbody', p.transactions.map((t) => h('tr', h('td', fmtWhen(t.at)), h('td', t.merchant, t.disputed ? badge('amber', 'Disputed') : null, h('div.small.muted', `${t.kind}${t.card ? ` · ${t.card}` : ''}`)), h('td.mono', t.amount), h('td', t.status)))))),
-    p.tickets.length ? h('section.card.crm-sec', h('h2', 'Tickets'), h('ul.crm-tk', p.tickets.map((t) => h('li', h('div.rt', h('b', `${t.typeLabel} · ${t.id}`), badge(t.status === 'closed' || t.status === 'resolved' ? 'mint' : 'amber', t.status.replace('_', ' ')), h('span.small.muted', fmtFull(t.createdAt))), h('p', t.reason), h('a', { href: `#/crm/case/${encodeURIComponent(t.caseId)}` }, 'Open the case'))))) : null);
+  const head = h('div.cx-who', h('span.av3', initials(cu.name)),
+    h('div', h('div.nm', h('span', cu.name), badge('lav', `${cap(cu.segment)} customer`)),
+      h('div.meta2', h('span.mono', cu.accountRef), h('span', cu.phone), cu.email ? h('span', cu.email) : null,
+        C.lastCall ? h('a.btn.sm', { href: `#/crm/case/${encodeURIComponent(C.lastCall)}` }, '← Back to the call') : null)));
+  const txns = p.transactions.slice(0, 12).map((t) => ({ ...t, focus: false }));
+  shell(head, h('div.cx-grid',
+    h('aside.cx-cust', { 'aria-label': 'Customer' }, accountCard(cu, null), balanceCard(p.account), usageCard(p.account, p.history), txCard(txns, cu)),
+    h('section.cx-case', { 'aria-label': 'Customer record' },
+      h('section.card.cx-sec', h('h2', 'Cards'), h('ul.cx-acts', cu.cards.map((k) => h('li', h('div', h('b', `${k.network} ${k.product}`), h('span', `${k.masked} · ${k.holder}`)), badge(k.status === 'active' ? 'mint' : 'coral', cap(k.status) + (k.statusReason ? ` · ${k.statusReason.replace(/_/g, ' ')}` : '')))))),
+      h('section.card.cx-sec', h('h2', `Service requests (${p.tickets.length})`), p.tickets.length ? h('ul.cx-tk', p.tickets.map((t) => ticketRow(t, false))) : h('p.small.muted', 'No service requests.')),
+      interactionsCard(p.cases, null)),
+    sideCol({ customerId: id }, null)));
 }
