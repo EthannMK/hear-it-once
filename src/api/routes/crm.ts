@@ -2,6 +2,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../../lib/errors.ts';
+import { adapters } from '../../adapters/registry.ts';
+import { customerHistory } from '../../adapters/bigquery/replica.ts';
 import { requirePermission, staffActor } from '../../auth/rbac.ts';
 import { caseIdForSession, caseWorkspace, createTicket, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
 
@@ -21,7 +23,11 @@ export function registerCrmRoutes(app: FastifyInstance): void {
 
   app.get<{ Params: { id: string } }>('/api/crm/customers/:id', async (req) => {
     const p = requirePermission(req.staff, 'case.read');
-    return customerProfile(Id.parse(req.params.id), staffActor(p));
+    const id = Id.parse(req.params.id);
+    const profile = customerProfile(id, staffActor(p));
+    // BigQuery mode: add the customer's full account history, read live from BigQuery.
+    const history = adapters().mode === 'bigquery' ? await customerHistory(id).catch(() => null) : null;
+    return history ? { ...profile, history } : profile;
   });
 
   app.get('/api/crm/cases', async (req) => {

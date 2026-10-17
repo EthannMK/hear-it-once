@@ -108,6 +108,7 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 
 | Document | Contents |
 |---|---|
+| [docs/BIGQUERY.md](docs/BIGQUERY.md) | Bank data and knowledge in BigQuery (`ADAPTER_MODE=bigquery`), Kaggle and Bitext data, setup script, ADK proposal |
 | [docs/CRM.md](docs/CRM.md) | Call memory (structured facts) and the Agent CRM: summary, tags, suggestions, tickets |
 | [docs/PLAN.md](docs/PLAN.md) | Phase 0 assessment and stack decision |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, state machines, data model, request flow |

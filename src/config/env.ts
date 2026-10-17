@@ -23,7 +23,16 @@ const EnvSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+  /** "mock" reads the synthetic tables in the local database; "bigquery" reads the same kind of synthetic bank data live from BigQuery. */
   ADAPTER_MODE: z.string().default('mock'),
+  /** BigQuery data source (ADAPTER_MODE=bigquery). Project defaults to GOOGLE_CLOUD_PROJECT. */
+  BQ_PROJECT: z.string().optional(),
+  BQ_DATASET: z.string().regex(/^[A-Za-z0-9_]+$/).default('northstar_bank'),
+  BQ_LOCATION: z.string().default('asia-southeast1'),
+  /** Local testing only: a BigQuery emulator endpoint, e.g. http://localhost:9050 (no Google credentials used). */
+  BQ_API_ENDPOINT: z.string().url().optional(),
+  /** Remote embedding model for knowledge search, as dataset.model. Empty or "off" uses keyword search only. */
+  BQ_EMBEDDING_MODEL: z.string().default('northstar_bank.embedding_model'),
   POLICY_PROFILE: z.enum(['prototype-mock', 'pilot-conservative']).default('prototype-mock'),
   INTENT_MODEL: z.enum(['rules', 'anthropic', 'gemini']).default('rules'),
   /** Used when INTENT_MODEL=gemini: reads the full sentence when the keyword rules are unsure. */
@@ -60,6 +69,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     throw new Error(`Invalid configuration: ${issues}`);
   }
   const env = parsed.data;
+  // BigQuery answers in about a second rather than milliseconds: unless set explicitly, give its
+  // lookups and writes more time so a slow query is not mistaken for a down system.
+  if (env.ADAPTER_MODE === 'bigquery') {
+    if (!source.ADAPTER_TIMEOUT_MS) env.ADAPTER_TIMEOUT_MS = 8000;
+    if (!source.ACTION_TIMEOUT_MS) env.ACTION_TIMEOUT_MS = 12000;
+  }
   if (!env.SESSION_SECRET) {
     if (env.NODE_ENV === 'production') throw new Error('SESSION_SECRET is required in production');
     // Development convenience only: a per-process random secret (sessions reset on restart).
