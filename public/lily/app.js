@@ -112,7 +112,9 @@ async function route() {
     if (S.call && !S.call.ended) S.call.destroy();
     return crmRoute(hash);
   }
-  if (hash.startsWith('#/safety')) {
+  // Guardrails is the screen's name in the header; #/safety is what earlier links used, and both
+  // open the same screen rather than leaving one of them pointing nowhere.
+  if (hash.startsWith('#/guardrails') || hash.startsWith('#/safety')) {
     if (S.call && !S.call.ended) S.call.destroy();
     return safetyRoute();
   }

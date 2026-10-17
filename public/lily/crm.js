@@ -16,7 +16,7 @@ const C = {
   // each section keeps (transaction filters and selection, knowledge search, unsaved notes).
   // It lives here and not in the DOM so a 4-second refresh, or switching section, keeps it.
   tab: 'overview', cop: true,
-  tx: { q: '', status: 'all', days: 'all', sel: null },
+  tx: { q: '', status: 'all', days: '90', disputed: false, sel: null, forCust: null, rows: [], total: 0, matching: 0, hasMore: false, cursor: null, oldestAt: null, statuses: [], loading: false, error: null },
   kb: { forCase: null, data: null, error: null, loading: false, q: '', sel: null },
   notes: null, notesFor: null,
   side: 'ai', cust: 'account', ai: {}, joined: null, joinedFor: null, lastCall: null,
@@ -752,7 +752,7 @@ function setTab(k) { C.tab = k; C.redraw?.(); }
 function workspace(w, id) {
   if (!AG_TABS.some(([k]) => k === C.tab)) C.tab = 'overview';
   if (C.notesFor !== id) { C.notesFor = id; C.notes = null; }
-  const n = { tx: w.transactions?.length ?? 0, talk: w.transcript.length, case: (w.tickets?.length ?? 0) + (w.actions?.length ?? 0), timeline: w.timeline.length };
+  const n = { tx: (C.tx.forCust && C.tx.forCust === w.customer?.id ? C.tx.total : 0) || w.transactions?.length || 0, talk: w.transcript.length, case: (w.tickets?.length ?? 0) + (w.actions?.length ?? 0), timeline: w.timeline.length };
   const btns = AG_TABS.map(([k, label]) => h('button', { type: 'button', role: 'tab', 'data-k': k, onclick: () => setTab(k) },
     h('span', label), n[k] ? h('span.n', String(n[k])) : null));
   const work = h('section.ag-work', { role: 'tabpanel', tabindex: '-1', 'aria-label': 'Agent workspace' });
@@ -782,6 +782,12 @@ function workspace(w, id) {
   // A section whose data arrives after the first paint (Knowledge) refreshes only the copilot's
   // context block, so the thread above it is left alone.
   C.refreshCtx = () => { if (ctx.isConnected) ctx.replaceChildren(...copilotContext(w)); };
+  // A count a section only learns after loading (the full transaction history) corrects its tab.
+  C.refreshCount = (k, total) => {
+    const b = btns.find((x) => x.dataset.k === k);
+    if (!b || !b.isConnected) return;
+    b.replaceChildren(h('span', AG_TABS.find(([t]) => t === k)[1]), total ? h('span.n', String(total)) : null);
+  };
   draw();
   setCop(C.cop);
   return h('div.ag-shell', h('nav.ag-nav', { role: 'tablist', 'aria-label': 'Agent workspace sections' }, btns), body);
@@ -901,53 +907,89 @@ function balanceBody(a) {
 
 /* ------------------------------------------------------------ transactions */
 
-const TX_RANGES = [['all', 'Any date'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']];
+const TX_RANGES = [['all', 'Whole history'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['365', 'Last 12 months']];
 
 /**
- * The transaction workspace. Filters and the selected row live in module state, so they survive a
- * refresh of the page and a trip to another section. Choosing a row opens its full record beside
- * the table — never a second page.
+ * The transaction workspace. The ledger is read from the customer's own transaction endpoint, not
+ * from the handful the case carries, and it is paged: the counts beside the filters are counted in
+ * the database, so the screen can say how many entries there really are instead of implying that
+ * the first page is the whole history. Filters, the page already loaded and the selected row live
+ * in module state, so leaving the section and coming back costs nothing and loses nothing.
  */
 function txView(w) {
-  const rows = w.transactions ?? [];
-  const statuses = [...new Set(rows.map((t) => t.status))];
-  const q = h('input', { type: 'search', value: C.tx.q, maxlength: '60', placeholder: 'Search merchant, amount or reference', 'aria-label': 'Search transactions' });
-  const st = h('select', { 'aria-label': 'Status' }, h('option', { value: 'all' }, 'Any status'), statuses.map((x) => h('option', { value: x, ...(C.tx.status === x ? { selected: '' } : {}) }, cap(rows.find((t) => t.status === x)?.statusLabel ?? x))));
-  const dr = h('select', { 'aria-label': 'Date range' }, TX_RANGES.map(([k, l]) => h('option', { value: k, ...(C.tx.days === k ? { selected: '' } : {}) }, l)));
-  const flagged = h('label.ag-chk', h('input', { type: 'checkbox', ...(C.tx.only ? { checked: '' } : {}) }), h('span', 'Disputed or flagged only'));
-  const count = h('span.small.muted');
+  const st = C.tx;
+  const cust = w.customer?.id ?? null;
+  if (!cust) return h('div.ag-tx', h('p.small.muted', 'No customer is identified on this case, so there is no account to read transactions from.'));
+  if (st.forCust !== cust) { Object.assign(st, { forCust: cust, rows: [], total: 0, matching: 0, hasMore: false, cursor: null, sel: null, error: null, loading: false, statuses: [] }); }
+
+  const q = h('input', { type: 'search', value: st.q, maxlength: '60', placeholder: 'Merchant, amount or reference', 'aria-label': 'Search transactions' });
+  const stSel = h('select', { 'aria-label': 'Status' });
+  const dr = h('select', { 'aria-label': 'Date range' }, TX_RANGES.map(([k, l]) => h('option', { value: k, ...(st.days === k ? { selected: '' } : {}) }, l)));
+  const disp = h('input', { type: 'checkbox', ...(st.disputed ? { checked: '' } : {}) });
+  const count = h('span.small.muted.ag-count');
   const table = h('div.ag-txwrap');
   const detail = h('div.ag-txdet');
+  const more = h('div.ag-more');
 
-  const match = (t) => {
-    const needle = C.tx.q.trim().toLowerCase();
-    if (needle && ![t.merchant, t.amount, t.id, t.networkRef, t.authCode, t.card, t.where].some((x) => String(x ?? '').toLowerCase().includes(needle))) return false;
-    if (C.tx.status !== 'all' && t.status !== C.tx.status) return false;
-    if (C.tx.only && !t.disputed && !t.reportedByOthers && !t.focus) return false;
-    if (C.tx.days !== 'all') {
-      const age = (Date.now() - Date.parse(t.at)) / 86400000;
-      if (!(age >= 0 ? age <= Number(C.tx.days) : true)) return false;
+  const drawStatuses = () => stSel.replaceChildren(h('option', { value: 'all' }, 'Any status'), ...st.statuses.map((x) => h('option', { value: x, ...(st.status === x ? { selected: '' } : {}) }, cap(x))));
+
+  // One request per change of filter, and one more for each further page. Nothing is refetched
+  // when the agent only switches section.
+  async function load(append) {
+    st.loading = true; st.error = null;
+    paint();
+    const p = new URLSearchParams({ limit: '25' });
+    if (st.q.trim()) p.set('q', st.q.trim());
+    if (st.status !== 'all') p.set('status', st.status);
+    if (st.days !== 'all') p.set('days', st.days);
+    if (st.disputed) p.set('disputed', 'true');
+    if (append && st.cursor) p.set('cursor', st.cursor);
+    try {
+      const r = await api(`/api/crm/customers/${encodeURIComponent(cust)}/transactions?${p}`);
+      st.rows = append ? [...st.rows, ...r.items] : r.items;
+      st.total = r.total; st.matching = r.matching; st.hasMore = r.hasMore; st.cursor = r.nextCursor;
+      st.oldestAt = r.oldestAt; st.statuses = r.statuses;
+      C.refreshCount?.('tx', r.total);
+      if (st.sel && !st.rows.some((t) => t.id === st.sel)) st.sel = null;
+    } catch (e) {
+      st.error = e.message;
+    } finally {
+      st.loading = false;
+      if (table.isConnected) { drawStatuses(); paint(); }
     }
-    return true;
-  };
+  }
 
   function paint() {
-    const shown = rows.filter(match);
-    if (C.tx.sel && !shown.some((t) => t.id === C.tx.sel)) C.tx.sel = null;
-    count.replaceChildren(`${shown.length} of ${rows.length} transaction${rows.length === 1 ? '' : 's'}`);
-    table.replaceChildren(shown.length ? txGrid(shown, paint) : h('p.small.muted.pad', rows.length ? 'No transaction matches these filters.' : 'This customer has no transactions on file.'));
-    const sel = rows.find((t) => t.id === C.tx.sel) ?? null;
+    const filtered = st.q.trim() || st.status !== 'all' || st.days !== 'all' || st.disputed;
+    count.replaceChildren(st.error ? 'Could not be read'
+      : st.loading && !st.rows.length ? 'Loading…'
+      : filtered ? `${st.rows.length} shown · ${st.matching} match these filters · ${st.total} in the full history`
+      : `${st.rows.length} shown · ${st.total} in the full history`);
+    table.replaceChildren(
+      st.error ? h('div.ag-state', { role: 'alert' }, K.icon('alert'), h('div', h('b', 'The transaction ledger could not be read.'), h('span', st.error)), h('button.btn.sm', { type: 'button', onclick: () => load(false) }, K.icon('retry'), 'Try again'))
+        : st.loading && !st.rows.length ? h('ul.skel.ag-skel', [1, 2, 3, 4].map(() => h('li', h('span'))))
+        : st.rows.length ? txGrid(st.rows, paint)
+        : h('div.ag-state', K.icon('search'), h('div', h('b', filtered ? 'Nothing matches these filters.' : 'No transactions on file for this customer.'), h('span', filtered ? 'Widen the date range or clear the search.' : st.total ? '' : 'Nothing has been recorded against this account.'))));
+    more.replaceChildren(...[
+      st.hasMore ? h('button.btn.sm', { type: 'button', disabled: st.loading, onclick: () => load(true) }, st.loading ? 'Loading…' : `Load 25 more (${Math.max(0, st.matching - st.rows.length)} left)`) : null,
+      !st.hasMore && st.rows.length ? h('span.small.muted', st.oldestAt ? `That is every entry${st.days === 'all' ? '' : ' in this range'}. The oldest on file is ${fmtWhen(st.oldestAt)}.` : 'That is every entry.') : null,
+    ].filter(Boolean));
+    const sel = st.rows.find((t) => t.id === st.sel) ?? null;
     detail.replaceChildren(sel ? txDetail(sel, w) : h('p.small.muted', 'Select a transaction to see its full record and what you can do with it.'));
     detail.classList.toggle('on', !!sel);
   }
-  q.addEventListener('input', () => { C.tx.q = q.value; paint(); });
-  st.addEventListener('change', () => { C.tx.status = st.value; paint(); });
-  dr.addEventListener('change', () => { C.tx.days = dr.value; paint(); });
-  flagged.querySelector('input').addEventListener('change', (e) => { C.tx.only = e.currentTarget.checked; paint(); });
+
+  let t = 0;
+  q.addEventListener('input', () => { st.q = q.value; clearTimeout(t); t = setTimeout(() => load(false), 280); });
+  stSel.addEventListener('change', () => { st.status = stSel.value; load(false); });
+  dr.addEventListener('change', () => { st.days = dr.value; load(false); });
+  disp.addEventListener('change', () => { st.disputed = disp.checked; load(false); });
+  drawStatuses();
   paint();
+  if (!st.rows.length && !st.loading) load(false);
   return h('div.ag-tx',
-    h('div.ag-txbar', h('div.cx-search.sm', K.icon('search'), q), st, dr, flagged, count),
-    h('div.ag-txsplit', table, detail));
+    h('div.ag-txbar', h('div.cx-search.sm', K.icon('search'), q), stSel, dr, h('label.ag-chk', disp, h('span', 'Disputed only')), count),
+    h('div.ag-txsplit', h('div.ag-txcol', table, more), detail));
 }
 
 /** The ledger itself: one row per entry, the selected one highlighted. */

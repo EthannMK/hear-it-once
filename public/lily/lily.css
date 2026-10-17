@@ -1251,6 +1251,7 @@ table.ag-txt td.mono { white-space: nowrap; }
 .ag-chk { display: inline-flex; gap: 6px; align-items: center; font-size: 0.82rem; color: var(--text-2); white-space: nowrap; }
 .ag-txsplit { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 12px; align-items: start; min-height: 0; }
 .ag-txsplit:has(> .ag-txdet:not(.on)) { grid-template-columns: minmax(0, 1fr) 220px; }
+@media (min-width: 1101px) and (min-height: 600px) { .ag-txcol { max-height: 100%; } .ag-txcol > .ag-txwrap { flex: 1 1 auto; min-height: 0; } }
 .ag-txwrap { overflow: auto; min-width: 0; border: 1px solid var(--hair); border-radius: 14px; }
 table.ag-txt { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
 table.ag-txt thead th { position: sticky; top: 0; z-index: 1; background: var(--ivory); font: 700 0.6rem var(--label); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); text-align: left; padding: 8px 10px; white-space: nowrap; }
@@ -1391,3 +1392,15 @@ table.ag-txt tr.on td { background: #f2f0fb; box-shadow: inset 3px 0 0 var(--vio
 .crm-dlg .ag-taglist { margin-top: -4px; }
 .crm-dlg .fld select { width: 100%; }
 @media (max-height: 800px) { .ag-ctx { max-height: 34%; } .ag-cop .cx-ins { max-height: 34%; } }
+
+/* The paged transaction ledger: the table and its "load more" footer in one column. */
+.ag-txcol { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.ag-more { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; flex: none; }
+.ag-count { margin-left: auto; white-space: nowrap; }
+.ag-state { display: flex; gap: 10px; align-items: flex-start; padding: 18px 16px; color: var(--text-2); }
+.ag-state svg.i { width: 18px; height: 18px; flex: none; margin-top: 2px; color: var(--muted); }
+.ag-state b { display: block; color: var(--aub); }
+.ag-state span { display: block; font-size: 0.84rem; color: var(--muted); }
+.ag-state .btn { margin-left: auto; flex: none; }
+.ag-txwrap .ag-skel { padding: 10px; }
+.ag-txwrap .ag-skel span { height: 34px; }

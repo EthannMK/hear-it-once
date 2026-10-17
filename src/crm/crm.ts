@@ -1110,3 +1110,96 @@ export function removeCallTag(caseId: string, actor: StaffActor, raw: unknown) {
   audit({ actor, event: 'crm.call_tag_removed', status: 'ok', resourceType: 'case', resourceId: caseId, sessionId: c.session_id, metadata: { tag } });
   return { caseId, tags: callTags(caseId) };
 }
+
+/* ================================================================== the full transaction ledger */
+
+const TxnQuery = z.object({
+  /** Only transactions in the last N days. Null means the whole history. */
+  days: z.coerce.number().int().min(1).max(3650).nullable().default(null),
+  status: z.string().trim().max(30).regex(/^[a-z_]*$/).nullable().default(null),
+  q: z.string().trim().max(60).default(''),
+  /** Only entries the customer has disputed, so the count stays exact across pages. */
+  disputed: z.coerce.boolean().default(false),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  /** Keyset cursor from a previous page: "<txn_at>|<id>". Rows are ordered newest first. */
+  cursor: z.string().max(80).nullable().default(null),
+});
+
+/**
+ * A customer's transactions, filtered and paged. The case workspace deliberately carries only the
+ * handful of recent entries an agent sees at a glance; this is the ledger behind it, so the screen
+ * can say how many there really are and work through them rather than implying six is all there is.
+ *
+ * Paging is by keyset (the last row's time and id) rather than OFFSET, so a page cannot repeat or
+ * skip a row if something posts while the agent is reading. `total` is the customer's whole
+ * history; `matching` is how many rows the current filters select, both counted in the database
+ * rather than inferred from the page.
+ */
+export function customerTransactions(customerId: string, actor: Actor, raw: unknown) {
+  const f = TxnQuery.parse(raw ?? {});
+  if (f.q && looksLikeCardNumber(f.q)) throw new AppError('VALIDATION_FAILED', 'Card numbers can’t be used to search.');
+  const cust = get<{ id: string }>('SELECT id FROM bank_customers WHERE id = ?', [customerId]);
+  if (!cust) throw new AppError('NOT_FOUND', 'Customer not found.');
+
+  const where: string[] = ['customer_id = ?'];
+  const params: (string | number)[] = [customerId];
+  if (f.days) {
+    where.push('txn_at >= ?');
+    params.push(new Date(Date.now() - f.days * 86400000).toISOString());
+  }
+  if (f.status) {
+    where.push('status = ?');
+    params.push(f.status);
+  }
+  if (f.q) {
+    // Text matches the fields an agent reads off the row. A number is also tried as an amount, so
+    // "24.99" finds the charge as well as a reference that happens to contain those digits.
+    const like = `%${f.q.toLowerCase()}%`;
+    const amount = Number(f.q.replace(/[^\d.]/g, ''));
+    const minor = Number.isFinite(amount) && f.q.replace(/[^\d.]/g, '') !== '' ? Math.round(amount * 100) : null;
+    where.push(`(lower(merchant_name) LIKE ? OR lower(id) LIKE ? OR lower(COALESCE(network_ref,'')) LIKE ? OR lower(COALESCE(auth_code,'')) LIKE ? OR lower(COALESCE(merchant_city,'')) LIKE ?${minor === null ? '' : ' OR amount_minor = ?'})`);
+    params.push(like, like, like, like, like);
+    if (minor !== null) params.push(minor);
+  }
+  if (f.disputed) {
+    where.push('id IN (SELECT transaction_id FROM disputes WHERE customer_id = ?)');
+    params.push(customerId);
+  }
+  const filter = where.join(' AND ');
+  const total = get<{ n: number }>('SELECT COUNT(*) n FROM bank_transactions WHERE customer_id = ?', [customerId])?.n ?? 0;
+  const matching = get<{ n: number }>(`SELECT COUNT(*) n FROM bank_transactions WHERE ${filter}`, params)?.n ?? 0;
+
+  const page = [...params];
+  let keyset = '';
+  if (f.cursor) {
+    const [at, id] = f.cursor.split('|');
+    if (at && id) {
+      keyset = ' AND (txn_at < ? OR (txn_at = ? AND id < ?))';
+      page.push(at, at, id);
+    }
+  }
+  const rows = all<Parameters<typeof txnRow>[0]>(
+    `SELECT ${DETAIL_COLS} FROM bank_transactions WHERE ${filter}${keyset} ORDER BY txn_at DESC, id DESC LIMIT ?`,
+    [...page, f.limit + 1],
+  );
+  const hasMore = rows.length > f.limit;
+  const slice = rows.slice(0, f.limit);
+  const last = slice.at(-1);
+
+  const cards = all<{ id: string; last4: string }>('SELECT id, last4 FROM bank_cards WHERE customer_id = ?', [customerId]).map((c) => ({ ref: c.id, masked: `•••• ${c.last4}` }));
+  const disputed = new Set(all<{ transaction_id: string }>('SELECT transaction_id FROM disputes WHERE customer_id = ?', [customerId]).map((d) => d.transaction_id));
+  const items = withMerchantPattern(slice.map((t) => txnRow(t, cards, disputed)), customerId);
+
+  const oldest = get<{ txn_at: string }>('SELECT txn_at FROM bank_transactions WHERE customer_id = ? ORDER BY txn_at LIMIT 1', [customerId])?.txn_at ?? null;
+  audit({ actor, event: 'crm.transactions_viewed', status: 'ok', resourceType: 'customer', resourceId: customerId, metadata: { returned: items.length, matching, days: f.days, hasQuery: !!f.q } });
+  return {
+    items,
+    total,
+    matching,
+    hasMore,
+    nextCursor: hasMore && last ? `${last.txn_at}|${last.id}` : null,
+    oldestAt: oldest,
+    filters: { days: f.days, status: f.status, q: f.q, disputed: f.disputed },
+    statuses: all<{ status: string }>('SELECT DISTINCT status FROM bank_transactions WHERE customer_id = ? ORDER BY status', [customerId]).map((r) => r.status),
+  };
+}
