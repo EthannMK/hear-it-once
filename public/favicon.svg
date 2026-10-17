@@ -1,10 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Hear It Once">
-  <rect width="32" height="32" rx="8" fill="#29263d"/>
-  <g fill="#7565e8">
-    <rect x="6"  y="13" width="3" height="6"  rx="1.5"/>
-    <rect x="11" y="10" width="3" height="12" rx="1.5"/>
-    <rect x="21" y="10" width="3" height="12" rx="1.5"/>
-    <rect x="26" y="13" width="3" height="6"  rx="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Hear It Once">
+  <!--
+    The browser tab carries the PRODUCT, not the client bank: this is Hear It Once, which happens to
+    be running for Northstar. The same drawing as public/brand/hear-it-once.svg, on a filled tile
+    with heavier strokes and the leaf dropped, because a favicon is read at 16px.
+  -->
+  <rect width="64" height="64" rx="15" fill="#14121f"/>
+  <g fill="none" stroke="#8b7df0" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M44 17 C 38 10, 26 9, 19 16 C 12 23, 13 32, 17.5 37.5 C 21 42, 23.5 44.5, 24.5 49" />
   </g>
-  <rect x="16" y="7" width="3" height="18" rx="1.5" fill="#bfe8d5"/>
+  <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M31 27 L37 22.5 L37 47" />
+    <path d="M30 47 L44 47" />
+  </g>
 </svg>

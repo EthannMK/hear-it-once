@@ -1,14 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Northstar Bank">
-  <!-- A four-point star, faceted: each arm is two triangles, one side a shade deeper. The arms are
-       kept thick so the mark still reads at 16px in the header. -->
-  <g>
-    <path d="M32 2 L39 25 L32 32 Z" fill="#8b7df0"/>
-    <path d="M32 2 L25 25 L32 32 Z" fill="#5846c9"/>
-    <path d="M62 32 L39 39 L32 32 Z" fill="#8b7df0"/>
-    <path d="M62 32 L39 25 L32 32 Z" fill="#6553d8"/>
-    <path d="M32 62 L25 39 L32 32 Z" fill="#8b7df0"/>
-    <path d="M32 62 L39 39 L32 32 Z" fill="#5846c9"/>
-    <path d="M2 32 L25 25 L32 32 Z" fill="#7565e8"/>
-    <path d="M2 32 L25 39 L32 32 Z" fill="#5846c9"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="40 10 120 160" role="img" aria-label="Northstar Bank">
+  <!--
+    The bank's own mark: a four-point compass star, north picked out in red, with a white centre.
+    The geometry is the bank's supplied artwork unchanged; only the white background box is dropped,
+    so the mark sits on the header, on paper and on a dark slide without a card around it. The
+    viewBox is the mark's exact bounding box, so setting a height is enough to place it anywhere.
+
+    This is the client's mark. The product has its own, hear-it-once.svg, and the two never appear
+    at the same size or weight — see the header in public/lily/app.js.
+  -->
+  <polygon points="100,10 116,84 160,100 116,116 100,170 84,116 40,100 84,84" fill="#00008F"/>
+  <polygon points="100,10 116,84 100,100 84,84" fill="#FF1721"/>
+  <circle cx="100" cy="100" r="7" fill="#FFFFFF"/>
 </svg>
