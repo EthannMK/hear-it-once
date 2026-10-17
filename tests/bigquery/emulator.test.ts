@@ -41,6 +41,9 @@ async function loadSchema() {
     // The emulator does not support clustering or table options; BigQuery does.
     .map((s) => s.replace(/\)\s*CLUSTER BY[^\n]*?(?=\s*(OPTIONS|$))/s, ')').replace(/\s*OPTIONS\s*\([^)]*\)\s*$/s, ''));
   for (const s of statements) {
+    // A fresh emulator dataset gets the columns from CREATE TABLE, so the catch-up ALTERs for
+    // datasets built by an earlier version have nothing to do here.
+    if (/^ALTER TABLE/i.test(s)) continue;
     const name = s.match(/`[^`]+\.([a-z_]+)`/)![1];
     await c.query(`DROP TABLE IF EXISTS \`${P}.${D}.${name}\``).catch(() => undefined);
     await c.query(s.replace('IF NOT EXISTS ', ''));
