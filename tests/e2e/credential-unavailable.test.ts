@@ -70,7 +70,7 @@ describe('scenario 1 — the card and the phone are both gone', () => {
     const s = SCENARIOS.find((x) => x.id === 'S02')!;
     const c = await call();
     await c.say('I lost my phone and my card');
-    await c.say(s.customer.cardNumber ?? '4999 0200 0074 1014');
+    await c.say('4999 0200 0074 1014');
     await c.say('yes');
     expect(get<{ verification_status: string }>('SELECT verification_status FROM call_sessions WHERE id = ?', [c.sessionId])?.verification_status).toBe('verified');
     expect(handoff(c)).toBeUndefined();

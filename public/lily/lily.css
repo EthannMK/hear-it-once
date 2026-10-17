@@ -1057,3 +1057,5 @@ table.txt .txmore td { background: var(--ivory); }
 .cx-histl .hb { display: flex; gap: 6px; align-items: center; }
 .cx-histl .hsaid { font: italic 400 0.86rem var(--serif); color: var(--text-2); margin: 6px 0; }
 .cx-histl .txd2 { margin-top: 6px; }
+/* Several customers reporting the same merchant: shown beside the charge, not buried in a report. */
+.badge.pat { display: inline-flex; width: fit-content; max-width: 100%; margin-top: 3px; font-weight: 700; white-space: nowrap; }

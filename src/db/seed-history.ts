@@ -7,7 +7,7 @@
  * calls. Every row is labelled data_origin = 'seeded_illustrative'. These numbers are
  * invented and must never be read as measured performance.
  */
-import { run, tx } from './db.ts';
+import { get, run, tx } from './db.ts';
 import { nowMs } from '../lib/clock.ts';
 import { insertCard, insertCustomer, insertTxn } from './seed.ts';
 
@@ -217,11 +217,11 @@ export function seedIllustrativeHistory(opts: { days?: number; calls?: number; s
         const opId = id('OP');
         let target = o.target;
         if (o.type === 'submit_dispute') {
-          target = insertTxn(cust.id, { card: cust.card, merchant: pick(['GLOBEX STREAMING', 'NIGHTOWL GAMES', 'SKYLINE TICKETS', 'PIXELMART']), amount: Math.round(between(1500, 60000)), daysAgo: Math.max(1, (now - o.at) / 86_400_000 + between(1, 5)), mode: 'ecommerce' });
+          target = insertTxn(cust.id, { card: cust.card, merchant: pick(['GLOBEX STREAMING', 'NIGHTOWL GAMES', 'SKYLINE TICKETS', 'PIXELMART', 'NOVAPLAY DIGITAL', 'NOVAPLAY DIGITAL']), amount: Math.round(between(1500, 60000)), daysAgo: Math.max(1, (now - o.at) / 86_400_000 + between(1, 5)), mode: 'ecommerce' });
           run(
             `INSERT INTO disputes (id, case_id, session_id, customer_id, card_id, transaction_id, merchant, amount_minor, currency, txn_date, reason_code, rule_code, status, rework_required, downstream_status, data_origin, created_at, updated_at)
-             VALUES (?,?,?,?,?,?, 'SEEDED MERCHANT', 0, 'USD', ?, 'fraud_unrecognised', 'DR-FRAUD-01', ?, ?, ?, 'seeded_illustrative', ?, ?)`,
-            [id('DSP'), caseId, sid, cust.id, cust.card, target, iso(o.at).slice(0, 10), o.status === 'succeeded' ? 'submitted' : 'pending', o.status === 'succeeded' ? (chance(0.08) ? 1 : 0) : null, o.status === 'succeeded' ? 'simulated_review_complete' : null, iso(o.at), iso(o.at)],
+             VALUES (?,?,?,?,?,?, ?, 0, 'USD', ?, 'fraud_unrecognised', 'DR-FRAUD-01', ?, ?, ?, 'seeded_illustrative', ?, ?)`,
+            [id('DSP'), caseId, sid, cust.id, cust.card, target, get<{ merchant_name: string }>('SELECT merchant_name FROM bank_transactions WHERE id = ?', [target])?.merchant_name ?? 'SEEDED MERCHANT', iso(o.at).slice(0, 10), o.status === 'succeeded' ? 'submitted' : 'pending', o.status === 'succeeded' ? (chance(0.08) ? 1 : 0) : null, o.status === 'succeeded' ? 'simulated_review_complete' : null, iso(o.at), iso(o.at)],
           );
         }
         run(
