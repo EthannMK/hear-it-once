@@ -1452,6 +1452,10 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
 .dm-list b { color: var(--aub); }
 .dm-not .dm-list li::before { background: var(--coral); }
 .dm-foot { text-align: center; color: var(--muted); font-size: 0.92rem; padding-top: 4px; }
+.dm-foot b { color: var(--aub); }
+.dm-src { font-size: 0.84rem; line-height: 1.6; color: var(--muted); text-align: center; max-width: 92ch; margin: 0 auto; }
+.dm-go { justify-self: start; margin-top: 2px; }
+.dm-go svg.i { width: 16px; height: 16px; }
 
 /* The guardrails explainer: numbered points above the live evidence. */
 .sf-how { display: grid; gap: 10px; }

@@ -62,27 +62,9 @@ function draw() {
           : items.length ? h('div.dm-cards', items.map(person))
             : h('p.small.muted', 'No demo accounts are available.')),
 
-      h('section.card.dm-sec',
-        h('h2', K.icon('search'), 'Where the data comes from'),
-        h('ul.dm-list',
-          h('li', h('b', 'The five accounts, their cards, charges, fees and declines. '), 'Written for this prototype. Every name, number and merchant is invented; no real person or bank is involved.'),
-          h('li', h('b', 'The longer transaction history behind them. '), 'Derived from the Sparkov synthetic credit-card dataset on Kaggle (CC0), which is itself generated data, not real cardholders.'),
-          h('li', h('b', 'The bank’s own answers — branches, rates, fees, how-tos. '), 'A written set of entries for the fictional Northstar Bank. Lily may say what is in it and nothing else.'),
-          h('li', h('b', 'The guidance the agent screen shows. '), 'Derived from this prototype’s own configured rules, so each article names the rule that enforces it. It is not real bank policy.'),
-          h('li', h('b', 'The retail-banking FAQ used for intent coverage. '), 'The Bitext retail-banking dataset (CDLA-Sharing-1.0).')),
-        h('p.small.muted', 'In BigQuery mode the same records live in BigQuery and are read live during the call; card numbers are never stored there, only a hash used to check what a caller reads out.')),
+      h('p.dm-src', 'All of it is synthetic: the accounts are written for this prototype, the longer transaction history comes from the Sparkov dataset on Kaggle (CC0), and nothing here moves real money or reaches a real bank.'),
 
-      h('section.card.dm-sec.dm-not',
-        h('h2', K.icon('alert'), 'What this prototype does not do'),
-        h('ul.dm-list',
-          h('li', h('b', 'No real money moves. '), 'Blocks, replacements, disputes and fee reversals are recorded against the demo records only. Nothing reaches a card network or a bank.'),
-          h('li', h('b', 'No real telephony. '), 'The transfer to a human agent is simulated: the call stays in the browser and the agent screen is the other side of it.'),
-          h('li', h('b', 'The security check is a demo. '), 'A card number, a date of birth and a one-time passcode are checked against invented records. A real deployment would use the bank’s own identity service.'),
-          h('li', h('b', 'The assistant never changes an account on its own. '), 'Every action needs the caller’s spoken consent, and some need an agent’s approval as well.'),
-          h('li', h('b', 'Not every attack is solved. '), 'The Guardrails screen names the patterns that are out of scope rather than leaving them out.'),
-          h('li', h('b', 'Accuracy figures are from one scripted run. '), 'They are reproducible, not a production measurement.'))),
-
-      h('p.dm-foot', 'Ready? ', h('a', { href: '#/' }, 'Go to the customer screen'), ' and start a call.')));
+      h('p.dm-foot', 'Pick an account above and press ', h('b', 'Start a call as this persona'), '. This page stays open behind it.')));
 }
 
 /** One demo account: who they are, what is true of them, and their transactions behind a fold. */
@@ -104,6 +86,17 @@ function person(x) {
     h('p.dm-sit', h('b', 'What is true of this account: '), x.situation),
     x.tryPhrase ? h('p.dm-try', h('span', 'Try saying'), h('q', x.tryPhrase), copy(x.tryPhrase, `${x.name} phrase`)) : null,
     extra.length ? h('ul.dm-extra', extra.map((e) => h('li', e))) : null,
+    h('button.btn.dark.dm-go', {
+      type: 'button',
+      title: 'Copies the card number and opens the customer screen in a new tab',
+      onclick: async (e) => {
+        const btn = e.currentTarget;
+        try { await navigator.clipboard.writeText(x.cardNumber); btn.replaceChildren(K.icon('check'), 'Card number copied — opening…'); }
+        catch { btn.replaceChildren(K.icon('phone'), 'Opening…'); K.toast('Copy is not available here; copy the card number by hand.'); }
+        window.open('/#/', '_blank', 'noopener');
+        setTimeout(() => btn.replaceChildren(K.icon('phone'), 'Start a call as this persona'), 2200);
+      },
+    }, K.icon('phone'), 'Start a call as this persona'),
     txns.length
       ? h('details.dm-txd',
         h('summary', `Transactions on file (${txns.length})`),
