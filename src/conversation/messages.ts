@@ -44,6 +44,10 @@ export const ASK_CARD = "To confirm it's you, I need your 16-digit card number. 
 export const askCardKnowing = (last4: string) => `Thanks, I've noted it's the card ending ${[...last4].join(' ')}. To confirm it's you, could you read me the full 16-digit card number? A few digits at a time is fine.`;
 /** The customer gave the full number before the security step: confirm it rather than asking again. */
 export const cardReadbackEarlier = (last4: string) => `You gave me your card number a moment ago, the one ending in ${[...last4].join(' ')}. Shall I use that one?`;
+/** The card is gone but its number may not be: ask once, and say how to move on if it is. */
+export const ASK_CARD_LOST =
+  "First I need to be sure it's you, and the quickest way is the 16-digit card number. You might still have it in the app, on a statement or written down — read it to me, or type it in the secure box on screen. If you can't get to it, just say so and I'll check another way.";
+
 /** The card number cannot be read out: the second approved route, said plainly and without blame. */
 export const OFFER_ALT_CHECK =
   "That's all right — you don't need the card in front of you. I can check it's you another way: your 8-digit customer number, then your date of birth, and a passcode I'll text to the phone number on your account. What's your customer number? If you don't have it to hand, just say so and I'll bring in a colleague.";

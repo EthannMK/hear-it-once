@@ -945,15 +945,6 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
     run("UPDATE call_sessions SET verification_status = 'identified' WHERE id = ?", [s.id]);
     run("INSERT INTO verification_attempts (session_id, customer_id, step, method, outcome, created_at) VALUES (?,?, 'identify', 'ani', 'passed', ?)", [s.id, c.verification.identifiedCustomerId, nowIso()]);
   }
-  // Both the card and the registered phone are gone: neither approved check can run, so the call
-  // goes to a person now rather than asking for a number the caller cannot read and a passcode that
-  // cannot reach them.
-  if (c.flags.includes('lost_card') && c.flags.includes('lost_phone') && !isVerified(c.verification)) {
-    c.cannotSupply = { ...c.cannotSupply, card: true, phone: true };
-    event(s, 'credential_unavailable', { step: 'card', lostPhone: true, atStart: true });
-    tl(s, { type: 'verification.alternative_exhausted', stage: 'verify', title: 'Card and registered phone both lost — no approved check can run on this line', detail: 'The card number cannot be read and a passcode cannot be sent to a phone the caller no longer has. Passing to a person to verify another way. Nothing was weakened and no account data was read.', status: 'warn', source: 'identity verification' });
-    return handoff(s, 'credential_unavailable', 'card and registered phone both lost — no approved check can run', M.LOST_CARD_AND_PHONE, { priority: 'urgent', missing: ['Identity not confirmed — verify another way before discussing or changing the account', 'Card reported lost by the caller but NOT blocked: it cannot be blocked until identity is confirmed'] });
-  }
   if (c.cardIdentify && !c.verification.identifiedCustomerId) {
     // Nobody is assumed. Ask for the card number; whoever holds it is who the caller is.
     c.verification.status = 'awaiting_card';
@@ -963,7 +954,7 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
     if (early && early.digits.length === 16) {
       captures.set(s.id, { digits: early.digits, confirming: true });
       say(s, M.cardReadbackEarlier(early.digits.slice(-4)));
-    } else say(s, M.ASK_CARD);
+    } else say(s, askCardFor(c));
   } else if (c.verificationMode === 'card_number' && c.verification.identifiedCustomerId) {
     // Active demo customer is known from caller ID (identification only). Ask for the card number.
     c.verification.status = 'awaiting_card';
@@ -975,7 +966,7 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
       // The customer already gave the full number earlier in the call: confirm it instead of asking again.
       captures.set(s.id, { digits: early.digits, confirming: true });
       say(s, M.cardReadbackEarlier(early.digits.slice(-4)));
-    } else say(s, said4 ? M.askCardKnowing(said4) : M.ASK_CARD);
+    } else say(s, said4 ? M.askCardKnowing(said4) : askCardFor(c));
   } else if (c.verification.status === 'awaiting_dob') {
     c.stage = 'awaiting_dob';
     say(s, M.ASK_DOB);
@@ -1109,6 +1100,16 @@ const MONEY_MENTION = /\$\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?
  * passcode is. Asking again would not help them, so the call moves to the next approved route, and
  * to a person when none is left. No check is skipped or softened to get past this.
  */
+/**
+ * The card number is still the quickest way to be sure who is calling, and plenty of people have it
+ * saved in the app or on a statement even when the card itself is gone. So it is asked for once.
+ * When the card has been reported lost, the question says plainly how to get past it, so nobody has
+ * to guess or repeat themselves.
+ */
+function askCardFor(c: CallContext): string {
+  return c.flags.includes('lost_card') ? M.ASK_CARD_LOST : M.ASK_CARD;
+}
+
 async function onCredentialUnavailable(s: Session, step: 'card' | 'otp' | 'dob' | 'identify', text: string): Promise<void> {
   const c = s.ctx;
   const u = readUnavailable(text);
