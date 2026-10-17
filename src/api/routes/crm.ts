@@ -7,7 +7,7 @@ import { customerHistory } from '../../adapters/bigquery/replica.ts';
 import { requirePermission, staffActor } from '../../auth/rbac.ts';
 import { audit } from '../../audit/audit.ts';
 import { ask, backOfficeEngine, draftReply, draftWrapUp, insights } from '../../backoffice/backoffice.ts';
-import { addCallTag, caseIdForSession, caseKnowledge, caseWorkspace, latestCaseId, createTicket, removeCallTag, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
+import { addCallTag, caseIdForSession, caseKnowledge, caseWorkspace, latestCaseId, createTicket, customerTransactions, removeCallTag, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
 
 const Id = z.string().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/);
 
@@ -59,6 +59,11 @@ export function registerCrmRoutes(app: FastifyInstance): void {
     const r = body.kind === 'wrapup' ? await draftWrapUp(body.caseId, p.userId) : await draftReply(body.caseId, p.userId);
     audit({ actor: staffActor(p), event: `backoffice.drafted_${body.kind}`, status: 'ok', resourceType: 'case', resourceId: body.caseId, metadata: { mode: r.mode, ms: r.ms } });
     return r;
+  });
+
+  app.get<{ Params: { id: string } }>('/api/crm/customers/:id/transactions', async (req) => {
+    const p = requirePermission(req.staff, 'case.read');
+    return customerTransactions(Id.parse(req.params.id), staffActor(p), req.query ?? {});
   });
 
   app.get('/api/crm/cases', async (req) => {

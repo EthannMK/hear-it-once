@@ -94,7 +94,9 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     const e = err as { statusCode?: number; message?: string; code?: string };
     if (e.statusCode === 429) return reply.status(429).send({ error: { code: 'RATE_LIMITED', message: e.message ?? 'Too many requests.' } });
     if (e.statusCode && e.statusCode < 500) return reply.status(e.statusCode).send({ error: { code: 'VALIDATION_FAILED', message: e.message ?? 'Bad request.' } });
-    log.error('http.unhandled', { url: req.url, method: req.method, err: e.message });
+    // The path only, never the query string: an agent's search can carry a customer's phone or
+    // account number, and a crash is not a reason to write one into the logs.
+    log.error('http.unhandled', { path: req.url.split('?')[0], method: req.method, err: e.message });
     return reply.status(500).send({ error: { code: 'INTERNAL', message: 'Something went wrong. No action was taken.' } });
   });
 

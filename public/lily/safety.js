@@ -43,11 +43,11 @@ async function ensureOps() {
 }
 
 export async function safetyRoute() {
-  K.render('safety', h('main.sf', h('section.card', h('p.muted', 'Loading the controls…'))));
+  K.render('guardrails', h('main.sf', h('section.card', h('p.muted', 'Loading the controls…'))));
   try {
     await ensureOps();
   } catch (e) {
-    return K.render('safety', h('main.sf', h('section.card', { role: 'alert' }, h('h2', 'Could not sign in to the operations screen'), h('p', e.message))));
+    return K.render('guardrails', h('main.sf', h('section.card', { role: 'alert' }, h('h2', 'Could not sign in to the operations screen'), h('p', e.message))));
   }
   await load();
 }
@@ -64,7 +64,7 @@ async function load() {
 }
 
 function draw() {
-  K.render('safety',
+  K.render('guardrails',
     h('main.sf',
       h('header.sf-head',
         h('h1', 'Safety and controls'),
