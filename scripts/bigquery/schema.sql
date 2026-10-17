@@ -75,9 +75,12 @@ CREATE TABLE IF NOT EXISTS `PROJECT_ID.DATASET.dispute_submissions` (
 CREATE TABLE IF NOT EXISTS `PROJECT_ID.DATASET.fee_reversals` (reversal_id STRING, fee_id STRING, customer_id STRING, rule_code STRING, amount_minor INT64, currency STRING, session_id STRING, created_at TIMESTAMP) CLUSTER BY customer_id;
 CREATE TABLE IF NOT EXISTS `PROJECT_ID.DATASET.demo_resets` (customer_id STRING, reset_at TIMESTAMP) CLUSTER BY customer_id;
 
--- Existing datasets: add the card-system detail columns if they are not there yet.
-ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS mcc STRING;
-ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS merchant_city STRING;
-ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS merchant_country STRING;
-ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS network_ref STRING;
-ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS acquirer STRING;
+-- Existing datasets: add the card-system detail columns if they are not there yet. All five are
+-- added in one statement: BigQuery counts each ALTER TABLE as a change to the table's definition
+-- and refuses more than a few per table in quick succession.
+ALTER TABLE `PROJECT_ID.DATASET.transactions`
+  ADD COLUMN IF NOT EXISTS mcc STRING,
+  ADD COLUMN IF NOT EXISTS merchant_city STRING,
+  ADD COLUMN IF NOT EXISTS merchant_country STRING,
+  ADD COLUMN IF NOT EXISTS network_ref STRING,
+  ADD COLUMN IF NOT EXISTS acquirer STRING;

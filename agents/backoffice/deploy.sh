@@ -22,8 +22,13 @@ echo "== 2/5 Read-only views for the agent"
 # works on a dataset built by an older setup.sh, rather than failing on a column that is not there.
 SCHEMA="$ROOT/scripts/bigquery/schema.sql"
 if [ -f "$SCHEMA" ]; then
-  sed "s/PROJECT_ID/$PROJECT/g; s/\.DATASET\./.$DATASET./g" "$SCHEMA" | bq query --location="$BQ_LOCATION" --use_legacy_sql=false --quiet \
-    || { echo "The dataset could not be brought up to date. Run: bash scripts/bigquery/setup.sh" >&2; exit 1; }
+  # BigQuery limits how often a table's definition may change, so a busy dataset can refuse the
+  # first attempt. Waiting and trying again costs a minute and saves a confusing failure.
+  for attempt in 1 2 3; do
+    if sed "s/PROJECT_ID/$PROJECT/g; s/\.DATASET\./.$DATASET./g" "$SCHEMA" | bq query --location="$BQ_LOCATION" --use_legacy_sql=false --quiet; then break; fi
+    [ "$attempt" = 3 ] && { echo "The dataset could not be brought up to date. Run: bash scripts/bigquery/setup.sh" >&2; exit 1; }
+    echo "  BigQuery is busy; waiting 20 s and trying again ($attempt of 3)"; sleep 20
+  done
 fi
 sed "s/PROJECT_ID/$PROJECT/g; s/\.DATASET\./.$DATASET./g" "$HERE/views.sql" | bq query --location="$BQ_LOCATION" --use_legacy_sql=false --quiet
 echo "== 3/5 Staging bucket $BUCKET"
