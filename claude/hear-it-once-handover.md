@@ -9,9 +9,10 @@ Read this first, then the code. Where this file and the code disagree, the code 
 
 ```bash
 git clone https://github.com/EthannMK/hear-it-once.git && cd hear-it-once
-git pull origin main          # head should be 4988959 or later
-npm ci && npm test            # expect 506 passed, 7 skipped
+git pull origin main          # head should be ac07b29 or later
+npm ci && npm test            # expect 639 passed, 7 skipped
 python3 -m pytest agents/backoffice/test_tools.py -q   # expect 23 passed
+npm run scorecard             # plays every scenario and rewrites docs/ACCURACY.md
 PORT=3100 npm start           # mock mode; typing works with no Google credentials
 ```
 
@@ -64,6 +65,11 @@ datasets that already exist.
 | AI back office | `src/backoffice/backoffice.ts` (app side) and `agents/backoffice/` (the ADK agent) |
 | Caller's screen | `public/lily/app.js` |
 | Agent's screen | `public/lily/crm.js` |
+| Safety and controls screen | `public/lily/safety.js` (`#/safety`; signs in as operations, not as the agent) |
+| The off switch | `src/safety/control.ts`, enforced first in `src/policy/engine.ts` |
+| Tamper-evident audit log | `src/audit/chain.ts`, checked by `GET /api/audit/verify` |
+| Untrusted text handed to a model | `src/security/untrusted.ts` |
+| Accuracy scorecard | `src/reporting/scorecard.ts` and `scripts/scorecard.ts` → `docs/ACCURACY.md` |
 | Styles | `public/lily/lily.css` (one file, CSS variables at the top) |
 | Fraud controls reference | `src/security/fraud-patterns.ts`, explained in `docs/FRAUD_CONTROLS.md` |
 
@@ -103,8 +109,38 @@ accountOverview, `/api/crm/latest`), `tests/e2e/repeat-call.test.ts`, transactio
 `tests/unit/intent-parsers.test.ts`, and `agents/backoffice/test_tools.py` for the SQL refusals
 against a fake BigQuery client.
 
+## The safety work (commits f40d234, ca0699a, 3b1d4b8, eb630ee, ac07b29)
+
+**The audit log is tamper-evident.** Every row carries a keyed hash of itself and of the row before
+it; the head is kept outside the table, which is what catches rows deleted off the end. Set
+`AUDIT_CHAIN_KEY` in production so the key lives outside the database — without it the chain still
+catches edits made outside the application, and `/api/audit/verify` reports the weaker position
+rather than claiming the stronger one.
+
+**There is an off switch.** Three positions: normal, actions paused (answers and looks things up but
+changes nothing), switched off (every caller goes straight to a person). Enforced in
+`authorizeAction` before any eligibility rule is read, so no caller text and no model output routes
+around it. Staff are deliberately unaffected. A reason is required and audited. A position that
+cannot be read is treated as off.
+
+**The bank's own records are untrusted text.** Merchant names and the customer's recorded words are
+wrapped and neutralised before any model reads them. Instruction-like record text is shown to the
+agent, audited, and left in place as evidence. On top of that, a drafted message may only speak of an
+action as done if a system confirmed it: a draft claiming a refund, block, replacement or dispute
+that did not happen is discarded and the records write the draft instead.
+
+**`npm run scorecard`** plays every scenario against the real API and rewrites `docs/ACCURACY.md`
+with the date and commit. Five correctness measures and containment, kept apart. The generated doc
+says which expectations predate the output and which were set after watching the first run.
+
+**Screen 3** shows all of it live at `#/safety`.
+
 ## What is left
 
+0. **The ADK agent is deployed but in `us-central1`, not `asia-southeast1`.** The app is pointed at
+   it and working. Moving it is cosmetic — a nicer answer about data residency — so it is not worth
+   an evening. The guards that sit between the agent's answer and the agent reading it are tested
+   through `setBackOfficeEngineForTests`, not against the live engine.
 1. **Deploy and check the agent end to end.** Not done: the deploy needs Ethan's gcloud session.
    Once `AGENT_ENGINE_RESOURCE` is set:
    - Confirm `parseEngineStream` matches what the real `:query` and `:streamQuery` return. The unit

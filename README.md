@@ -117,8 +117,10 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 1. Open `/`, pick a test identity and press **Start talking to Lily**.
 2. Ask anything about banking. For questions about the test account, read the full dummy card number shown on screen when Lily asks. A wrong number gets a retry, three wrong ones prepare a handover.
 3. End the call: the page switches to the Agent CRM case for it. Or say "I want to speak to a person", open **Agent CRM** from the waiting banner and accept the handover.
+4. Open **3 · Safety** for the controls: the off switch (choose a position, say why, and the next caller is treated differently), the audit log checked against its own hashes while you watch, the last accuracy run, and the fraud patterns the call policy answers.
 
-`npm run db:reset` resets all demo data.
+`npm run db:reset` resets all demo data. `npm run scorecard` plays every scenario and rewrites
+[docs/ACCURACY.md](docs/ACCURACY.md).
 
 ## Documentation
 
@@ -131,7 +133,9 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Assumptions and unresolved business decisions, with conservative defaults |
 | [docs/API.md](docs/API.md) | API contracts, auth, errors, pagination |
 | [docs/KPIS.md](docs/KPIS.md) | Metric definitions and what can / cannot be measured locally |
-| [docs/SECURITY.md](docs/SECURITY.md) | Security and privacy checklist |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security and privacy checklist, including the off switch, the tamper-evident audit log and what is done about prompt injection |
+| [docs/ACCURACY.md](docs/ACCURACY.md) | What the assistant gets right, measured by a run rather than asserted (`npm run scorecard`) |
+| [docs/FRAUD_CONTROLS.md](docs/FRAUD_CONTROLS.md) | The documented contact-centre fraud patterns the call policy answers, and where each control lives |
 | [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | Known limitations; simulated vs real |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Deployment guide for this stack |
 | [docs/PILOT_READINESS.md](docs/PILOT_READINESS.md) | What must be true before a controlled pilot |
