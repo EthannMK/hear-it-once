@@ -39,7 +39,7 @@ write('cards', pick(`SELECT * FROM bank_cards`).map((c) => ({
   card_id: c.id, customer_id: c.customer_id, last4: c.last4, network: c.network, product: c.product, holder_role: c.holder_role, holder_name: c.holder_name,
   status: c.status, status_reason: c.status_reason, pan_sha256: c.demo_pan ? sha(String(c.demo_pan).replace(/\D/g, '')) : null, created_at: c.created_at,
 })));
-write('transactions', pick(`SELECT id AS transaction_id, customer_id, card_id, kind, merchant_name, merchant_category, amount_minor, currency, txn_at, posted_at, status, entry_mode, auth_code, related_payment_id FROM bank_transactions`)
+write('transactions', pick(`SELECT id AS transaction_id, customer_id, card_id, kind, merchant_name, merchant_category, amount_minor, currency, txn_at, posted_at, status, entry_mode, auth_code, related_payment_id, mcc, merchant_city, merchant_country, network_ref, acquirer FROM bank_transactions`)
   .map((t) => ({ ...t, source: 'northstar_seed', is_fraud_label: null })));
 write('fraud_alerts', pick(`SELECT id AS alert_id, customer_id, card_id, transaction_id, alert_type, risk_level, status, reported_card_status, reported_amount_minor, created_at FROM bank_fraud_alerts`));
 write('payments', pick(`SELECT id AS payment_id, customer_id, amount_minor, currency, initiated_at, channel, source_account_masked, status, status_detail, posted_at, expected_posting_date, status_as_of FROM bank_payments`));

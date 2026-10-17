@@ -227,7 +227,27 @@ function builtinInsights(x: Ctx): string[] {
   }
   const open = h.alerts.filter((a) => a.status === 'open').length;
   const third = open ? `${open} open fraud alert${open > 1 ? 's' : ''} on the account; check it before any change.` : ruleFor(x) ?? 'No open fraud alerts.';
-  return [first, second, third];
+  // What matters from earlier calls, so the agent does not have to read the history tab to find
+  // out they are talking to someone who has been here before.
+  const last = lastCall(x.customerId, x.caseId);
+  return [first, second, third, ...(last ? [last] : [])];
+}
+
+/**
+ * The one line worth knowing about the last time this customer called: when, what about, how it
+ * ended, and whether it was left open. A repeat caller on the same subject is the thing an agent
+ * most needs to know before they speak.
+ */
+function lastCall(customerId: string, exceptCaseId: string | null): string | null {
+  const c = get<{ id: string; issue_type: string | null; status: string; created_at: string; resolution_status: string | null }>(
+    'SELECT id, issue_type, status, created_at, resolution_status FROM cases WHERE customer_id = ? AND id != ? ORDER BY created_at DESC LIMIT 1',
+    [customerId, exceptCaseId ?? ''],
+  );
+  if (!c) return 'First contact: no earlier calls on record.';
+  const total = get<{ n: number }>('SELECT COUNT(*) n FROM cases WHERE customer_id = ? AND id != ?', [customerId, exceptCaseId ?? ''])?.n ?? 0;
+  const subject = c.issue_type ? ISSUE_LABELS[c.issue_type] ?? c.issue_type.replace(/_/g, ' ') : 'a general question';
+  const openStill = !['resolved', 'closed'].includes(c.status);
+  return `${total} earlier call${total === 1 ? '' : 's'}; the last was ${day(c.created_at)} about ${String(subject).toLowerCase()}, ${openStill ? 'and it is still open' : `and it was ${(c.resolution_status ?? c.status).replace(/_/g, ' ')}`}.`;
 }
 
 function builtinAnswer(x: Ctx, q: string): { text: string; bullets: string[]; sources: string[]; steps: AgentStep[] } {

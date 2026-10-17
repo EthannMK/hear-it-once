@@ -1010,3 +1010,50 @@ canvas.ledger { width: min(460px, 100%); height: 230px; display: block; }
 /* Inside the panel the sections are plain blocks: the panel is the card. */
 .cx-cust .cx-stack > .card { border: 0; box-shadow: none; padding: 0; background: none; }
 .cx-cust .cx-stack > .card + .card { border-top: 1px solid var(--hair); padding-top: 12px; }
+
+/* A tab that needs the room takes the screen; the other columns step aside until it is closed. */
+.cx-grid.focus-cust { grid-template-columns: minmax(0, 1fr); }
+.cx-grid.focus-cust > :not(.cx-cust) { display: none; }
+.cx-grid.focus-side { grid-template-columns: minmax(0, 1fr); }
+.cx-grid.focus-side > :not(.cx-side) { display: none; }
+
+/* The transaction ledger, full width. */
+.cx-txtable { display: flex; flex-direction: column; min-height: 0; }
+.cx-txtable .tablewrap { overflow: auto; min-height: 0; }
+table.txt { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+table.txt th { position: sticky; top: 0; z-index: 1; background: var(--white); text-align: left; font: 600 0.68rem var(--label); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--hair); }
+table.txt td { padding: 8px 10px; border-bottom: 1px solid var(--hair); vertical-align: top; color: var(--text-2); }
+table.txt tbody.focus .txr td { background: var(--amber-soft); }
+table.txt .txr { cursor: pointer; }
+table.txt .txr:hover td { background: var(--lav); }
+table.txt td b { display: block; color: var(--aub); font-weight: 600; }
+table.txt td span { display: block; color: var(--muted); font-size: 0.74rem; }
+table.txt td.amt { text-align: right; white-space: nowrap; }
+table.txt .st { display: inline-block; font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: var(--lav); color: var(--violet-d); }
+table.txt .st.posted { background: rgba(191, 232, 213, 0.5); color: var(--mint-ink); }
+table.txt .st.reversed { background: var(--amber-soft); color: var(--amber-ink); }
+table.txt .txmore { display: none; }
+table.txt tbody.open .txmore { display: table-row; }
+table.txt .txmore td { background: var(--ivory); }
+.txd2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 20px; margin: 0; }
+/* Label above value: inside a table cell, two columns fight with the column widths behind them. */
+.txd2 > div { display: grid; gap: 1px; }
+.txd2 dt { font-size: 0.66rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.txd2 dd { margin: 0; font-size: 0.76rem; color: var(--aub); overflow-wrap: anywhere; }
+
+/* The case column is tabbed as well: AI summary and tagging, actions, requests. */
+.cx-case.card { display: flex; flex-direction: column; min-height: 0; padding: 0; overflow: hidden; }
+.cx-case .cx-pane { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 14px; }
+.cx-case .cx-stack { display: grid; gap: 12px; align-content: start; }
+.cx-case .cx-stack > .card { border: 0; box-shadow: none; padding: 0; background: none; }
+.cx-case .cx-stack > .card + .card { border-top: 1px solid var(--hair); padding-top: 12px; }
+
+/* History: one block per earlier call. */
+.cx-histl { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.cx-histl li { border: 1px solid var(--hair); border-radius: 12px; padding: 10px 12px; background: var(--white); }
+.cx-histl .hh { display: flex; justify-content: space-between; gap: 12px; align-items: start; flex-wrap: wrap; }
+.cx-histl .hh b { display: block; color: var(--aub); }
+.cx-histl .hh span { display: block; font-size: 0.74rem; color: var(--muted); }
+.cx-histl .hb { display: flex; gap: 6px; align-items: center; }
+.cx-histl .hsaid { font: italic 400 0.86rem var(--serif); color: var(--text-2); margin: 6px 0; }
+.cx-histl .txd2 { margin-top: 6px; }

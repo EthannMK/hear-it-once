@@ -282,8 +282,14 @@ function seedPriorCase(customerId: string): void {
  * detail whichever build fills it in.
  */
 export function backfillTxnDetail(): number {
+  // The category map has been corrected once since this shipped; rows filled in by the first
+  // version are re-derived, after which only new rows need filling.
+  const VERSION = 'txn_detail_v2';
+  const done = get<{ value: string }>("SELECT value FROM app_settings WHERE key = 'txn_detail_version'")?.value === VERSION;
   const rows = all<{ id: string; kind: string; merchant_category: string | null; entry_mode: string | null; merchant_name: string | null; auth_code: string | null }>(
-    "SELECT id, kind, merchant_category, entry_mode, merchant_name, auth_code FROM bank_transactions WHERE mcc IS NULL",
+    done
+      ? 'SELECT id, kind, merchant_category, entry_mode, merchant_name, auth_code FROM bank_transactions WHERE mcc IS NULL'
+      : 'SELECT id, kind, merchant_category, entry_mode, merchant_name, auth_code FROM bank_transactions',
   );
   for (const r of rows) {
     const d = txnDetail({ id: r.id, kind: r.kind, category: r.merchant_category, entryMode: r.entry_mode, merchant: r.merchant_name });
@@ -292,7 +298,8 @@ export function backfillTxnDetail(): number {
       [d.mcc, d.merchantCity, d.merchantCountry, d.networkRef, d.acquirer, r.kind === 'payment' || r.kind === 'fee' ? null : authCodeFor(r.id), r.id],
     );
   }
-  if (rows.length) log.info('filled in card detail on older transactions', { rows: rows.length });
+  run("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('txn_detail_version', ?)", [VERSION]);
+  if (rows.length) log.info('filled in card detail on transactions', { rows: rows.length });
   return rows.length;
 }
 

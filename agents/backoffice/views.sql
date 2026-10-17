@@ -26,7 +26,10 @@ LEFT JOIN (
 CREATE OR REPLACE VIEW `PROJECT_ID.DATASET.agent_transactions` AS
 SELECT t.transaction_id, t.customer_id, t.card_id, t.kind, t.merchant_name, t.merchant_category,
        t.amount_minor / 100 AS amount, t.currency, TIMESTAMP_ADD(t.txn_at, INTERVAL m.s SECOND) AS txn_at,
-       TIMESTAMP_ADD(t.posted_at, INTERVAL m.s SECOND) AS posted_at, t.status, t.entry_mode, t.source, t.is_fraud_label
+       TIMESTAMP_ADD(t.posted_at, INTERVAL m.s SECOND) AS posted_at, t.status, t.entry_mode, t.source, t.is_fraud_label,
+       -- Card-system detail. The authorisation code stays out: it is not needed to answer a question
+       -- and it is one of the things that should not travel.
+       t.mcc, t.merchant_city, t.merchant_country, t.network_ref, t.acquirer
 FROM `PROJECT_ID.DATASET.transactions` t
 CROSS JOIN (SELECT TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(anchor_at), SECOND) AS s FROM `PROJECT_ID.DATASET.dataset_meta`) m;
 
