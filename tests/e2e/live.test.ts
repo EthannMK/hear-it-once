@@ -660,7 +660,7 @@ describe('spoken numbers and dates are normalised without inventing digits', () 
   });
 });
 
-describe('virtual agents by language (Lily, Hnin, Maya)', () => {
+describe('virtual agents by language (Lily, Maya; May is not live yet)', () => {
   /** The customer agreed to move; the outgoing agent says its line and the turn completes. */
   async function moveTo(session: ScriptedSession, lang: string) {
     const before = ScriptedProvider.sessions.length;
@@ -685,25 +685,54 @@ describe('virtual agents by language (Lily, Hnin, Maya)', () => {
     expect(session.opts.tools.map((t) => t.name)).toContain(TOOL.switch);
   });
 
-  it('moves to Hnin after the customer agreed: new voice, new name, same facts, recorded in the transcript', async () => {
+  it('moves to Maya after the customer agreed: new voice, new name, same facts, recorded in the transcript', async () => {
     const { client, sessionId, session } = await connect('S01');
     await customerSaysThenTool(client, session, "There's a charge from Novaplay for $249 that I didn't make");
-    await moveTo(session, 'my');
-    const hnin = ScriptedProvider.last;
-    expect(hnin).not.toBe(session);
+    await moveTo(session, 'fil');
+    const maya = ScriptedProvider.last;
+    expect(maya).not.toBe(session);
     expect(session.closed).toBe(true);
-    expect(hnin.opts.voice).toBe('Kore');
-    expect(hnin.opts.systemInstruction).toMatch(/^You are Hnin,/);
-    expect(hnin.opts.systemInstruction).toMatch(/Burmese/);
+    expect(maya.opts.voice).toBe('Leda');
+    expect(maya.opts.systemInstruction).toMatch(/^You are Maya,/);
+    expect(maya.opts.systemInstruction).toMatch(/Tagalog/);
     // Carried across, so nothing has to be asked again.
-    expect(hnin.opts.systemInstruction).toMatch(/JOINING A CALL THAT IS ALREADY IN PROGRESS/);
-    expect(hnin.opts.systemInstruction).toMatch(/Already known/);
-    expect(hnin.texts.at(-1)).toMatch(/taken over/);
+    expect(maya.opts.systemInstruction).toMatch(/JOINING A CALL THAT IS ALREADY IN PROGRESS/);
+    expect(maya.opts.systemInstruction).toMatch(/Already known/);
+    expect(maya.texts.at(-1)).toMatch(/taken over/);
     const msg = await client.waitFor((m) => m.type === 'agent');
-    expect(msg).toMatchObject({ lang: 'my', name: 'Hnin', from: 'Lily' });
-    expect(get<{ context_json: string }>('SELECT context_json FROM call_sessions WHERE id = ?', [sessionId])!.context_json).toContain('"agentLang":"my"');
-    expect(all<{ kind: string }>('SELECT kind FROM conversation_turns WHERE session_id = ?', [sessionId]).some((t) => t.kind === 'agent_switch:Hnin')).toBe(true);
+    expect(msg).toMatchObject({ lang: 'fil', name: 'Maya', from: 'Lily' });
+    expect(get<{ context_json: string }>('SELECT context_json FROM call_sessions WHERE id = ?', [sessionId])!.context_json).toContain('"agentLang":"fil"');
+    expect(all<{ kind: string }>('SELECT kind FROM conversation_turns WHERE session_id = ?', [sessionId]).some((t) => t.kind === 'agent_switch:Maya')).toBe(true);
     expect(timelineTypes(sessionId)).toContain('agent.switched');
+  });
+
+  /**
+   * Burmese is built — May has a prompt, a voice and a seat — but she is not taking calls yet. The
+   * refusal is enforced in the bridge rather than left to the prompt, because a model asked twice by
+   * an insistent customer will try anyway, and switching to an agent that is not ready would leave
+   * the customer somewhere worse than English.
+   */
+  it('refuses to move to Burmese, and says so rather than failing silently', async () => {
+    const { session, sessionId } = await connect('S01');
+    const before = ScriptedProvider.sessions.length;
+    session.toolCall(TOOL.switch, { language: 'my' });
+    await sleep(160);
+    const r = session.toolResponses.at(-1)!.response as any;
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/May/);
+    expect(r.message).toMatch(/not taking calls yet/i);
+    // No new agent was brought in, and Lily still has the call.
+    expect(ScriptedProvider.sessions.length).toBe(before);
+    expect(session.closed).toBe(false);
+    expect(timelineTypes(sessionId)).toContain('agent.switch_refused');
+    expect(timelineTypes(sessionId)).not.toContain('agent.switched');
+  });
+
+  it('never offers Burmese in the first place', async () => {
+    const { session } = await connect('S01');
+    const p = session.opts.systemInstruction;
+    expect(p).toMatch(/May will speak Burmese, but she is not taking calls yet/);
+    expect(p).toMatch(/never call .* for Burmese/i);
   });
 
   it('a language switch in the middle of a second-level check keeps the check going', async () => {
@@ -771,7 +800,7 @@ describe('virtual agents by language (Lily, Hnin, Maya)', () => {
     session.toolCall(TOOL.switch, { language: 'xx' });
     await sleep(120);
     expect((session.toolResponses.at(-1)!.response as any).ok).toBe(false);
-    await moveTo(session, 'my');
+    await moveTo(session, 'fil');
     await moveTo(ScriptedProvider.last, 'en');
     expect(ScriptedProvider.last.opts.systemInstruction).toMatch(/^You are Lily,/);
     expect(ScriptedProvider.last.opts.voice).toBe('Aoede');
@@ -779,7 +808,7 @@ describe('virtual agents by language (Lily, Hnin, Maya)', () => {
 
   it('the other agents keep Lily by name only where she is a team member', async () => {
     const { session } = await connect('S01');
-    await moveTo(session, 'my');
+    await moveTo(session, 'fil');
     const p = ScriptedProvider.last.opts.systemInstruction;
     expect(p).toMatch(/Lily \(English, the main agent\)/);
     expect(p).not.toMatch(/You are Lily/);

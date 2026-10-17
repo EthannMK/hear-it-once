@@ -28,7 +28,7 @@ import { LILY_TOOLS, TOOL, lilySystemInstruction } from './lily.ts';
  * belongs to the back end, so Lily's spoken version of the same words is not stored again.
  */
 const OWNS_TRANSCRIPT = new Set<string>([TOOL.banking, TOOL.card, TOOL.human]);
-import { LANGUAGES, isLang, type LangCode } from './languages.ts';
+import { LANGUAGES, canSwitchTo, isLang, upcomingReply, type LangCode } from './languages.ts';
 import { runTool } from './tools.ts';
 import { normaliseSpoken } from './speech.ts';
 import { knownForAssistant } from '../conversation/facts.ts';
@@ -347,6 +347,14 @@ export class LiveBridge {
     const to = call.args.language;
     if (!isLang(to) || to === this.language) {
       this.session?.sendToolResponse({ id: call.id, name: call.name }, { ok: false, message: 'That agent already has the call. Carry on.' });
+      return;
+    }
+    // Enforced here, not in the prompt. The model is told which languages are live, but a model
+    // that has been asked for Burmese by an insistent customer will try anyway, and a switch to an
+    // agent that is not ready would put the customer in front of something worse than English.
+    if (!canSwitchTo(to)) {
+      emitTimeline(this.sessionId, { type: 'agent.switch_refused', stage: 'understand', title: `${LANGUAGES[to].name} is not available yet`, detail: `${LANGUAGES[to].agent} is built but not taking calls. The customer was offered English or a person instead.`, status: 'info', source: 'voice bridge' });
+      this.session?.sendToolResponse({ id: call.id, name: call.name }, { ok: false, message: `${LANGUAGES[to].agent} is not taking calls yet. Say this to the customer, in their language first and then English: "${upcomingReply(to)}" Do not call this tool for ${LANGUAGES[to].name} again on this call.` });
       return;
     }
     this.pendingAgent = to;

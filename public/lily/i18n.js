@@ -36,7 +36,8 @@ const D = {
 };
 
 // The screen is English only.
-// Every call starts in English with Lily. Burmese (Hnin) and Tagalog (Maya) join only when the caller asks.
+// Every call starts in English with Lily. Tagalog (Maya) joins only when the caller asks. Burmese
+// (May) is built but not live yet — see LANGUAGES in src/live/languages.ts.
 export const getLang = () => 'en';
 /** t('key', { n: 3 }) → English interface text. */
 export const t = (k, v = {}) => String(D.en[k] ?? k).replace(/\{(\w+)\}/g, (_, x) => (v[x] ?? ''));

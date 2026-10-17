@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { all, get, parseJson, run, tx } from '../db/db.ts';
 import { AppError } from '../lib/errors.ts';
 import { nowIso } from '../lib/clock.ts';
-import { newId } from '../lib/ids.ts';
+import { newId, randomDigits } from '../lib/ids.ts';
 import { redactText } from '../lib/redact.ts';
 import { audit, type Actor } from '../audit/audit.ts';
 import { readCheck } from '../verification/agent-check.ts';
@@ -948,6 +948,19 @@ export const TicketCreate = z
  * Create a complaint or escalation ticket from the case's recorded state. Idempotent: the same
  * request key, or a second open ticket of the same type on the case, returns the existing ticket.
  */
+/**
+ * An unused six-digit ticket reference. Short enough to say once and write down (see sayRef), long
+ * enough that a demo will not collide; the retry is there because "short" and "unique" pull against
+ * each other and the primary key is the thing that actually decides.
+ */
+function freeTicketId(): string {
+  for (let i = 0; i < 12; i++) {
+    const id = `TCK-${randomDigits(6)}`;
+    if (!get('SELECT 1 FROM case_tickets WHERE id = ?', [id])) return id;
+  }
+  throw new AppError('CONFLICT', 'Could not allocate a ticket reference. Please try again.');
+}
+
 export function createTicket(caseId: string, actor: Actor, raw: unknown): { ticket: ReturnType<typeof ticketBrief>; duplicate: boolean } {
   const body = TicketCreate.parse(raw);
   const byKey = get<TicketRow>('SELECT * FROM case_tickets WHERE request_key = ?', [body.requestKey]);
@@ -985,7 +998,10 @@ export function createTicket(caseId: string, actor: Actor, raw: unknown): { tick
   const reported = real(c.customer_reported) ?? real(s?.issue_statement ?? null) ?? facts.issue?.value ?? null;
   const team = body.team ?? (body.type === 'complaint' ? 'Complaints' : meta.team);
   const priority: Priority = body.priority ?? (body.type === 'complaint' && meta.effective.priority === 'normal' ? 'high' : meta.effective.priority);
-  const id = newId('TCK', 8);
+  // Six digits, because this is the one reference the customer is read out and asked to remember.
+  // A collision would be caught by the primary key, so a few attempts are made before giving up
+  // rather than failing a ticket over a one-in-a-million clash.
+  const id = freeTicketId();
   const ts = nowIso();
   const summary = [
     `${meta.effective.issueType} (${meta.effective.category}).`,

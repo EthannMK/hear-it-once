@@ -114,7 +114,7 @@ export interface CallContext {
   offerCount?: number;
   /** How many times the bank information had no answer, so the wording alternates. */
   notFoundCount?: number;
-  /** Which virtual agent currently has the call (en = Lily, my = Hnin, fil = Maya). */
+  /** Which virtual agent currently has the call (en = Lily, fil = Maya; my = May, not live yet). */
   agentLang?: string;
   /** How many times in a row the card number could not be read; picks gentler, more specific help each time. */
   cardUnparsed?: number;
@@ -738,14 +738,23 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
 }
 
 /**
- * A reference a person can hear once and write down: spoken in short groups, with the prefix read as
- * a word. "TCK-HTL7WHGY" becomes "ticket H T L 7, W H G Y", which survives a phone line.
+ * A reference a person can hear once and write down.
+ *
+ * Six digits in two groups of three — "ticket 4 8 2, 7 1 5" — because that is about as much as
+ * anyone holds in their head from one hearing, and digits survive a bad line in a way that letters
+ * do not: B, P, D, V, T and E all sound alike, and a customer who mishears one character has a
+ * reference that does not exist. The digits are read one at a time rather than as "four hundred and
+ * eighty-two", so there is nothing to convert back.
+ *
+ * Older references with letters in them still read correctly, in groups of four, so a ticket raised
+ * before this change can still be quoted back.
  */
 function sayRef(ref: string | null): string {
   if (!ref) return 'not yet assigned';
   const [prefix, body] = ref.includes('-') ? [ref.slice(0, ref.indexOf('-')), ref.slice(ref.indexOf('-') + 1)] : ['', ref];
   const word = prefix === 'TCK' ? 'ticket ' : prefix === 'CASE' ? 'case ' : prefix ? `${prefix} ` : '';
-  const groups = (body.match(/.{1,4}/g) ?? [body]).map((g) => g.split('').join(' '));
+  const size = /^\d+$/.test(body) ? 3 : 4;
+  const groups = (body.match(new RegExp(`.{1,${size}}`, 'g')) ?? [body]).map((g) => g.split('').join(' '));
   return `${word}${groups.join(', ')}`;
 }
 

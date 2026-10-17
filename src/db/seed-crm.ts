@@ -4,7 +4,7 @@
  * treat them as open repeat contacts.
  */
 import { get, run } from './db.ts';
-import { newId } from '../lib/ids.ts';
+import { newId, randomDigits } from '../lib/ids.ts';
 import { nowMs } from '../lib/clock.ts';
 
 export function seedCrmHistory(): void {
@@ -37,7 +37,7 @@ export function seedCrmHistory(): void {
     [['assistant', 'Thank you for calling Northstar Bank. This is Lily, an AI assistant. How can I help?'], ['customer', it.said], ['assistant', it.summary]]
       .forEach(([who, text], i) => run('INSERT INTO conversation_turns (session_id, seq, speaker, kind, text, created_at) VALUES (?,?,?,?,?,?)', [sid, i + 1, who, 'utterance', text, new Date(at.getTime() + i * 20_000).toISOString()]));
     if (it.complaint) {
-      const tid = newId('TCK', 8);
+      const tid = `TCK-${randomDigits(6)}`;
       run(
         `INSERT INTO case_tickets (id, case_id, customer_id, type, category, reason, original_concern, summary, confirmed_details_json, steps_taken_json, evidence_json, outstanding_action, priority, status, team, owner_id, request_key, created_by, data_origin, created_at, updated_at)
          VALUES (?,?,?, 'complaint', 'General inquiry', ?, ?, ?, '[]', ?, '[]', NULL, 'high', 'closed', 'Complaints', 'STF-AGENT-2', ?, 'STF-AGENT-2', 'seeded_illustrative', ?, ?)`,
