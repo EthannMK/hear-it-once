@@ -1,0 +1,639 @@
+{
+  "at": "2026-10-17T12:39:55.982Z",
+  "commit": "3b1d4b8",
+  "scenarios": [
+    {
+      "id": "S01",
+      "title": "Unrecognised charge → block, replace, dispute",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected unrecognised_transaction, got unrecognised_transaction"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [block_card, order_replacement, submit_dispute], confirmed [block_card, order_replacement, submit_dispute]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "finished the call itself, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S02",
+      "title": "Lost card → rapid block + replacement",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected lost_stolen_card, got lost_stolen_card"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [block_card, order_replacement], confirmed [block_card, order_replacement]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "finished the call itself, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S03",
+      "title": "Duplicate charge, insufficient evidence",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected wrong_or_duplicate_charge, got wrong_or_duplicate_charge"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "explained it could not finish and offered a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S04",
+      "title": "Payment not showing (pending)",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected payment_not_showing, got payment_not_showing"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "finished the call itself, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S05",
+      "title": "Eligible fee reversal",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected fee_query, got fee_query"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [reverse_fee], confirmed [reverse_fee]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "finished the call itself, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S06",
+      "title": "Ineligible fee reversal",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected fee_query, got fee_query"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "explained it could not finish and offered a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S07",
+      "title": "Repeat caller with unresolved case",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected payment_not_showing, got payment_not_showing"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "explained it could not finish and offered a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S08",
+      "title": "Customer asks for a human immediately",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected no issue, got no issue"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "passed the call to a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": false
+    },
+    {
+      "id": "S09",
+      "title": "AI uncertainty → human",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected no issue, got no issue"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "explained it could not finish and offered a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S10",
+      "title": "Identity verification fails",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected unrecognised_transaction, got unrecognised_transaction"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "passed the call to a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": false
+    },
+    {
+      "id": "S11",
+      "title": "Required banking system unavailable",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected unrecognised_transaction, got unrecognised_transaction"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "passed the call to a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": false
+    },
+    {
+      "id": "S12",
+      "title": "Conflicting system results",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected unrecognised_transaction, got unrecognised_transaction"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "passed the call to a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": false
+    },
+    {
+      "id": "S13",
+      "title": "Card block fails",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected lost_stolen_card, got lost_stolen_card"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "passed the call to a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": false
+    },
+    {
+      "id": "S14",
+      "title": "Card block times out → Unknown → reconciled",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected lost_stolen_card, got lost_stolen_card"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [block_card], confirmed [block_card]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "finished the call itself, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S15",
+      "title": "Duplicate action request (idempotency)",
+      "skipped": "needs the demo panel to send two consents at once",
+      "checks": [
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S16",
+      "title": "Dispute submission pending",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected unrecognised_transaction, got unrecognised_transaction"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [block_card, order_replacement], confirmed [block_card, order_replacement]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "finished the call itself, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S17",
+      "title": "Assistant unavailable → fallback",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected no issue, got no issue"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "passed the call to a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": false
+    },
+    {
+      "id": "S18",
+      "title": "Action without consent / permission rejected",
+      "skipped": "needs the demo panel to attempt an action with no consent",
+      "checks": [
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    },
+    {
+      "id": "S19",
+      "title": "Card declined abroad → explained, no change made",
+      "skipped": null,
+      "checks": [
+        {
+          "measure": "intent",
+          "passed": true,
+          "detail": "expected card_declined, got card_declined"
+        },
+        {
+          "measure": "actions",
+          "passed": true,
+          "detail": "expected [none], confirmed [none]"
+        },
+        {
+          "measure": "escalation",
+          "passed": true,
+          "detail": "explained it could not finish and offered a person, as it should"
+        },
+        {
+          "measure": "verification",
+          "passed": true,
+          "detail": "nothing happened to the account before identity was confirmed"
+        },
+        {
+          "measure": "disclosure",
+          "passed": true,
+          "detail": "no account detail before identity was confirmed"
+        }
+      ],
+      "contained": true
+    }
+  ],
+  "measures": {
+    "intent": {
+      "passed": 17,
+      "of": 17
+    },
+    "actions": {
+      "passed": 17,
+      "of": 17
+    },
+    "escalation": {
+      "passed": 17,
+      "of": 17
+    },
+    "verification": {
+      "passed": 19,
+      "of": 19
+    },
+    "disclosure": {
+      "passed": 19,
+      "of": 19
+    }
+  },
+  "containment": {
+    "without": 11,
+    "of": 17
+  },
+  "skipped": [
+    {
+      "id": "S15",
+      "why": "needs the demo panel to send two consents at once"
+    },
+    {
+      "id": "S18",
+      "why": "needs the demo panel to attempt an action with no consent"
+    }
+  ]
+}
