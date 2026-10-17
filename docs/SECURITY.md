@@ -20,6 +20,7 @@ These controls exist in the prototype. **Their existence is not a compliance cla
 | Rate limiting | ✅ | Global 600/min/IP; tighter on call start, input, actions, login | — (config) |
 | Prompt-injection / untrusted content | ✅ | Deterministic safety signals; LLM sees caller text as tagged data with schema-validated output; model cannot reach policy or actions | INT; CONV |
 | Audit of sensitive reads and all writes | ✅ | `audit_events` with redacted metadata; staff views of calls/cases/briefs audited | FND; STAFF |
+| Tamper-evident audit log | ✅ | Every row carries a keyed hash of itself and of the row before it; the head is kept outside the table, so removing rows from the end also shows. `GET /api/audit/verify` walks the chain and reports what it checked. Set `AUDIT_CHAIN_KEY` so the key lives outside the database — without it the chain still catches edits made outside the application, and verification says so rather than claiming more | `tests/audit/chain.test.ts` (edited field, removed row, truncated end, cleared table, hand-inserted row, forged hash, swapped rows) |
 | Privacy-safe logs | ✅ | Structured logger deep-redacts every record | ACT logging |
 | Secrets management | ✅ | Env vars only; `.env` git-ignored; `.env.example` placeholders; `check:secrets` scan | `npm run check:secrets` |
 | Dependency checks | ✅ | `npm audit` — 0 known vulnerabilities at build time (13 Oct 2026) | `npm run audit:deps` |

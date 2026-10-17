@@ -10,6 +10,7 @@ import { nowIso } from '../../lib/clock.ts';
 import { AppError } from '../../lib/errors.ts';
 import { audit } from '../../audit/audit.ts';
 import { queryAudit } from '../../audit/audit.ts';
+import { verifyAuditChain } from '../../audit/chain.ts';
 import { issueStaffToken, listStaffUsers, requirePermission, staffActor } from '../../auth/rbac.ts';
 import { getCaseDetail } from '../../cases/case-service.ts';
 import { acceptHandoff, agentMessage, completeHandoff, getHandoff, listHandoffs } from '../../handoff/handoff-service.ts';
@@ -167,6 +168,15 @@ export function registerStaffRoutes(app: FastifyInstance): void {
     const q = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50), cursor: z.coerce.number().int().optional(), sessionId: z.string().max(40).optional(), event: z.string().max(60).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional() }).parse(req.query);
     audit({ actor: staffActor(p), event: 'audit.viewed', status: 'ok' });
     return queryAudit(q);
+  });
+
+  /**
+   * Check the audit log against its own hash chain. Reading this does not write an audit row: that
+   * would change what is being verified while it is being verified.
+   */
+  app.get('/api/audit/verify', async (req) => {
+    requirePermission(req.staff, 'audit.read');
+    return verifyAuditChain();
   });
 
   app.get('/api/kpis', async (req) => {

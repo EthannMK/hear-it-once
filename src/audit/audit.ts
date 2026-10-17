@@ -1,10 +1,14 @@
 /**
  * Audit service (FR-14). Persists timestamp, actor, event, resource, correlation ID,
  * status and REDACTED metadata for every sensitive read and every write.
+ *
+ * Every row is also linked into a hash chain as it is written, so the log can be shown not to have
+ * been edited afterwards. See src/audit/chain.ts.
  */
-import { run, all, get } from '../db/db.ts';
+import { run, all, get, tx } from '../db/db.ts';
 import { nowIso } from '../lib/clock.ts';
 import { redactDeep } from '../lib/redact.ts';
+import { linkRow } from './chain.ts';
 
 export interface Actor {
   type: 'customer_session' | 'agent' | 'qa' | 'admin' | 'system' | 'assistant';
@@ -28,23 +32,28 @@ export interface AuditInput {
 }
 
 export function audit(e: AuditInput): void {
-  run(
-    `INSERT INTO audit_events (ts, correlation_id, session_id, actor_type, actor_id, event, resource_type, resource_id, status, metadata_json, data_origin)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    [
-      e.at ?? nowIso(),
-      e.correlationId ?? null,
-      e.sessionId ?? null,
-      e.actor.type,
-      e.actor.id,
-      e.event,
-      e.resourceType ?? null,
-      e.resourceId ?? null,
-      e.status,
-      JSON.stringify(redactDeep(e.metadata ?? {})),
-      e.dataOrigin ?? 'demo_session',
-    ],
-  );
+  // The insert and its hash are one transaction: a row is never readable without the link that
+  // seals it, and a failure leaves neither behind.
+  tx(() => {
+    const r = run(
+      `INSERT INTO audit_events (ts, correlation_id, session_id, actor_type, actor_id, event, resource_type, resource_id, status, metadata_json, data_origin)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        e.at ?? nowIso(),
+        e.correlationId ?? null,
+        e.sessionId ?? null,
+        e.actor.type,
+        e.actor.id,
+        e.event,
+        e.resourceType ?? null,
+        e.resourceId ?? null,
+        e.status,
+        JSON.stringify(redactDeep(e.metadata ?? {})),
+        e.dataOrigin ?? 'demo_session',
+      ],
+    );
+    linkRow(r.lastInsertRowid);
+  });
 }
 
 export interface AuditQuery {

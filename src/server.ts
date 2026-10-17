@@ -2,6 +2,7 @@
 import { env } from './config/env.ts';
 import { db } from './db/db.ts';
 import { backfillTxnDetail, isSeeded, seedAll } from './db/seed.ts';
+import { sealExistingRows } from './audit/chain.ts';
 import { buildApp } from './api/app.ts';
 import { log } from './lib/logger.ts';
 import { purgeExpiredTranscripts } from './reporting/retention.ts';
@@ -20,6 +21,10 @@ if (!isSeeded()) {
   // A database saved by an older build has the card-detail columns but no values in them.
   backfillTxnDetail();
 }
+// Audit rows written before the log was chained are hashed in place, so the chain covers the whole
+// log. Verification reports which rows were sealed this way rather than as they were written.
+const sealed = sealExistingRows();
+if (sealed) log.info('sealed audit rows written before the chain existed', { rows: sealed });
 // BigQuery mode: lookups go to BigQuery live; the app's copy of the bank rows is refreshed from it now.
 if (e.ADAPTER_MODE === 'bigquery') {
   adapters();

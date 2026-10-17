@@ -19,6 +19,13 @@ const EnvSchema = z.object({
   HIO_BACKUP_DIR: z.string().optional(),
   HIO_BACKUP_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
   SESSION_SECRET: z.string().min(32, 'SESSION_SECRET must be at least 32 characters').optional(),
+  /**
+   * The key the audit log's hash chain is computed with. Set it in production and keep it out of the
+   * database: that is what makes an edit to the log detectable by someone who can write to the
+   * database. Unset, a key is generated and stored alongside the log, which is weaker — see
+   * src/audit/chain.ts.
+   */
+  AUDIT_CHAIN_KEY: z.string().min(32, 'AUDIT_CHAIN_KEY must be at least 32 characters').optional(),
   DEMO_MODE: z
     .enum(['true', 'false'])
     .default('true')
