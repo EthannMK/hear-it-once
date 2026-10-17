@@ -21,7 +21,7 @@ import { readCheck } from '../verification/agent-check.ts';
 import { emitTimeline, listTimeline } from '../events/timeline.ts';
 import { caseEvent, updateCase } from '../cases/case-service.ts';
 import { buildResolution } from '../api/brief.ts';
-import { ACTION_LABELS, HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate, formatMoney } from '../conversation/format.ts';
+import { ACTION_LABELS, HANDOFF_REASON_LABELS, ISSUE_LABELS, OP_STATUS_LABELS, formatDate, formatMoney } from '../conversation/format.ts';
 import { factRows, setFact, type Facts } from '../conversation/facts.ts';
 import type { CallContext } from '../conversation/orchestrator.ts';
 import { SOURCE_DISPLAY } from '../retrieval/labels.ts';
@@ -197,6 +197,12 @@ export function accountOverview(customerId: string) {
     available: formatMoney(available),
     limit: formatMoney(limit),
     pending: pending ? formatMoney(pending) : null,
+    // The same figures in minor units, so anything reading this can check them rather than parse
+    // the formatted text back into numbers.
+    balanceMinor: balance,
+    availableMinor: available,
+    limitMinor: limit,
+    pendingMinor: pending,
     utilisation: limit ? Math.min(100, Math.round(((balance + pending) / limit) * 100)) : 0,
     lowCredit: !!lowCredit,
     lastPayment: lastPayment ? { amount: formatMoney(lastPayment.amount_minor), at: lastPayment.at, status: lastPayment.status } : null,
@@ -277,6 +283,7 @@ const TXN_TYPE_LABELS: Record<string, string> = {
 };
 const MCC_LABELS: Record<string, string> = {
   '4121': 'Taxis and limousines', '4722': 'Travel agencies', '4814': 'Telecommunications', '4900': 'Utilities',
+  '8099': 'Health services',
   '5411': 'Groceries and supermarkets', '5541': 'Service stations', '5732': 'Electronics', '5812': 'Restaurants',
   '5814': 'Fast food', '5815': 'Digital goods', '5912': 'Pharmacies', '5968': 'Subscriptions', '5999': 'Miscellaneous retail',
   '6012': 'Financial institution', '6300': 'Insurance', '7832': 'Cinemas',
@@ -339,6 +346,42 @@ function caseListItem(c: CaseRow) {
     updatedAt: c.updated_at,
     live: !!s && !s.ended_at && s.data_origin === 'demo_session',
     waitingForAgent: meta.handoff?.status === 'queued' || meta.handoff?.status === 'requested',
+  };
+}
+
+/** How the customer reached the bank, in words rather than the channel's code. */
+const CHANNEL_LABELS: Record<string, string> = {
+  voice_browser: 'Voice call', text_simulator: 'Typed chat', telephony: 'Phone call',
+};
+
+/**
+ * One earlier call, at the level an agent reads when they want to know what happened last time:
+ * how long it ran, how it ended, whether identity was checked, what was actually done, whether a
+ * person took it, and what the customer said in their own words.
+ */
+function interactionDetail(c: { id: string; sessionId: string; createdAt: string; [k: string]: unknown }) {
+  const s = get<{ answered_at: string; ended_at: string | null; channel: string; outcome: string | null; verification_status: string; csat: number | null }>(
+    'SELECT answered_at, ended_at, channel, outcome, verification_status, csat FROM call_sessions WHERE id = ?',
+    [c.sessionId],
+  );
+  const ops = all<{ action_type: string; status: string; external_ref: string | null; completed_at: string | null }>(
+    'SELECT action_type, status, external_ref, completed_at FROM action_operations WHERE session_id = ? ORDER BY requested_at',
+    [c.sessionId],
+  );
+  const h = get<{ reason: string; status: string; agent_id: string | null }>('SELECT reason, status, agent_id FROM handoffs WHERE session_id = ? ORDER BY requested_at DESC LIMIT 1', [c.sessionId]);
+  const said = all<{ text: string }>("SELECT text FROM conversation_turns WHERE session_id = ? AND speaker = 'customer' AND sensitive_redacted = 0 ORDER BY seq LIMIT 3", [c.sessionId]);
+  const secs = s?.ended_at ? Math.max(0, Math.round((Date.parse(s.ended_at) - Date.parse(s.answered_at)) / 1000)) : null;
+  return {
+    ...c,
+    channel: s?.channel ? CHANNEL_LABELS[s.channel] ?? s.channel.replace(/_/g, ' ') : null,
+    endedAt: s?.ended_at ?? null,
+    durationLabel: secs == null ? 'Still open' : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`,
+    outcome: s?.outcome ?? null,
+    identity: s?.verification_status ?? 'not_started',
+    csat: s?.csat ?? null,
+    actions: ops.map((o) => ({ label: ACTION_LABELS[o.action_type] ?? o.action_type, status: OP_STATUS_LABELS[o.status] ?? o.status.replace(/_/g, ' '), reference: o.external_ref, at: o.completed_at })),
+    handover: h ? { reason: HANDOFF_REASON_LABELS[h.reason] ?? h.reason, status: h.status, agent: h.agent_id ? staffName(h.agent_id) : null } : null,
+    said: said.map((x) => redactText(x.text).slice(0, 160)),
   };
 }
 
@@ -581,7 +624,7 @@ export function caseWorkspace(caseId: string, actor: Actor) {
     flush(rawTurns.length);
   }
   const transcript = rawTurns.filter((x) => !spokenIn.has(x.seq)).map((t) => ({ seq: t.seq, speaker: t.speaker, kind: t.kind, text: t.text, at: t.created_at, hidden: !!t.sensitive_redacted }));
-  const previous = cust.id ? casesForCustomer(cust.id).filter((x) => x.id !== c.id).slice(0, 6) : [];
+  const previous = (cust.id ? casesForCustomer(cust.id).filter((x) => x.id !== c.id).slice(0, 8) : []).map(interactionDetail);
 
   // The one card and the charges this call is about, so the agent sees those first.
   const txnRefs = parseJson<string[]>(c.transaction_refs_json, []);

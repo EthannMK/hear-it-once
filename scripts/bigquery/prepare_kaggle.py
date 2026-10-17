@@ -25,6 +25,15 @@ from datetime import datetime, timedelta, timezone
 PER_CUSTOMER = 250
 
 
+# Sparkov's categories mapped to the merchant category codes a card network would carry.
+MCC = {
+    "grocery_pos": "5411", "grocery_net": "5411", "gas_transport": "5541", "home": "5200",
+    "shopping_pos": "5999", "shopping_net": "5999", "food_dining": "5812", "entertainment": "7832",
+    "personal_care": "7230", "health_fitness": "8099", "misc_pos": "5999", "misc_net": "5999",
+    "kids_pets": "5995", "travel": "4722",
+}
+ACQUIRERS = ["First Data", "Worldpay", "Chase Paymentech", "Elavon", "Global Payments"]
+
 def main(src: str, out: str) -> None:
     customers = [json.loads(l) for l in open(f"{out}/customers.json") if l.strip()]
     cards = {c["customer_id"]: c["card_id"] for c in (json.loads(l) for l in open(f"{out}/cards.json") if l.strip()) if c["holder_role"] == "primary"}
@@ -66,6 +75,12 @@ def main(src: str, out: str) -> None:
                 "status": "posted", "entry_mode": "ecommerce" if cat.endswith("_net") else "contactless" if cat == "gas_transport" else "chip",
                 "auth_code": "K" + hashlib.sha1(tid.encode()).hexdigest()[:5].upper(), "related_payment_id": None,
                 "source": "kaggle_sparkov", "is_fraud_label": fraud,
+                # Card-system detail, so history rows read like the rest of the ledger. The Sparkov
+                # data is US and carries no merchant city, so the city is left empty rather than
+                # filled with the cardholder's own town.
+                "mcc": MCC.get(cat, "5999"), "merchant_city": None, "merchant_country": "US",
+                "network_ref": "7" + str(int(hashlib.sha1(tid.encode()).hexdigest()[:16], 16))[:22].rjust(22, "0"),
+                "acquirer": ACQUIRERS[int(hashlib.sha1(tid.encode()).hexdigest()[:8], 16) % len(ACQUIRERS)],
             })
             if fraud:
                 alerts.append({

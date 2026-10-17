@@ -13,16 +13,20 @@
 
 /** Merchant category codes, as a card network assigns them, with the label an agent reads. */
 const MCC_BY_CATEGORY: Record<string, [string, string]> = {
+  grocery: ['5411', 'Grocery stores, supermarkets'],
   groceries: ['5411', 'Grocery stores, supermarkets'],
   dining: ['5812', 'Eating places, restaurants'],
+  restaurant: ['5812', 'Eating places, restaurants'],
   coffee: ['5814', 'Fast food restaurants'],
   transport: ['4121', 'Taxicabs and limousines'],
   travel: ['4722', 'Travel agencies and tour operators'],
   fuel: ['5541', 'Service stations'],
   digital: ['5815', 'Digital goods: media, books, movies'],
+  digital_goods: ['5815', 'Digital goods: media, books, movies'],
   entertainment: ['7832', 'Motion picture theatres'],
   utilities: ['4900', 'Utilities: electric, gas, water'],
   retail: ['5999', 'Miscellaneous retail'],
+  health: ['8099', 'Health practitioners and medical services'],
   pharmacy: ['5912', 'Drug stores and pharmacies'],
   electronics: ['5732', 'Electronics stores'],
   telecom: ['4814', 'Telecommunication services'],

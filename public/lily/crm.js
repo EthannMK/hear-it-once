@@ -10,7 +10,7 @@ import { api, h, uid } from '/js/lib.js';
 let K = null; // { render, icon, toast }
 export function initCrm(kit) { K = kit; }
 
-const C = { me: null, timer: null, ws: null, dirty: false, openTicketForm: null, openRec: null, side: 'ai', cust: 'account', ai: {}, joined: null, joinedFor: null, lastCall: null };
+const C = { me: null, timer: null, ws: null, dirty: false, openTicketForm: null, openRec: null, side: 'ai', cust: 'account', caseTab: 'summary', ai: {}, joined: null, joinedFor: null, lastCall: null };
 const fmtWhen = (iso) => { try { const d = new Date(iso); const today = new Date().toDateString() === d.toDateString(); return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }); } catch { return ''; } };
 const fmtFull = (iso) => { try { return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
 const initials = (n) => String(n ?? '?').split(' ').map((x) => x[0]).join('').slice(0, 2).toUpperCase();
@@ -239,6 +239,60 @@ function customerCol(w) {
  * account at a glance, the transactions behind it, and what happened on earlier calls. An agent
  * works one of these at a time, and the screen stays on one page.
  */
+/**
+ * Give a panel the full width of the screen. An agent reading a transaction ledger or a timeline
+ * needs the room, and the other columns are not being read at that moment. The default tab of each
+ * panel always returns to the three-column view.
+ */
+/**
+ * The transaction ledger across the full width: one row per entry with the columns a card agent
+ * works from, and the rest of the record on the row itself when it is opened. This is the view the
+ * Transactions tab opens, which is why the tab takes the screen.
+ */
+function txTable(txns, cu) {
+  const head = ['Date and time', 'Merchant', 'Type', 'Entry', 'Location', 'Category', 'Status', 'Amount'];
+  const rows = (txns ?? []).map((t) => {
+    const when = new Date(t.at);
+    const time = isNaN(when) ? '' : when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const more = [
+      ['Settled', t.postedAt ? fmtFull(t.postedAt) : 'Not yet settled'],
+      t.card ? ['Card', t.card] : null,
+      t.authCode ? ['Authorisation code', t.authCode] : null,
+      t.networkRef ? ['Acquirer reference', t.networkRef] : null,
+      t.acquirer ? ['Acquirer', t.acquirer] : null,
+      t.mcc ? ['Merchant category code', `${t.mcc}${t.mccLabel ? ` · ${t.mccLabel}` : ''}`] : null,
+      ['Transaction id', t.id],
+    ].filter(Boolean);
+    const open = (e) => e.currentTarget.closest('tbody').classList.toggle('open');
+    return h(`tbody${t.focus ? '.focus' : ''}`,
+      h('tr.txr', { onclick: open, tabindex: '0', onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } } },
+        h('td', h('b', fmtWhen(t.at)), time ? h('span', time) : null),
+        h('td', h('b', t.merchant), t.disputed ? badge('lav', 'Disputed') : t.focus ? badge('amber', 'This call') : null),
+        h('td', t.typeLabel ?? t.kind),
+        h('td', t.entryLabel ?? '—'),
+        h('td', t.where ?? '—'),
+        h('td', t.category ? String(t.category).replace(/_/g, ' ') : '—'),
+        h('td', h(`span.st.${t.status}`, t.statusLabel ?? t.status)),
+        h('td.amt', h('b.mono', t.amount))),
+      h('tr.txmore', h('td', { colspan: String(head.length) },
+        h('dl.txd2', more.map(([k, v]) => h('div', h('dt', k), h('dd.mono', v)))))));
+  });
+  return h('section.cx-sec.cx-txtable',
+    h('div.cx-h', h('h2', `Transactions${txns?.length ? ` (${txns.length})` : ''}`),
+      h('span.small.muted', 'Click a row for the rest of the record'),
+      location.hash.includes('/customer/') || !cu ? null : h('a.small', { href: `#/crm/customer/${encodeURIComponent(cu.id)}` }, 'See all')),
+    rows.length
+      ? h('div.tablewrap', h('table.txt', h('thead', h('tr', head.map((x) => h('th', { scope: 'col' }, x)))), ...rows))
+      : h('p.small.muted', 'No transactions.'));
+}
+
+function focusPanel(which) {
+  const grid = document.querySelector('.cx-grid');
+  if (!grid) return;
+  grid.classList.toggle('focus-cust', which === 'cust');
+  grid.classList.toggle('focus-side', which === 'side');
+}
+
 function custPanel(w, cu) {
   const earlier = (w.previousCases ?? []).filter((x) => x.id !== w.case?.id);
   const tabs = [
@@ -251,11 +305,13 @@ function custPanel(w, cu) {
   const btns = tabs.map(([k, label]) => h('button', { type: 'button', role: 'tab', 'data-k': k, onclick: () => { C.cust = k; draw(); } }, label));
   function draw() {
     for (const b of btns) b.setAttribute('aria-selected', String(b.dataset.k === C.cust));
+    const wide = C.cust !== 'account';
     pane.replaceChildren(
-      C.cust === 'tx' ? h('div.cx-stack', txCard(w.transactions, cu))
+      C.cust === 'tx' ? h('div.cx-stack', txTable(w.transactions, cu))
         : C.cust === 'history' ? h('div.cx-stack', interactionsCard(w.previousCases ?? [], w.case?.id))
           : h('div.cx-stack', accountCard(cu, w.focus?.cardRef), balanceCard(w.account), usageCard(w.account, w.history)),
     );
+    focusPanel(wide ? 'cust' : null);
   }
   draw();
   return h('aside.card.cx-cust', { 'aria-label': 'Customer' }, h('div.cx-tabs', { role: 'tablist' }, btns), pane);
@@ -337,7 +393,20 @@ function txRow(t) {
 }
 
 function caseCol(w) {
-  return h('section.cx-case', { 'aria-label': 'Case' }, summaryCard(w), recommendation(w), actionsCard(w), ticketsCard(w));
+  const tabs = [['summary', 'AI summary'], ['actions', `Actions${w.actions?.length ? ` (${w.actions.length})` : ''}`], ['requests', `Requests${w.tickets?.length ? ` (${w.tickets.length})` : ''}`]];
+  if (!tabs.some(([k]) => k === C.caseTab)) C.caseTab = 'summary';
+  const pane = h('div.cx-pane');
+  const btns = tabs.map(([k, label]) => h('button', { type: 'button', role: 'tab', 'data-k': k, onclick: () => { C.caseTab = k; draw(); } }, label));
+  function draw() {
+    for (const b of btns) b.setAttribute('aria-selected', String(b.dataset.k === C.caseTab));
+    pane.replaceChildren(
+      C.caseTab === 'actions' ? h('div.cx-stack', actionsCard(w))
+        : C.caseTab === 'requests' ? h('div.cx-stack', ticketsCard(w))
+          : h('div.cx-stack', summaryCard(w), recommendation(w)),
+    );
+  }
+  draw();
+  return h('section.card.cx-case', { 'aria-label': 'Case' }, h('div.cx-tabs', { role: 'tablist' }, btns), pane);
 }
 
 function summaryCard(w) {
@@ -427,12 +496,25 @@ function ticketsCard(w) {
 }
 
 function interactionsCard(items, currentId) {
-  const list = items.filter((x) => x.id !== currentId);
-  return h('section.card.cx-sec',
-    h('h2', `Earlier interactions (${list.length})`),
-    list.length ? h('ul.cx-int', list.slice(0, 6).map((c) => h('li', h('a', { href: `#/crm/case/${encodeURIComponent(c.id)}` },
-      h('span.d', fmtWhen(c.createdAt)), h('span.t', c.headline ?? c.issueType), badge(ST[c.status] ?? 'lav', c.statusLabel)))))
-      : h('p.small.muted', 'First contact: no earlier calls or cases.'));
+  const list = (items ?? []).filter((x) => x.id !== currentId);
+  if (!list.length) return h('section.cx-sec', h('h2', 'Earlier interactions'), h('p.small.muted', 'First contact: no earlier calls or cases.'));
+  return h('section.cx-sec.cx-hist',
+    h('div.cx-h', h('h2', `Earlier interactions (${list.length})`), h('span.small.muted', 'Newest first · open one to work it')),
+    h('ul.cx-histl', list.map((c) => h('li',
+      h('div.hh',
+        h('div',
+          h('b', c.headline ?? c.issueType ?? 'Customer call'),
+          h('span', [fmtFull(c.createdAt), c.channel, c.durationLabel, c.identity === 'verified' ? 'identity verified' : 'identity not verified'].filter(Boolean).join(' · '))),
+        h('div.hb',
+          badge(ST[c.status] ?? 'lav', c.statusLabel ?? c.status),
+          c.csat ? badge('mint', `Rated ${c.csat}/5`) : null,
+          h('a.btn.sm', { href: `#/crm/case/${encodeURIComponent(c.id)}` }, 'Open'))),
+      c.said?.length ? h('p.hsaid', `“${c.said[0]}”`) : null,
+      h('dl.txd2',
+        h('div', h('dt', 'Outcome'), h('dd', (c.outcome ?? 'not recorded').replace(/_/g, ' '))),
+        h('div', h('dt', 'Actions'), h('dd', c.actions?.length ? c.actions.map((a) => `${a.label} — ${a.status}`).join('; ') : 'none')),
+        h('div', h('dt', 'Handover'), h('dd', c.handover ? `${c.handover.reason} — ${c.handover.status}${c.handover.agent ? ` (${c.handover.agent})` : ''}` : 'handled without a person')),
+        h('div', h('dt', 'Case'), h('dd.mono', c.id)))))));
 }
 
 /* ------------------------------------------------------------------ right column: AI back office, timeline, conversation */
@@ -449,6 +531,7 @@ function sideCol(target, w) {
   function draw() {
     for (const b of btns) b.setAttribute('aria-selected', String(b.dataset.k === C.side));
     pane.replaceChildren(C.side === 'timeline' ? timeline(w) : C.side === 'talk' ? conversation(w) : aiPane(target, key));
+    focusPanel(C.side === 'ai' ? null : 'side');
   }
   draw();
   return h('aside.card.cx-side', { 'aria-label': 'Back office, timeline and conversation' }, h('div.cx-tabs', { role: 'tablist' }, btns), pane);

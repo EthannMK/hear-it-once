@@ -20,7 +20,9 @@ OPTIONS (description = 'Cards. No card numbers are stored: pan_sha256 is a hash 
 CREATE TABLE IF NOT EXISTS `PROJECT_ID.DATASET.transactions` (
   transaction_id STRING NOT NULL, customer_id STRING NOT NULL, card_id STRING, kind STRING, merchant_name STRING, merchant_category STRING,
   amount_minor INT64, currency STRING, txn_at TIMESTAMP, posted_at TIMESTAMP, status STRING, entry_mode STRING, auth_code STRING,
-  related_payment_id STRING, source STRING, is_fraud_label BOOL
+  related_payment_id STRING, source STRING, is_fraud_label BOOL,
+  -- Card-system detail, the same fields the agent screen shows.
+  mcc STRING, merchant_city STRING, merchant_country STRING, network_ref STRING, acquirer STRING
 ) CLUSTER BY customer_id, txn_at
 OPTIONS (description = 'Card transactions. source = northstar_seed (scripted demo data) or kaggle_sparkov (history derived from the Kaggle Sparkov synthetic dataset, CC0).');
 
@@ -72,3 +74,10 @@ CREATE TABLE IF NOT EXISTS `PROJECT_ID.DATASET.dispute_submissions` (
 );
 CREATE TABLE IF NOT EXISTS `PROJECT_ID.DATASET.fee_reversals` (reversal_id STRING, fee_id STRING, customer_id STRING, rule_code STRING, amount_minor INT64, currency STRING, session_id STRING, created_at TIMESTAMP) CLUSTER BY customer_id;
 CREATE TABLE IF NOT EXISTS `PROJECT_ID.DATASET.demo_resets` (customer_id STRING, reset_at TIMESTAMP) CLUSTER BY customer_id;
+
+-- Existing datasets: add the card-system detail columns if they are not there yet.
+ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS mcc STRING;
+ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS merchant_city STRING;
+ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS merchant_country STRING;
+ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS network_ref STRING;
+ALTER TABLE `PROJECT_ID.DATASET.transactions` ADD COLUMN IF NOT EXISTS acquirer STRING;

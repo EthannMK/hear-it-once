@@ -27,8 +27,10 @@ const COLS: Record<string, { local: string; select: (c: BqClient) => string; col
   transactions: {
     local: 'bank_transactions',
     select: (c) => `WITH ${metaCte(c)} SELECT transaction_id AS id, customer_id, card_id, kind, merchant_name, merchant_category, amount_minor, currency, ${sh('txn_at')} AS txn_at,
-      ${sh('posted_at')} AS posted_at, status, entry_mode, auth_code, related_payment_id, CURRENT_TIMESTAMP() AS created_at FROM ${T(c, 'transactions')} CROSS JOIN meta`,
-    cols: ['id', 'customer_id', 'card_id', 'kind', 'merchant_name', 'merchant_category', 'amount_minor', 'currency', 'txn_at', 'posted_at', 'status', 'entry_mode', 'auth_code', 'related_payment_id', 'created_at'],
+      ${sh('posted_at')} AS posted_at, status, entry_mode, auth_code, related_payment_id, CURRENT_TIMESTAMP() AS created_at,
+      mcc, merchant_city, merchant_country, network_ref, acquirer FROM ${T(c, 'transactions')} CROSS JOIN meta`,
+    cols: ['id', 'customer_id', 'card_id', 'kind', 'merchant_name', 'merchant_category', 'amount_minor', 'currency', 'txn_at', 'posted_at', 'status', 'entry_mode', 'auth_code', 'related_payment_id', 'created_at',
+      'mcc', 'merchant_city', 'merchant_country', 'network_ref', 'acquirer'],
   },
   fraud_alerts: {
     local: 'bank_fraud_alerts',
