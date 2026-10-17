@@ -147,12 +147,13 @@ export function customerProfile(customerId: string, actor: Actor) {
     `SELECT ${DETAIL_COLS} FROM bank_transactions WHERE customer_id = ? ORDER BY txn_at DESC LIMIT 12`,
     [customerId],
   ).map((t) => txnRow(t, cardList, disputed));
+  const txnsWithPattern = withMerchantPattern(txns, customerId);
   const cases = casesForCustomer(customerId);
   audit({ actor, event: 'crm.customer_viewed', status: 'ok', resourceType: 'customer', resourceId: customerId });
   return {
     customer: b,
     account: accountOverview(customerId),
-    transactions: txns,
+    transactions: txnsWithPattern,
     cases,
     tickets: all<TicketRow>('SELECT * FROM case_tickets WHERE customer_id = ? ORDER BY created_at DESC', [customerId]).map(ticketBrief),
   };
@@ -256,7 +257,39 @@ function txnRow(
     card: cards.find((c) => c.ref === t.card_id)?.masked ?? null,
     disputed: disputed.has(t.id),
     focus: focusIds.includes(t.id),
+    /** Other customers who reported this merchant recently; set by withMerchantPattern. */
+    reportedByOthers: 0,
   };
+}
+
+/**
+ * How many OTHER customers have reported the same merchant lately, from fraud alerts and disputes
+ * already on the bank's records. One customer's unfamiliar charge is a question; several customers
+ * reporting the same merchant in a month is a pattern, and the agent should see it next to the
+ * charge rather than have to go looking.
+ */
+function withMerchantPattern<T extends { merchant: string; reportedByOthers: number }>(rows: T[], exceptCustomerId: string): T[] {
+  const names = [...new Set(rows.map((r) => r.merchant).filter((m) => m && m !== '—'))];
+  if (!names.length) return rows;
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const list = names.map(() => '?').join(',');
+  const counts = new Map<string, Set<string>>();
+  const add = (merchant: string | null, customerId: string) => {
+    if (!merchant) return;
+    const key = merchant.toUpperCase();
+    (counts.get(key) ?? counts.set(key, new Set()).get(key)!).add(customerId);
+  };
+  for (const r of all<{ merchant_name: string | null; customer_id: string }>(
+    `SELECT t.merchant_name, a.customer_id FROM bank_fraud_alerts a JOIN bank_transactions t ON t.id = a.transaction_id
+     WHERE UPPER(t.merchant_name) IN (${list}) AND a.customer_id != ? AND a.created_at >= ?`,
+    [...names.map((n) => n.toUpperCase()), exceptCustomerId, since],
+  )) add(r.merchant_name, r.customer_id);
+  for (const r of all<{ merchant_name: string | null; customer_id: string }>(
+    `SELECT t.merchant_name, d.customer_id FROM disputes d JOIN bank_transactions t ON t.id = d.transaction_id
+     WHERE UPPER(t.merchant_name) IN (${list}) AND d.customer_id != ? AND d.created_at >= ?`,
+    [...names.map((n) => n.toUpperCase()), exceptCustomerId, since],
+  )) add(r.merchant_name, r.customer_id);
+  return rows.map((r) => ({ ...r, reportedByOthers: counts.get(r.merchant.toUpperCase())?.size ?? 0 }));
 }
 
 /** The columns a transaction row needs, in one place: both views read the same record. */
@@ -302,7 +335,7 @@ function recentTransactions(customerId: string, cards: { ref: string; masked: st
   const focus = focusIds.length ? all<T>(`${cols} WHERE customer_id = ? AND id IN (${focusIds.map(() => '?').join(',')})`, [customerId, ...focusIds]) : [];
   const disputed = new Set(all<{ transaction_id: string }>('SELECT transaction_id FROM disputes WHERE customer_id = ?', [customerId]).map((d) => d.transaction_id));
   const rows = [...focus, ...recent.filter((t) => !focus.some((f) => f.id === t.id))].slice(0, Math.max(6, focus.length));
-  return rows.map((t) => txnRow(t, cards, disputed, focusIds));
+  return withMerchantPattern(rows.map((t) => txnRow(t, cards, disputed, focusIds)), customerId);
 }
 
 /** The case to open when the agent's screen is opened without one: a call still waiting or live first, then the newest. */

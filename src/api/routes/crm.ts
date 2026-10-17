@@ -6,7 +6,7 @@ import { adapters } from '../../adapters/registry.ts';
 import { customerHistory } from '../../adapters/bigquery/replica.ts';
 import { requirePermission, staffActor } from '../../auth/rbac.ts';
 import { audit } from '../../audit/audit.ts';
-import { ask, backOfficeEngine, insights } from '../../backoffice/backoffice.ts';
+import { ask, backOfficeEngine, draftReply, draftWrapUp, insights } from '../../backoffice/backoffice.ts';
 import { caseIdForSession, caseWorkspace, latestCaseId, createTicket, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
 
 const Id = z.string().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/);
@@ -49,6 +49,15 @@ export function registerCrmRoutes(app: FastifyInstance): void {
     const t = Target.parse({ caseId: body.caseId, customerId: body.customerId });
     const r = await ask(t, body.question, p.userId);
     audit({ actor: staffActor(p), event: 'backoffice.asked', status: 'ok', resourceType: t.caseId ? 'case' : 'customer', resourceId: (t.caseId ?? t.customerId)!, metadata: { mode: r.mode, ms: r.ms, tools: r.steps.map((s) => s.tool) } });
+    return r;
+  });
+
+  /** A first draft of what to say next, written from the case. The agent edits and sends it. */
+  app.post('/api/backoffice/draft', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req) => {
+    const p = requirePermission(req.staff, 'case.read');
+    const body = z.object({ caseId: Id, kind: z.enum(['reply', 'wrapup']).default('reply') }).parse(req.body ?? {});
+    const r = body.kind === 'wrapup' ? await draftWrapUp(body.caseId, p.userId) : await draftReply(body.caseId, p.userId);
+    audit({ actor: staffActor(p), event: `backoffice.drafted_${body.kind}`, status: 'ok', resourceType: 'case', resourceId: body.caseId, metadata: { mode: r.mode, ms: r.ms } });
     return r;
   });
 

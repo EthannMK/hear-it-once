@@ -8,6 +8,7 @@ import { setup, Caller, staffLogin } from './harness.ts';
 import { parseEngineStream, shapeAnswer, insights, ask } from '../../src/backoffice/backoffice.ts';
 import { accountOverview } from '../../src/crm/crm.ts';
 import { allProfileCards } from '../../src/live/profiles.ts';
+import { all, get } from '../../src/db/db.ts';
 
 let app: FastifyInstance;
 beforeEach(async () => { app = await setup(); });
@@ -24,6 +25,19 @@ async function verifiedCall() {
   await c.say('yes');
   await c.refresh();
   return c;
+}
+
+const caseIdOf = (c: Caller) => get<{ id: string }>('SELECT id FROM cases WHERE session_id = ?', [c.sessionId])!.id;
+const staffCookie = (a: FastifyInstance) => staffLogin(a, 'STF-AGENT-1');
+async function staffPost(a: FastifyInstance, url: string, payload: object) {
+  const r = await a.inject({ method: 'POST', url, headers: { cookie: await staffCookie(a) }, payload });
+  if (r.statusCode !== 200) throw new Error(`${url} → ${r.statusCode} ${r.body}`);
+  return r.json();
+}
+async function staffGet(a: FastifyInstance, url: string) {
+  const r = await a.inject({ method: 'GET', url, headers: { cookie: await staffCookie(a) } });
+  if (r.statusCode !== 200) throw new Error(`${url} → ${r.statusCode} ${r.body}`);
+  return r.json();
 }
 
 describe('reading a reply from Agent Engine', () => {
@@ -191,5 +205,67 @@ describe('/api/crm/latest', () => {
     expect(r.statusCode).toBe(200);
     expect(typeof r.json().caseId).toBe('string');
     expect(r.json().caseId).toBe(c.caseRow().id);
+  });
+});
+
+/**
+ * WRITING FOR THE AGENT, NEVER FOR THE CUSTOMER DIRECTLY. A draft is a first version the agent
+ * edits and sends; a wrap-up is the outcome and notes the case already supports. Neither may claim
+ * anything the records do not confirm.
+ */
+describe('drafting from the case', () => {
+  it('a reply names only actions the bank confirmed, with their references', async () => {
+    const c = await verifiedCall();
+    await c.say('yes');
+    const r = await staffPost(app, '/api/backoffice/draft', { caseId: caseIdOf(c), kind: 'reply' });
+    const confirmed = all<{ action_type: string; external_ref: string | null }>("SELECT action_type, external_ref FROM action_operations WHERE session_id = ? AND status = 'succeeded'", [c.sessionId]);
+    for (const o of confirmed) expect(r.text, `names ${o.action_type}`).toMatch(new RegExp(o.external_ref ?? o.action_type.replace(/_/g, ' '), 'i'));
+    // Nothing is claimed that no system confirmed.
+    const pending = all<{ action_type: string }>("SELECT action_type FROM action_operations WHERE session_id = ? AND status != 'succeeded'", [c.sessionId]);
+    for (const o of pending) expect(r.text).not.toMatch(new RegExp(`${o.action_type.replace(/_/g, ' ')}[^.]*confirmed`, 'i'));
+    expect(r.text).not.toMatch(/\d{13,16}/);
+  });
+
+  it('a reply for an unverified caller asks to check who they are, and promises nothing', async () => {
+    const c = new Caller(app);
+    await c.start(undefined, { channel: 'voice_browser' });
+    await c.say('I lost my phone and my card');
+    await c.say("I don't have it with me");
+    const r = await staffPost(app, '/api/backoffice/draft', { caseId: caseIdOf(c), kind: 'reply' });
+    expect(r.text).toMatch(/check|details/i);
+    expect(r.text).not.toMatch(/blocked|cancelled|refunded/i);
+  });
+
+  it('the wrap-up follows what happened: resolved only when something was confirmed', async () => {
+    const c = new Caller(app);
+    await c.start(undefined, { channel: 'voice_browser' });
+    await c.say('I lost my phone and my card');
+    await c.say("I don't remember the number");
+    const r = await staffPost(app, '/api/backoffice/draft', { caseId: caseIdOf(c), kind: 'wrapup' });
+    expect(r.outcome).toBe('follow_up_required');
+    expect(r.notes).toMatch(/not confirmed|No account changes/i);
+    expect(r.followUp).toMatch(/verify/i);
+  });
+
+  it('refuses a case that does not exist rather than inventing one', async () => {
+    const r = await app.inject({ method: 'POST', url: '/api/backoffice/draft', headers: { cookie: await staffCookie(app) }, payload: { caseId: 'CASE-NOPE', kind: 'reply' } });
+    expect(r.statusCode).toBe(404);
+  });
+});
+
+describe('a merchant other customers have reported', () => {
+  it('counts other customers, never this one, and shows it beside the charge', async () => {
+    const c = await verifiedCall();
+    const w = await staffGet(app, `/api/crm/cases/${caseIdOf(c)}`);
+    const novaplay = w.transactions.find((t: any) => /NOVAPLAY/i.test(t.merchant));
+    expect(novaplay, 'the charge in question is listed').toBeTruthy();
+    const others = all<{ n: number }>(
+      `SELECT COUNT(DISTINCT d.customer_id) n FROM disputes d JOIN bank_transactions t ON t.id = d.transaction_id
+       WHERE UPPER(t.merchant_name) = 'NOVAPLAY DIGITAL' AND d.customer_id != ? AND d.created_at >= ?`,
+      [w.customer.id, new Date(Date.now() - 30 * 86_400_000).toISOString()],
+    )[0].n;
+    expect(novaplay.reportedByOthers).toBeGreaterThanOrEqual(others);
+    // A quiet merchant stays quiet: the badge is not shown for everything.
+    expect(w.transactions.some((t: any) => t.reportedByOthers === 0)).toBe(true);
   });
 });

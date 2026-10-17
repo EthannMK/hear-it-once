@@ -18,6 +18,14 @@ const PRI = { urgent: ['coral', 'Urgent'], high: ['amber', 'High'], normal: ['la
 const ST = { new: 'lav', in_progress: 'violet', awaiting_customer: 'amber', awaiting_bank: 'amber', escalated: 'coral', resolved: 'mint' };
 const ACT = { completed: 'mint', awaiting_customer: 'lav', awaiting_approval: 'amber', in_progress: 'amber', failed: 'coral', unknown: 'coral', declined: 'lav' };
 const badge = (tone, text) => h(`span.badge.${tone}`, text);
+/**
+ * Other customers who reported the same merchant in the last 30 days. One unfamiliar charge is a
+ * question; several people reporting the same merchant is a pattern worth seeing beside the charge.
+ */
+const patternBadge = (t) => (t.reportedByOthers > 0
+  ? h('span.badge.coral.pat', { title: `${t.reportedByOthers} other customer${t.reportedByOthers > 1 ? 's' : ''} raised a fraud alert or dispute for ${t.merchant} in the last 30 days` },
+      `Reported by ${t.reportedByOthers} other${t.reportedByOthers > 1 ? 's' : ''}`)
+  : null);
 const cap = (s) => String(s ?? '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 /** A small in-page confirmation box (a native <dialog>). Resolves true / false, or the typed text when `ask` is set. */
@@ -181,24 +189,54 @@ function handoverBar(w) {
     const ck = w.agentCheck ?? null;
     return h('section.cx-hand.on', K.icon('headset'),
       h('div.grow', h('b', `You’re with the customer${hd.agentName && !mine ? ` (${hd.agentName})` : ''}`),
-        h('form.row3', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (!v) return; act(e.submitter, () => api(`/api/handoffs/${hd.id}/message`, { method: 'POST', body: { text: v } }), 'Message sent.'); } }, input, h('button.btn', { type: 'submit', disabled: !mine }, 'Send'))),
+        h('form.row3', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (!v) return; act(e.submitter, () => api(`/api/handoffs/${hd.id}/message`, { method: 'POST', body: { text: v } }), 'Message sent.'); } },
+          input,
+          h('button.btn.sm', { type: 'button', disabled: !mine, title: 'Write a first version from the case. Nothing is sent until you press Send.', onclick: (e) => draftInto(e.currentTarget, input, w.case.id) }, K.icon('activity'), 'Draft'),
+          h('button.btn', { type: 'submit', disabled: !mine }, 'Send'))),
       h('div.row3',
         h('button.btn.sm', { type: 'button', disabled: !mine || ck?.status === 'awaiting' || ck?.status === 'passed', title: 'A passcode goes to the registered phone; the customer types it in.', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/identity-check`, { method: 'POST', body: {} }), 'Passcode sent. Ask the customer to type it in.') },
           K.icon('lock'), ck?.status === 'awaiting' ? 'Passcode sent' : ck?.status === 'passed' ? 'Verified by passcode' : ck?.status === 'failed' ? 'Passcode failed' : 'Verify by passcode'),
-        h('button.btn.dark', { type: 'button', disabled: !mine, onclick: (e) => finishHandover(e.currentTarget, hd) }, 'Finish call')));
+        h('button.btn.dark', { type: 'button', disabled: !mine, onclick: (e) => finishHandover(e.currentTarget, hd, w.case.id) }, 'Finish call')));
   }
   return h('section.cx-hand', K.icon('headset'), h('div.grow', h('b', hd.status === 'completed' ? `Handled by ${hd.agentName ?? 'an agent'}` : 'No agent was available'), h('span', hd.status === 'completed' ? `Outcome: ${cap(hd.outcome)}` : 'A callback was requested.')));
 }
 
-async function finishHandover(btn, hd) {
+/**
+ * A first version of what to say next, written from the case and put in the message box. The agent
+ * reads it, changes what they want and presses Send: nothing reaches the customer on its own.
+ */
+async function draftInto(btn, input, caseId) {
+  const was = btn.textContent;
+  btn.disabled = true; btn.replaceChildren('Writing…');
+  try {
+    const r = await api('/api/backoffice/draft', { method: 'POST', body: { caseId, kind: 'reply' } });
+    input.value = r.text ?? '';
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    K.toast(`Draft ready${r.mode === 'adk' ? ' (ADK agent)' : ''}. Edit it, then press Send.`);
+  } catch (e) { K.toast(`Couldn’t write a draft: ${e.message}`); }
+  finally { btn.disabled = false; btn.replaceChildren(K.icon('activity'), was || 'Draft'); }
+}
+
+async function finishHandover(btn, hd, caseId) {
   const outcome = h('select', { 'aria-label': 'Outcome' }, h('option', { value: 'resolved' }, 'Resolved'), h('option', { value: 'follow_up_required' }, 'Follow-up needed'), h('option', { value: 'unresolved' }, 'Not resolved'));
-  const notes = h('textarea', { rows: '3', maxlength: '1000', 'aria-label': 'Notes for the case', placeholder: 'Notes for the case (optional)' });
+  const notes = h('textarea', { rows: '4', maxlength: '1000', 'aria-label': 'Notes for the case', placeholder: 'Writing the wrap-up from the case…' });
+  const follow = h('p.small.muted', 'Reading the case…');
+  // The wrap-up is filled in from the case while the box is open; the agent confirms or changes it.
+  api('/api/backoffice/draft', { method: 'POST', body: { caseId, kind: 'wrapup' } })
+    .then((r) => {
+      if (!notes.value.trim()) notes.value = r.notes ?? '';
+      if (r.outcome) outcome.value = r.outcome;
+      notes.placeholder = 'Notes for the case';
+      follow.replaceChildren(r.followUp ? `Suggested follow-up: ${r.followUp}` : 'Written from the case record. Change anything that is not right.');
+    })
+    .catch(() => { notes.placeholder = 'Notes for the case'; follow.replaceChildren('Write the outcome and any notes for the case.'); });
   const ok = await new Promise((resolve) => {
     const dlg = h('dialog.crm-dlg', { 'aria-labelledby': 'fin-t' });
     const done = (v) => { dlg.close(); dlg.remove(); resolve(v); };
     dlg.append(h('form', { onsubmit: (e) => { e.preventDefault(); done(true); } },
       h('h2#fin-t', 'Finish this call'), h('p', 'The outcome and your notes are saved on the case.'),
-      h('label.fld', h('span', 'Outcome'), outcome), h('label.fld', h('span', 'Notes'), notes),
+      h('label.fld', h('span', 'Outcome'), outcome), h('label.fld', h('span', 'Notes'), notes), follow,
       h('div.row3', h('button.btn.dark', { type: 'submit' }, 'Finish'), h('button.btn', { type: 'button', onclick: () => done(false) }, 'Cancel'))));
     dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(false); });
     document.body.append(dlg); dlg.showModal(); outcome.focus();
@@ -267,7 +305,7 @@ function txTable(txns, cu) {
     return h(`tbody${t.focus ? '.focus' : ''}`,
       h('tr.txr', { onclick: open, tabindex: '0', onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e); } } },
         h('td', h('b', fmtWhen(t.at)), time ? h('span', time) : null),
-        h('td', h('b', t.merchant), t.disputed ? badge('lav', 'Disputed') : t.focus ? badge('amber', 'This call') : null),
+        h('td', h('b', t.merchant), t.disputed ? badge('lav', 'Disputed') : t.focus ? badge('amber', 'This call') : null, patternBadge(t)),
         h('td', t.typeLabel ?? t.kind),
         h('td', t.entryLabel ?? '—'),
         h('td', t.where ?? '—'),
@@ -388,7 +426,7 @@ function txRow(t) {
       h('div.txm',
         h('b', t.merchant),
         h('span', [fmtWhen(t.at), time, t.typeLabel ?? t.kind, t.statusLabel && t.status !== 'posted' ? t.statusLabel : null, t.where].filter(Boolean).join(' · '))),
-      h('div.amt', h('b.mono', t.amount), t.focus ? badge('amber', 'This call') : t.disputed ? badge('lav', 'Disputed') : null)),
+      h('div.amt', h('b.mono', t.amount), t.focus ? badge('amber', 'This call') : t.disputed ? badge('lav', 'Disputed') : null, patternBadge(t))),
     h('dl.txd', detail.map(([k, v]) => h('div', h('dt', k), h('dd.mono', v)))));
 }
 

@@ -17,8 +17,7 @@ import { all, get, parseJson } from '../db/db.ts';
 import { env } from '../config/env.ts';
 import { log } from '../lib/logger.ts';
 import { AppError } from '../lib/errors.ts';
-import { formatMoney } from '../conversation/format.ts';
-import { ISSUE_LABELS } from '../conversation/format.ts';
+import { ACTION_LABELS, ISSUE_LABELS, formatMoney } from '../conversation/format.ts';
 import { accountOverview } from '../crm/crm.ts';
 
 export interface AgentStep { tool: string; detail: string | null }
@@ -325,6 +324,69 @@ export async function insights(target: { caseId?: string; customerId?: string },
   insightCache.set(key, { at: Date.now(), value });
   if (insightCache.size > 200) insightCache.delete(insightCache.keys().next().value!);
   return value;
+}
+
+/* ------------------------------------------------------------------ drafting for the agent */
+
+/** What the case already holds, in the shape a reply or a wrap-up is written from. */
+function caseFacts(caseId: string) {
+  const w = get<{ customer_id: string | null; issue_type: string | null; customer_reported: string | null; verification_outcome: string; session_id: string }>(
+    'SELECT customer_id, issue_type, customer_reported, verification_outcome, session_id FROM cases WHERE id = ?', [caseId]);
+  if (!w) throw new AppError('NOT_FOUND', 'Case not found.');
+  const name = w.customer_id ? get<{ full_name: string }>('SELECT full_name FROM bank_customers WHERE id = ?', [w.customer_id])?.full_name ?? null : null;
+  const done = all<{ action_type: string; status: string; external_ref: string | null }>(
+    'SELECT action_type, status, external_ref FROM action_operations WHERE session_id = ? ORDER BY requested_at', [w.session_id]);
+  const confirmed = done.filter((o) => o.status === 'succeeded');
+  const open = done.filter((o) => o.status !== 'succeeded' && o.status !== 'rejected');
+  const ticket = get<{ id: string }>('SELECT id FROM case_tickets WHERE case_id = ? ORDER BY created_at DESC LIMIT 1', [caseId]);
+  return { ...w, name, confirmed, open, ticketRef: ticket?.id ?? null, verified: w.verification_outcome === 'verified' };
+}
+
+const actionSaid = (type: string) => ACTION_LABELS[type] ?? type.replace(/_/g, ' ');
+
+/**
+ * A first draft of what the agent might say next, written only from what the case records. It is
+ * never sent on its own: the agent reads it, edits it and presses send. Nothing it says about the
+ * account goes beyond what a system confirmed, so it cannot promise an outcome that did not happen.
+ */
+export async function draftReply(caseId: string, userId: string): Promise<AgentAnswer> {
+  const x = contextFor({ caseId });
+  const f = caseFacts(caseId);
+  return run(x, userId, 'MODE: DRAFT_REPLY', () => {
+    const hello = f.name && f.verified ? `Hi ${f.name.split(' ')[0]},` : 'Hello,';
+    const did = f.confirmed.length
+      ? `I can see ${f.confirmed.map((o) => `${actionSaid(o.action_type).toLowerCase()}${o.external_ref ? ` (reference ${o.external_ref})` : ''}`).join(', and ')} — all confirmed by our systems.`
+      : 'I have the full history of your call with Lily in front of me, so you will not need to go through it again.';
+    const next = f.open.length
+      ? `${actionSaid(f.open[0].action_type)} is still going through; I will stay with it and confirm as soon as it completes.`
+      : f.ticketRef ? `Your reference is ${f.ticketRef} if you need to quote it.` : 'Let me pick up from here.';
+    const ask = f.verified ? 'Is there anything else about this you would like me to check while we are on the call?' : 'First, I need to check a couple of details with you so I can look at the account.';
+    return { text: [hello, did, next, ask].join(' '), bullets: [], sources: ['the case record', 'action_operations'], steps: [{ tool: 'customer_snapshot', detail: f.customer_id ? `customer ${f.customer_id}` : null }] };
+  });
+}
+
+/**
+ * The outcome, notes and any follow-up the case suggests, so the agent confirms a wrap-up instead
+ * of writing one from a blank box at the end of every call. Only the records speak here.
+ */
+export async function draftWrapUp(caseId: string, userId: string): Promise<AgentAnswer & { outcome: string; notes: string; followUp: string | null }> {
+  const x = contextFor({ caseId });
+  const f = caseFacts(caseId);
+  const outcome = f.open.length || !f.verified ? 'follow_up_required' : f.confirmed.length ? 'resolved' : 'follow_up_required';
+  const a = await run(x, userId, 'MODE: WRAPUP', () => {
+    const parts = [
+      f.verified ? 'Identity confirmed on the call.' : 'Identity not confirmed on this call.',
+      f.customer_reported ? `Reported: “${f.customer_reported.slice(0, 160)}”.` : null,
+      f.confirmed.length ? `Completed and confirmed: ${f.confirmed.map((o) => `${actionSaid(o.action_type).toLowerCase()}${o.external_ref ? ` (${o.external_ref})` : ''}`).join('; ')}.` : 'No account changes were completed.',
+      f.open.length ? `Still open: ${f.open.map((o) => actionSaid(o.action_type).toLowerCase()).join('; ')}.` : null,
+      f.ticketRef ? `Reference ${f.ticketRef}.` : null,
+    ].filter(Boolean);
+    return { text: parts.join(' '), bullets: [], sources: ['the case record', 'action_operations'], steps: [{ tool: 'customer_snapshot', detail: `case ${caseId}` }] };
+  });
+  const followUp = !f.verified
+    ? 'Verify the customer another way before any account change, and record how it was done.'
+    : f.open.length ? `Confirm ${actionSaid(f.open[0].action_type).toLowerCase()} completed, then tell the customer.` : null;
+  return { ...a, outcome, notes: a.text, followUp };
 }
 
 export async function ask(target: { caseId?: string; customerId?: string }, question: string, userId: string): Promise<AgentAnswer> {
