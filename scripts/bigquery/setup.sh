@@ -42,7 +42,7 @@ if [ "${RESET_EVENTS:-0}" = "1" ]; then
 fi
 
 step "3/8 Exporting the synthetic Northstar seed"
-( cd "$ROOT" && { [ -d node_modules ] || npm ci --silent; } && npx tsx --disable-warning=ExperimentalWarning scripts/bigquery/export-seed.ts "$WORK/export" )
+( cd "$ROOT" && npm ci --silent --no-audit --no-fund && npx tsx --disable-warning=ExperimentalWarning scripts/bigquery/export-seed.ts "$WORK/export" )
 
 step "4/8 Kaggle card transactions (Sparkov, CC0)"
 KAGGLE_OK=0
@@ -130,8 +130,9 @@ $(bq query --location="$LOCATION" --use_legacy_sql=false --format=pretty --quiet
   SELECT 'transactions', COUNT(*) FROM \`$PROJECT.$DATASET.transactions\` UNION ALL
   SELECT 'kb_documents', COUNT(*) FROM \`$PROJECT.$DATASET.kb_documents\`")
 
-Switch the app to BigQuery (the current mock mode stays available; remove ADAPTER_MODE to go back):
+Deploy this code and switch the app to BigQuery in one step (from the repository root).
+Existing service settings are kept; remove ADAPTER_MODE later to go back to the built-in data:
 
-  gcloud run services update $SERVICE --region=$RUN_REGION \\
+  gcloud run deploy $SERVICE --source . --region=$RUN_REGION \\
     --update-env-vars=ADAPTER_MODE=bigquery,BQ_PROJECT=$PROJECT,BQ_DATASET=$DATASET,BQ_LOCATION=$LOCATION,$EMB_ENV
 EOF

@@ -89,9 +89,9 @@ What is never loaded:
    6. loads everything
    7. creates a BigQuery connection and a remote `text-embedding-005` model, then embeds the knowledge documents
    8. grants the Cloud Run service account `bigquery.jobUser`, `bigquery.dataEditor` and `bigquery.connectionUser`
-3. Switch the service over. The script prints this command at the end:
+3. Deploy the new code and switch the service over in one step. The script prints this command at the end:
    ```bash
-   gcloud run services update hear-it-once --region=asia-southeast1 \
+   gcloud run deploy hear-it-once --source . --region=asia-southeast1 \
      --update-env-vars=ADAPTER_MODE=bigquery,BQ_PROJECT=hear-it-once,BQ_DATASET=northstar_bank,BQ_LOCATION=asia-southeast1,BQ_EMBEDDING_MODEL=northstar_bank.embedding_model
    ```
    To go back: `gcloud run services update hear-it-once --region=asia-southeast1 --remove-env-vars=ADAPTER_MODE`.
