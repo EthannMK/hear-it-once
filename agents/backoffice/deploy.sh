@@ -4,8 +4,12 @@
 #   bash agents/backoffice/deploy.sh
 set -euo pipefail
 PROJECT="${PROJECT:-hear-it-once}"
-AGENT_LOCATION="${AGENT_LOCATION:-us-central1}"     # where the agent runs (Agent Engine region)
 BQ_LOCATION="${BQ_LOCATION:-asia-southeast1}"
+# Where the agent runs. It defaults to the dataset's own region, so the rows it reads never leave
+# that region: the query runs in BigQuery and the model that reads the result sits beside it. Agent
+# Runtime supports a subset of regions, so one that is not on that list will fail the deploy.
+# An agent already deployed in another region is a separate agent and has to be deleted by hand.
+AGENT_LOCATION="${AGENT_LOCATION:-$BQ_LOCATION}"
 DATASET="${DATASET:-northstar_bank}"
 SERVICE="${SERVICE:-hear-it-once}"; RUN_REGION="${RUN_REGION:-asia-southeast1}"
 BUCKET="${BUCKET:-gs://${PROJECT}-agent-staging}"
