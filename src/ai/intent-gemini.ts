@@ -11,6 +11,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { z } from 'zod';
 import { env } from '../config/env.ts';
 import { extractSlots, type Classification, type IntentModel, type RulesIntentModel } from './intent.ts';
+import { untrusted } from '../security/untrusted.ts';
 
 const Out = z.object({
   issueType: z.enum(['unrecognised_transaction', 'lost_stolen_card', 'wrong_or_duplicate_charge', 'payment_not_showing', 'fee_query', 'card_declined', 'account_inquiry', 'none']),
@@ -40,10 +41,12 @@ export class GeminiIntentModel implements IntentModel {
     this.ai = new GoogleGenAI({ vertexai: true, project, location: env().GOOGLE_CLOUD_LOCATION });
   }
   async classify(text: string, ctx?: { previousStatements: string[] }): Promise<Classification> {
-    const prior = ctx?.previousStatements?.length ? `Earlier in the call the customer said: ${ctx.previousStatements.slice(-3).join(' | ')}\n` : '';
+    // Earlier statements are caller speech too, so they are wrapped like the current one. Left bare
+    // they would be the easy way in: say the injection on turn one, ask the question on turn two.
+    const prior = ctx?.previousStatements?.length ? `Earlier in the call the customer said: ${untrusted('earlier_speech', ctx.previousStatements.slice(-3).join(' | '), 600)}\n` : '';
     const res = await this.ai.models.generateContent({
       model: this.model,
-      contents: `${prior}<caller_utterance>${text.replace(/</g, '‹').slice(0, 600)}</caller_utterance>`,
+      contents: `${prior}${untrusted('caller_utterance', text, 600)}`,
       config: {
         systemInstruction: GUIDE,
         temperature: 0,

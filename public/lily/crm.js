@@ -187,12 +187,16 @@ function handoverBar(w) {
   if (hd.status === 'connected') {
     const input = h('input', { type: 'text', maxlength: '500', placeholder: mine ? 'Message the customer…' : 'Accepted by another agent', 'aria-label': 'Message to the customer', disabled: !mine });
     const ck = w.agentCheck ?? null;
+    // Anything the agent needs to know about a draft before sending it stays on screen until the
+    // next draft replaces it. A warning that disappears after four seconds is not a warning.
+    const notice = h('div.cx-warn', { role: 'alert', hidden: true });
     return h('section.cx-hand.on', K.icon('headset'),
       h('div.grow', h('b', `You’re with the customer${hd.agentName && !mine ? ` (${hd.agentName})` : ''}`),
         h('form.row3', { onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (!v) return; act(e.submitter, () => api(`/api/handoffs/${hd.id}/message`, { method: 'POST', body: { text: v } }), 'Message sent.'); } },
           input,
-          h('button.btn.sm', { type: 'button', disabled: !mine, title: 'Write a first version from the case. Nothing is sent until you press Send.', onclick: (e) => draftInto(e.currentTarget, input, w.case.id) }, K.icon('activity'), 'Draft'),
-          h('button.btn', { type: 'submit', disabled: !mine }, 'Send'))),
+          h('button.btn.sm', { type: 'button', disabled: !mine, title: 'Write a first version from the case. Nothing is sent until you press Send.', onclick: (e) => draftInto(e.currentTarget, input, w.case.id, notice) }, K.icon('activity'), 'Draft'),
+          h('button.btn', { type: 'submit', disabled: !mine }, 'Send')),
+        notice),
       h('div.row3',
         h('button.btn.sm', { type: 'button', disabled: !mine || ck?.status === 'awaiting' || ck?.status === 'passed', title: 'A passcode goes to the registered phone; the customer types it in.', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/identity-check`, { method: 'POST', body: {} }), 'Passcode sent. Ask the customer to type it in.') },
           K.icon('lock'), ck?.status === 'awaiting' ? 'Passcode sent' : ck?.status === 'passed' ? 'Verified by passcode' : ck?.status === 'failed' ? 'Passcode failed' : 'Verify by passcode'),
@@ -205,7 +209,7 @@ function handoverBar(w) {
  * A first version of what to say next, written from the case and put in the message box. The agent
  * reads it, changes what they want and presses Send: nothing reaches the customer on its own.
  */
-async function draftInto(btn, input, caseId) {
+async function draftInto(btn, input, caseId, notice) {
   const was = btn.textContent;
   btn.disabled = true; btn.replaceChildren('Writing…');
   try {
@@ -213,7 +217,14 @@ async function draftInto(btn, input, caseId) {
     input.value = r.text ?? '';
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
-    K.toast(`Draft ready${r.mode === 'adk' ? ' (ADK agent)' : ''}. Edit it, then press Send.`);
+    // A warning here is about the draft, not about the customer: a record that reads like an
+    // instruction, or wording that had to be replaced because it promised something the records do
+    // not show. It stays on screen, because the agent decides what to send.
+    if (notice) {
+      notice.hidden = !r.warnings?.length;
+      notice.replaceChildren(...(r.warnings ?? []).map((w) => h('p', K.icon('alert'), w)));
+    }
+    K.toast(r.warnings?.length ? 'Draft ready, with something to check first.' : `Draft ready${r.mode === 'adk' ? ' (ADK agent)' : ''}. Edit it, then press Send.`);
   } catch (e) { K.toast(`Couldn’t write a draft: ${e.message}`); }
   finally { btn.disabled = false; btn.replaceChildren(K.icon('activity'), was || 'Draft'); }
 }
