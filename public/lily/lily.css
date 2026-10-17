@@ -1519,3 +1519,7 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
   .pr { position: static; max-height: none; }
   .judge.in-call.with-rail .btc { grid-column: 1; }
 }
+
+/* A language that is coming but cannot take a call yet: present, named, and plainly not ready. */
+.langs li.soon { opacity: 0.72; border-style: dashed; }
+.langs li.soon .pill { margin-left: 6px; font: 600 0.62rem var(--label); letter-spacing: 0.05em; text-transform: uppercase; color: var(--violet-d); background: var(--lav); border-radius: 999px; padding: 2px 7px; white-space: nowrap; }

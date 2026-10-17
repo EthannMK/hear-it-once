@@ -358,8 +358,12 @@ function drawHome() {
         h('div.hero-t',
           h('h1', 'Say it once.', h('br'), h('em', 'Get it sorted'), ' on the call.'),
           h('p.lede', `Talk to Lily, ${S.bank}'s voice assistant, the way you'd talk to a person. She checks who you are, looks at the bank's systems while you talk, and hands you to a human with the full story whenever you ask.`),
-          h('ul.langs', { 'aria-label': 'Languages and agents' }, [['en', 'English', 'Lily'], ['my', 'Burmese', 'Hnin'], ['fil', 'Tagalog', 'Maya']].map(([k, n, a]) => h('li', h(`i.flag.${k}`), h('span', h('b', n), h('small', a))))),
-          h('p.langnote', 'Lily speaks English. Speak Burmese or Tagalog and she will offer Hnin or Maya.'),
+          // Burmese is marked upcoming rather than hidden: the agent exists and the work is real, but
+          // she is not good enough to take a call yet, and a language advertised and then declined
+          // is worse than one that was never offered.
+          h('ul.langs', { 'aria-label': 'Languages and agents' }, [['en', 'English', 'Lily', true], ['fil', 'Tagalog', 'Maya', true], ['my', 'Burmese', 'May', false]].map(([k, n, a, live]) =>
+            h(`li${live ? '' : '.soon'}`, h(`i.flag.${k}`), h('span', h('b', n), h('small', a)), live ? null : h('span.pill', 'Upcoming')))),
+          h('p.langnote', 'Lily speaks English, and Maya speaks Tagalog — just start speaking it. Burmese is coming, with May.'),
           h('button.connect', { type: 'button', onclick: () => startCall() },
             h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', rail ? `As ${S.cards.find((c) => c.id === S.personaId)?.name ?? 'your chosen account'} — voice or typing` : 'Voice or typing, your choice')), icon('arrow')),
           h('div.subs',
