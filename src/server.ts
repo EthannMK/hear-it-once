@@ -1,7 +1,7 @@
 /** Entry point: `npm start`. Migrates, seeds on first run, serves the API and UI. */
 import { env } from './config/env.ts';
 import { db } from './db/db.ts';
-import { isSeeded, seedAll } from './db/seed.ts';
+import { backfillTxnDetail, isSeeded, seedAll } from './db/seed.ts';
 import { buildApp } from './api/app.ts';
 import { log } from './lib/logger.ts';
 import { purgeExpiredTranscripts } from './reporting/retention.ts';
@@ -16,6 +16,9 @@ db(); // open + migrate
 if (!isSeeded()) {
   seedAll();
   log.info('seeded synthetic demo data', { db: e.HIO_DB_PATH });
+} else {
+  // A database saved by an older build has the card-detail columns but no values in them.
+  backfillTxnDetail();
 }
 // BigQuery mode: lookups go to BigQuery live; the app's copy of the bank rows is refreshed from it now.
 if (e.ADAPTER_MODE === 'bigquery') {

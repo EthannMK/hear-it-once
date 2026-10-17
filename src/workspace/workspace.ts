@@ -16,7 +16,7 @@ import { audit, type Actor } from '../audit/audit.ts';
 import { emitTimeline, listTimeline } from '../events/timeline.ts';
 import { kbReferencesFor } from '../kb/kb.ts';
 import { getContext } from '../conversation/orchestrator.ts';
-import { HANDOFF_REASON_LABELS, ISSUE_LABELS } from '../conversation/format.ts';
+import { HANDOFF_REASON_LABELS, ISSUE_LABELS, formatDate } from '../conversation/format.ts';
 import { buildResolution } from '../api/brief.ts';
 import { SCENARIOS } from '../db/scenarios.ts';
 import { BANK_NAME } from '../live/profiles.ts';
@@ -93,6 +93,14 @@ function assemble(sessionId: string, h: HandoffRow | null) {
   const statement = s.issue_statement ?? res.customerSaid[0]?.text ?? '';
   const aiReason = `${primaryLabel}${secondary.length ? ` (also: ${secondary.join(', ')})` : ''}${statement ? ` — customer said: “${redactText(statement).slice(0, 220)}”` : ''}`;
 
+  const demoReset = (() => {
+    const e = all<{ detail_json: string }>(
+      "SELECT ce.detail_json FROM case_events ce JOIN cases c ON c.id = ce.case_id WHERE c.session_id = ? AND ce.event_type = 'demo_data_reset' ORDER BY ce.id DESC LIMIT 1",
+      [sessionId],
+    ).at(0);
+    return e ? parseJson<{ at?: string }>(e.detail_json, {}) : null;
+  })();
+
   // Concise AI summary, assembled only from recorded facts.
   const verifiedLine = s.verification_status === 'verified' ? 'Identity was verified in the call.' : s.verification_status === 'failed' ? `Identity was NOT verified (${cardTries.filter((a) => a.outcome !== 'passed').length || 'several'} failed attempt${cardTries.filter((a) => a.outcome !== 'passed').length === 1 ? '' : 's'}).` : 'Identity was not verified.';
   const done = res.actions.filter((a) => a.bucket === 'completed').map((a) => a.label);
@@ -104,6 +112,9 @@ function assemble(sessionId: string, h: HandoffRow | null) {
     done.length ? `Completed and confirmed by systems: ${done.join(', ')}.` : 'No account changes were made.',
     openActs.length ? `Not completed: ${openActs.join('; ')}.` : null,
     h ? `Handover reason: ${HANDOFF_REASON_LABELS[h.reason] ?? h.reason}${h.reason_detail ? ` (${h.reason_detail})` : ''}.` : 'Lily handled the call without a handover.',
+    // A later demo call put the bank records back. Without this line the summary reads as the
+    // account's current state, and contradicts the account panel beside it.
+    demoReset ? `Demo data was put back after this call${demoReset.at ? ` on ${formatDate(demoReset.at)}` : ''}: the card is active again and fees are charged again. What happened on this call still stands.` : null,
   ].filter(Boolean).join(' ');
 
   // Suggested solution: an AI RECOMMENDATION, separate from confirmed actions.

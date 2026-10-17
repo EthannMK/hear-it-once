@@ -141,17 +141,18 @@ export function searchCustomers(query: string, actor: Actor) {
 export function customerProfile(customerId: string, actor: Actor) {
   const b = customerBrief(customerId);
   if (!b) throw new AppError('NOT_FOUND', 'Customer not found.');
-  const txns = all<{ id: string; kind: string; merchant_name: string | null; amount_minor: number; currency: string; txn_at: string; status: string; card_id: string | null }>(
-    'SELECT id, kind, merchant_name, amount_minor, currency, txn_at, status, card_id FROM bank_transactions WHERE customer_id = ? ORDER BY txn_at DESC LIMIT 12',
+  const disputed = new Set(all<{ transaction_id: string }>('SELECT transaction_id FROM disputes WHERE customer_id = ?', [customerId]).map((d) => d.transaction_id));
+  const cardList = all<{ id: string; last4: string }>('SELECT id, last4 FROM bank_cards WHERE customer_id = ?', [customerId]).map((c) => ({ ref: c.id, masked: `•••• ${c.last4}` }));
+  const txns = all<Parameters<typeof txnRow>[0]>(
+    `SELECT ${DETAIL_COLS} FROM bank_transactions WHERE customer_id = ? ORDER BY txn_at DESC LIMIT 12`,
     [customerId],
-  ).map((t) => ({ id: t.id, kind: t.kind, merchant: t.merchant_name ?? (t.kind === 'payment' ? 'Payment received' : '—'), amount: formatMoney(t.amount_minor, t.currency), at: t.txn_at, status: t.status, card: b.cards.find((k) => k.ref === t.card_id)?.masked ?? null }));
-  const disputedTxns = new Set(all<{ transaction_id: string }>('SELECT transaction_id FROM disputes WHERE customer_id = ?', [customerId]).map((d) => d.transaction_id));
+  ).map((t) => txnRow(t, cardList, disputed));
   const cases = casesForCustomer(customerId);
   audit({ actor, event: 'crm.customer_viewed', status: 'ok', resourceType: 'customer', resourceId: customerId });
   return {
     customer: b,
     account: accountOverview(customerId),
-    transactions: txns.map((t) => ({ ...t, disputed: disputedTxns.has(t.id) })),
+    transactions: txns,
     cases,
     tickets: all<TicketRow>('SELECT * FROM case_tickets WHERE customer_id = ? ORDER BY created_at DESC', [customerId]).map(ticketBrief),
   };
@@ -209,15 +210,92 @@ export function accountOverview(customerId: string) {
   };
 }
 
+/**
+ * One transaction as a card agent reads it: when it happened and when it settled, what it was, how
+ * the card was presented, and the references a dispute is filed against. Every field comes from the
+ * record; nothing is filled in by the page.
+ */
+function txnRow(
+  t: {
+    id: string; kind: string; merchant_name: string | null; merchant_category?: string | null; mcc?: string | null;
+    merchant_city?: string | null; merchant_country?: string | null; amount_minor: number; currency: string;
+    txn_at: string; posted_at?: string | null; status: string; card_id: string | null;
+    entry_mode?: string | null; auth_code?: string | null; network_ref?: string | null; acquirer?: string | null;
+  },
+  cards: { ref: string; masked: string }[],
+  disputed: Set<string>,
+  focusIds: string[] = [],
+) {
+  return {
+    id: t.id,
+    kind: t.kind,
+    typeLabel: TXN_TYPE_LABELS[t.kind] ?? t.kind,
+    merchant: t.merchant_name ?? (t.kind === 'payment' ? 'Payment received' : t.kind === 'fee' ? 'Fee charged' : '—'),
+    where: [t.merchant_city, t.merchant_country ? COUNTRY_NAMES[t.merchant_country] ?? t.merchant_country : null].filter(Boolean).join(', ') || null,
+    category: t.merchant_category ?? null,
+    mcc: t.mcc ?? null,
+    mccLabel: t.mcc ? MCC_LABELS[t.mcc] ?? null : null,
+    amount: formatMoney(t.amount_minor, t.currency),
+    amountMinor: t.amount_minor,
+    currency: t.currency,
+    at: t.txn_at,
+    postedAt: t.posted_at ?? null,
+    status: t.status,
+    statusLabel: t.status === 'posted' ? 'Posted' : t.status === 'pending' ? 'Authorised, not yet settled' : 'Reversed',
+    entryMode: t.entry_mode ?? null,
+    entryLabel: t.entry_mode ? ENTRY_LABELS[t.entry_mode] ?? t.entry_mode : null,
+    authCode: t.auth_code ?? null,
+    networkRef: t.network_ref ?? null,
+    acquirer: t.acquirer ?? null,
+    card: cards.find((c) => c.ref === t.card_id)?.masked ?? null,
+    disputed: disputed.has(t.id),
+    focus: focusIds.includes(t.id),
+  };
+}
+
+/** The columns a transaction row needs, in one place: both views read the same record. */
+const DETAIL_COLS = 'id, kind, merchant_name, merchant_category, mcc, merchant_city, merchant_country, amount_minor, currency, txn_at, posted_at, status, card_id, entry_mode, auth_code, network_ref, acquirer';
+
+/** The countries the demo bank's merchants sit in, named rather than coded. */
+const COUNTRY_NAMES: Record<string, string> = {
+  SG: 'Singapore', TH: 'Thailand', MM: 'Myanmar', MY: 'Malaysia', PH: 'Philippines', HK: 'Hong Kong', ID: 'Indonesia',
+};
+
+/** How the card was presented, in the words an agent uses rather than the network's codes. */
+const ENTRY_LABELS: Record<string, string> = {
+  ecommerce: 'Online, card not present',
+  chip: 'Chip',
+  chip_pin: 'Chip and PIN',
+  contactless: 'Contactless',
+  swipe: 'Magnetic stripe',
+  recurring: 'Recurring, card on file',
+  manual: 'Keyed in manually',
+  atm: 'ATM',
+};
+const TXN_TYPE_LABELS: Record<string, string> = {
+  purchase: 'Purchase', payment: 'Payment', fee: 'Fee', refund: 'Refund', credit: 'Credit', cash_advance: 'Cash advance',
+};
+const MCC_LABELS: Record<string, string> = {
+  '4121': 'Taxis and limousines', '4722': 'Travel agencies', '4814': 'Telecommunications', '4900': 'Utilities',
+  '5411': 'Groceries and supermarkets', '5541': 'Service stations', '5732': 'Electronics', '5812': 'Restaurants',
+  '5814': 'Fast food', '5815': 'Digital goods', '5912': 'Pharmacies', '5968': 'Subscriptions', '5999': 'Miscellaneous retail',
+  '6012': 'Financial institution', '6300': 'Insurance', '7832': 'Cinemas',
+};
+
 /** Up to 6 recent transactions, with the ones this case is about always included and marked. */
 function recentTransactions(customerId: string, cards: { ref: string; masked: string }[], focusIds: string[]) {
-  type T = { id: string; kind: string; merchant_name: string | null; amount_minor: number; currency: string; txn_at: string; status: string; card_id: string | null };
-  const cols = 'SELECT id, kind, merchant_name, amount_minor, currency, txn_at, status, card_id FROM bank_transactions';
+  type T = {
+    id: string; kind: string; merchant_name: string | null; merchant_category: string | null; mcc: string | null;
+    merchant_city: string | null; merchant_country: string | null; amount_minor: number; currency: string;
+    txn_at: string; posted_at: string | null; status: string; card_id: string | null;
+    entry_mode: string | null; auth_code: string | null; network_ref: string | null; acquirer: string | null;
+  };
+  const cols = `SELECT ${DETAIL_COLS} FROM bank_transactions`;
   const recent = all<T>(`${cols} WHERE customer_id = ? ORDER BY txn_at DESC LIMIT 6`, [customerId]);
   const focus = focusIds.length ? all<T>(`${cols} WHERE customer_id = ? AND id IN (${focusIds.map(() => '?').join(',')})`, [customerId, ...focusIds]) : [];
   const disputed = new Set(all<{ transaction_id: string }>('SELECT transaction_id FROM disputes WHERE customer_id = ?', [customerId]).map((d) => d.transaction_id));
   const rows = [...focus, ...recent.filter((t) => !focus.some((f) => f.id === t.id))].slice(0, Math.max(6, focus.length));
-  return rows.map((t) => ({ id: t.id, kind: t.kind, merchant: t.merchant_name ?? (t.kind === 'payment' ? 'Payment received' : '—'), amount: formatMoney(t.amount_minor, t.currency), at: t.txn_at, status: t.status, card: cards.find((k) => k.ref === t.card_id)?.masked ?? null, disputed: disputed.has(t.id), focus: focusIds.includes(t.id) }));
+  return rows.map((t) => txnRow(t, cards, disputed, focusIds));
 }
 
 /** The case to open when the agent's screen is opened without one: a call still waiting or live first, then the newest. */
@@ -452,7 +530,12 @@ export function caseWorkspace(caseId: string, actor: Actor) {
       : null;
 
   const recommendations = buildRecommendations(c, s, meta, { identity, eligibility, customer, conflicts });
+  const demoReset = (() => {
+    const e = all<{ detail_json: string }>("SELECT detail_json FROM case_events WHERE case_id = ? AND event_type = 'demo_data_reset' ORDER BY id DESC LIMIT 1", [c.id]).at(0);
+    return e ? parseJson<{ at?: string }>(e.detail_json, {}) : null;
+  })();
   const summary = {
+    demoReset: demoReset ? { at: demoReset.at ?? null, note: 'The bank records were put back for a later demo call.' } : null,
     reported: reported ? redactText(reported) : null,
     intendedOutcome: intended,
     transaction: transactionLine,
@@ -471,6 +554,9 @@ export function caseWorkspace(caseId: string, actor: Actor) {
     confirmed.length ? `Confirmed by bank systems: ${confirmed.slice(0, 3).join(' ')}` : 'Nothing confirmed by bank systems yet.',
     actions.length ? `Actions: ${summary.attempted.join('; ')}.` : 'No account changes were made.',
     `Outcome: ${summary.outcome}.`,
+    // Demo data is put back between calls. Say so here, or this reads as the account's state now
+    // and contradicts the account panel next to it.
+    demoReset ? `Demo data was put back after this call${demoReset.at ? ` on ${formatDate(demoReset.at)}` : ''}: the card is active again and fees are charged again. What happened on this call still stands.` : null,
   ].filter(Boolean).join(' ');
 
   const tickets = all<TicketRow>('SELECT * FROM case_tickets WHERE case_id = ? ORDER BY created_at DESC', [c.id]).map((t) => ({

@@ -6,6 +6,7 @@
 import { db, run, get, all } from './db.ts';
 import { nowIso, nowMs } from '../lib/clock.ts';
 import { newId } from '../lib/ids.ts';
+import { authCodeFor, txnDetail } from './txn-detail.ts';
 import { maskPhone } from '../lib/redact.ts';
 import { hashDob, hashPhone } from '../adapters/mock/identity.ts';
 import { seedRoles, createStaffUser } from '../auth/rbac.ts';
@@ -15,6 +16,7 @@ import { seedCrmHistory } from './seed-crm.ts';
 import { adapters } from '../adapters/registry.ts';
 import { syncReplicaFromBigQuery } from '../adapters/bigquery/replica.ts';
 import { log } from '../lib/logger.ts';
+import { regenerateSummary } from '../cases/case-service.ts';
 
 const iso = (daysAgo: number, hour = 12, minute = 0) => {
   const d = new Date(nowMs() - daysAgo * 86_400_000);
@@ -88,10 +90,14 @@ export function insertTxn(customerId: string, t: TxnSpec): string {
   const id = t.id ?? newId('TXN');
   const at = iso(t.daysAgo, t.hour ?? 14, 5);
   const status = t.status ?? 'posted';
+  // Card-system detail (category code, where the merchant is, acquirer and the reference a dispute
+  // is filed against), derived from the id so it never changes between reads.
+  const d = txnDetail({ id, kind: t.kind ?? 'purchase', category: t.category, entryMode: t.mode, merchant: t.merchant });
   run(
-    `INSERT INTO bank_transactions (id, customer_id, card_id, kind, merchant_name, merchant_category, amount_minor, currency, txn_at, posted_at, status, entry_mode, auth_code, created_at)
-     VALUES (?,?,?,?,?,?,?,'USD',?,?,?,?,?,?)`,
-    [id, customerId, t.card ?? null, t.kind ?? 'purchase', t.merchant, t.category ?? null, t.amount, at, status === 'posted' ? iso(Math.max(0, t.daysAgo - 1), 6) : null, status, t.mode ?? null, t.auth ?? null, nowIso()],
+    `INSERT INTO bank_transactions (id, customer_id, card_id, kind, merchant_name, merchant_category, amount_minor, currency, txn_at, posted_at, status, entry_mode, auth_code, created_at,
+                                    mcc, merchant_city, merchant_country, network_ref, acquirer)
+     VALUES (?,?,?,?,?,?,?,'USD',?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, customerId, t.card ?? null, t.kind ?? 'purchase', t.merchant, t.category ?? null, t.amount, at, status === 'posted' ? iso(Math.max(0, t.daysAgo - 1), 6) : null, status, t.mode ?? null, t.auth ?? (t.kind === 'payment' || t.kind === 'fee' ? null : authCodeFor(id)), nowIso(), d.mcc, d.merchantCity, d.merchantCountry, d.networkRef, d.acquirer],
   );
   return id;
 }
@@ -269,6 +275,27 @@ function seedPriorCase(customerId: string): void {
     .forEach(([who, text], i) => run('INSERT INTO conversation_turns (session_id, seq, speaker, kind, text, created_at) VALUES (?,?,?,?,?,?)', [sid, i + 1, who, 'utterance', text, at]));
 }
 
+/**
+ * Fill in the card-system detail on transactions that predate it. A database seeded by an older
+ * build has the columns but not the values, so this runs at startup and touches only the rows that
+ * are missing them. The values are derived from the transaction id, so a row always gets the same
+ * detail whichever build fills it in.
+ */
+export function backfillTxnDetail(): number {
+  const rows = all<{ id: string; kind: string; merchant_category: string | null; entry_mode: string | null; merchant_name: string | null; auth_code: string | null }>(
+    "SELECT id, kind, merchant_category, entry_mode, merchant_name, auth_code FROM bank_transactions WHERE mcc IS NULL",
+  );
+  for (const r of rows) {
+    const d = txnDetail({ id: r.id, kind: r.kind, category: r.merchant_category, entryMode: r.entry_mode, merchant: r.merchant_name });
+    run(
+      'UPDATE bank_transactions SET mcc = ?, merchant_city = ?, merchant_country = ?, network_ref = ?, acquirer = ?, auth_code = COALESCE(auth_code, ?) WHERE id = ?',
+      [d.mcc, d.merchantCity, d.merchantCountry, d.networkRef, d.acquirer, r.kind === 'payment' || r.kind === 'fee' ? null : authCodeFor(r.id), r.id],
+    );
+  }
+  if (rows.length) log.info('filled in card detail on older transactions', { rows: rows.length });
+  return rows.length;
+}
+
 export function seedAll(opts: { history?: boolean } = {}): void {
   const d = db();
   d.exec('BEGIN');
@@ -285,6 +312,7 @@ export function seedAll(opts: { history?: boolean } = {}): void {
     throw e;
   }
   if (opts.history !== false) seedIllustrativeHistory();
+  backfillTxnDetail();
 }
 
 const DATA_TABLES = [
@@ -363,6 +391,28 @@ export function isSeeded(): boolean {
  * tester inherits the last tester's blocked card and sees a "systems disagree" handover.
  * Skipped while another call for the same customer is still live.
  */
+/** Note the reset on every case of this customer that acted on the records just put back. */
+function markDemoReset(customerId: string): void {
+  const cases = all<{ id: string }>(
+    `SELECT DISTINCT c.id FROM cases c
+       JOIN action_operations o ON o.case_id = c.id
+      WHERE c.customer_id = ? AND o.status = 'succeeded'
+        AND o.action_type IN ('block_card', 'reverse_fee', 'submit_dispute', 'order_replacement')`,
+    [customerId],
+  );
+  const at = nowIso();
+  for (const c of cases) {
+    run('INSERT INTO case_events (case_id, event_type, detail_json, created_at) VALUES (?,?,?,?)', [
+      c.id, 'demo_data_reset', JSON.stringify({ at, note: 'Demo data was put back for a later call: cards active, fees charged again, disputes released.' }), at,
+    ]);
+    try {
+      regenerateSummary(c.id);
+    } catch (e) {
+      log.warn('could not refresh a case summary after the demo reset', { caseId: c.id, error: (e as Error).message });
+    }
+  }
+}
+
 export function refreshDemoFixtures(customerId: string, exceptSessionId?: string): boolean {
   const live = get<{ n: number }>("SELECT COUNT(*) n FROM call_sessions WHERE customer_id = ? AND ended_at IS NULL AND id != ? AND updated_at > ?", [customerId, exceptSessionId ?? '', new Date(Date.now() - 10 * 60_000).toISOString()])?.n ?? 0;
   if (live > 0) return false;
@@ -373,5 +423,9 @@ export function refreshDemoFixtures(customerId: string, exceptSessionId?: string
   if (reg.resetDemoCustomer) reg.resetDemoCustomer(customerId).catch((e) => log.warn('demo reset not recorded in BigQuery', { customerId, error: (e as Error).message }));
   run("UPDATE bank_fraud_alerts SET reported_card_status = 'active' WHERE customer_id = ? AND reported_card_status != 'active'", [customerId]);
   run("UPDATE disputes SET status = 'rejected', downstream_status = 'released for the next demo call' WHERE customer_id = ? AND status IN ('submitting','submitted','pending','needs_review','unknown')", [customerId]);
+  // The bank records have been put back; the cases from earlier calls have not. Record the reset on
+  // each of them so the workspace never shows a case claiming a card is blocked next to an account
+  // panel saying it is active. What happened on that call stays true, with the reset noted after it.
+  markDemoReset(customerId);
   return true;
 }

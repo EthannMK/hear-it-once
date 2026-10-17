@@ -142,6 +142,13 @@ export function regenerateSummary(caseId: string): string {
   for (const d of disputes)
     lines.push(`Dispute ${d.id}: ${formatMoney(d.amount_minor, d.currency)} at ${d.merchant} on ${formatDate(d.txn_date)} — status ${d.status}${d.external_ref ? `, intake ref ${d.external_ref}` : ''} (submission is not a final decision).`);
   if (handoff) lines.push(`Handoff: ${HANDOFF_REASON_LABELS[handoff.reason] ?? handoff.reason} — ${handoff.status}.`);
+  // A later demo call put the bank records back. Say so, so this case cannot be read as the current
+  // state of the account: what happened on the call stands, and the reset came after it.
+  const reset = events.filter((e) => e.event_type === 'demo_data_reset').at(-1);
+  if (reset) {
+    const at = parseJson<{ at?: string }>(reset.detail_json, {}).at;
+    lines.push(`Demo data was put back after this call${at ? ` on ${formatDate(at)}` : ''}: the card is active again, fees are charged again and disputes are released. The actions above did happen on this call.`);
+  }
   if (c.next_steps) lines.push(`Next steps: ${c.next_steps}`);
   const summary = redactText(lines.join('\n'));
   run('UPDATE cases SET summary = ?, actions_json = ?, updated_at = ? WHERE id = ?', [summary, JSON.stringify(ops), nowIso(), caseId]);

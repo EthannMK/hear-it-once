@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Northstar Bank">
+  <!-- A four-point star, faceted: each arm is two triangles, one side a shade deeper. The arms are
+       kept thick so the mark still reads at 16px in the header. -->
+  <g>
+    <path d="M32 2 L39 25 L32 32 Z" fill="#8b7df0"/>
+    <path d="M32 2 L25 25 L32 32 Z" fill="#5846c9"/>
+    <path d="M62 32 L39 39 L32 32 Z" fill="#8b7df0"/>
+    <path d="M62 32 L39 25 L32 32 Z" fill="#6553d8"/>
+    <path d="M32 62 L25 39 L32 32 Z" fill="#8b7df0"/>
+    <path d="M32 62 L39 39 L32 32 Z" fill="#5846c9"/>
+    <path d="M2 32 L25 25 L32 32 Z" fill="#7565e8"/>
+    <path d="M2 32 L25 39 L32 32 Z" fill="#5846c9"/>
+  </g>
+</svg>
