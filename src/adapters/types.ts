@@ -242,7 +242,10 @@ export interface FeeLedgerWriteAdapter {
 
 /** Registry of all adapters (dependency-injected so tests and real providers can swap them). */
 export interface AdapterRegistry {
-  mode: 'mock';
+  /** "mock": synthetic tables in the local database. "bigquery": synthetic bank dataset in BigQuery. */
+  mode: 'mock' | 'bigquery';
+  /** Optional: put a demo customer's changeable bank state back to its seeded values (see refreshDemoFixtures). */
+  resetDemoCustomer?(customerId: string): Promise<void>;
   identity: IdentityVerificationAdapter;
   readers: {
     customer_profile: CustomerProfileAdapter;

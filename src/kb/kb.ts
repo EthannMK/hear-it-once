@@ -142,6 +142,8 @@ export const knowledgeBase = () => kb;
 export function setKnowledgeBaseForTests(k: KnowledgeBaseAdapter | null): void {
   kb = k ?? mockKnowledgeBase;
 }
+/** Choose the knowledge base at start-up (ADAPTER_MODE=bigquery uses the BigQuery one). */
+export const setKnowledgeBase = setKnowledgeBaseForTests;
 
 export function recordKbReference(sessionId: string, r: KbResult, query: string, opts: { supportsNextStep: boolean; agentReview: boolean }): void {
   run(
@@ -156,7 +158,7 @@ export function kbReferencesFor(sessionId: string) {
     'SELECT * FROM kb_references WHERE session_id = ? ORDER BY score DESC, id',
     [sessionId],
   ).map((r) => {
-    const a = KB_ARTICLES.find((x) => x.id === r.article_id) ?? INFO_ARTICLES.find((x) => x.id === r.article_id);
+    const a = KB_ARTICLES.find((x) => x.id === r.article_id) ?? INFO_ARTICLES.find((x) => x.id === r.article_id) ?? kb.get(r.article_id);
     return {
       id: r.article_id,
       title: a?.title ?? r.article_id,

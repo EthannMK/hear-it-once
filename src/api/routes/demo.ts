@@ -18,11 +18,12 @@ import { SUPPORTED_LANGUAGES } from '../../voice/interfaces.ts';
 export function registerDemoRoutes(app: FastifyInstance): void {
   /** What is simulated vs configured — shown honestly in the UI. */
   app.get('/api/demo/environment', async () => ({
-    mode: env().ADAPTER_MODE === 'mock' ? 'demo' : 'integration',
+    mode: env().ADAPTER_MODE === 'mock' ? 'demo' : env().ADAPTER_MODE === 'bigquery' ? 'bigquery' : 'integration',
+    dataSource: env().ADAPTER_MODE === 'bigquery' ? `BigQuery ${env().BQ_PROJECT ?? env().GOOGLE_CLOUD_PROJECT ?? ''}.${env().BQ_DATASET}` : 'local synthetic tables',
     demoMode: env().DEMO_MODE,
     policyProfile: policy().profile,
     connectors: [
-      ...Object.entries(SOURCE_DISPLAY).map(([k, label]) => ({ id: k, label, kind: 'read', status: 'simulated' })),
+      ...Object.entries(SOURCE_DISPLAY).map(([k, label]) => ({ id: k, label, kind: 'read', status: env().ADAPTER_MODE === 'bigquery' && k !== 'prior_cases' ? 'bigquery' : 'simulated' })),
       { id: 'card_control', label: 'Card control (block)', kind: 'write', status: 'simulated' },
       { id: 'replacement', label: 'Card issuing (replacement)', kind: 'write', status: 'simulated' },
       { id: 'dispute_intake', label: 'Dispute intake', kind: 'write', status: 'simulated' },

@@ -103,7 +103,7 @@ async function readOne(source: SourceName, ctx: AdapterContext, customerId: stri
         attempts = n;
         // Real mode: one breaker per downstream system. Mock mode: faults are injected per synthetic
         // customer, so breakers are also scoped per customer to keep demo scenarios independent.
-        const key = adapters().mode === 'mock' ? `${source}:${customerId}` : source;
+        const key = adapters().mode === 'mock' || adapters().mode === 'bigquery' ? `${source}:${customerId}` : source;
         return breakers.run(key, () => withTimeout(reader(source, ctx, customerId)(), e.ADAPTER_TIMEOUT_MS));
       },
       {
@@ -183,7 +183,7 @@ export async function retrieveFacts(input: { sessionId: string; correlationId: s
           title: `${SOURCE_DISPLAY[n]}: ${r.status === 'ok' ? (r.stale ? 'returned stale data' : 'returned') : r.status.replace('_', ' ')}`,
           detail: `${r.latencyMs} ms · ${r.attempts} attempt${r.attempts === 1 ? '' : 's'}${r.asOf ? ` · data as of ${r.asOf}` : ''}${r.errorCode && r.status !== 'ok' ? ` · ${r.errorCode}` : ''}`,
           status: r.status === 'ok' ? (r.stale ? 'warn' : 'ok') : 'failed',
-          source: SOURCE_DISPLAY[n],
+          source: adapters().mode === 'bigquery' && n !== 'prior_cases' ? `${SOURCE_DISPLAY[n]} · BigQuery` : SOURCE_DISPLAY[n],
           ref: id,
           data: { source: n, status: r.status, stale: r.stale, latencyMs: r.latencyMs, attempts: r.attempts, startedMs: start },
         });

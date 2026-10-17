@@ -12,6 +12,9 @@ import { seedRoles, createStaffUser } from '../auth/rbac.ts';
 import { SCENARIOS, type ScenarioDef } from './scenarios.ts';
 import { seedIllustrativeHistory } from './seed-history.ts';
 import { seedCrmHistory } from './seed-crm.ts';
+import { adapters } from '../adapters/registry.ts';
+import { syncReplicaFromBigQuery } from '../adapters/bigquery/replica.ts';
+import { log } from '../lib/logger.ts';
 
 const iso = (daysAgo: number, hour = 12, minute = 0) => {
   const d = new Date(nowMs() - daysAgo * 86_400_000);
@@ -307,6 +310,8 @@ export function resetDemoData(opts: { history?: boolean } = {}): void {
     d.exec('PRAGMA foreign_keys = ON');
   }
   seedAll(opts);
+  // BigQuery mode: the fresh local rows get new ids, so take the bank rows from BigQuery again.
+  if (adapters().mode === 'bigquery') syncReplicaFromBigQuery().catch((e) => log.warn('local copy not refreshed from BigQuery after reset', { error: (e as Error).message }));
 }
 
 /**
@@ -363,6 +368,9 @@ export function refreshDemoFixtures(customerId: string, exceptSessionId?: string
   if (live > 0) return false;
   run("UPDATE bank_cards SET status = 'active', status_reason = NULL, status_as_of = ? WHERE customer_id = ? AND status != 'active'", [nowIso(), customerId]);
   run('UPDATE bank_fees SET reversed_at = NULL, reversal_reason = NULL WHERE customer_id = ? AND reversed_at IS NOT NULL', [customerId]);
+  // BigQuery mode: record the reset there too, so events from earlier calls stop counting.
+  const reg = adapters();
+  if (reg.resetDemoCustomer) reg.resetDemoCustomer(customerId).catch((e) => log.warn('demo reset not recorded in BigQuery', { customerId, error: (e as Error).message }));
   run("UPDATE bank_fraud_alerts SET reported_card_status = 'active' WHERE customer_id = ? AND reported_card_status != 'active'", [customerId]);
   run("UPDATE disputes SET status = 'rejected', downstream_status = 'released for the next demo call' WHERE customer_id = ? AND status IN ('submitting','submitted','pending','needs_review','unknown')", [customerId]);
   return true;

@@ -193,13 +193,16 @@ export function buildPolicy(profile: PolicyConfig['profile']): PolicyConfig {
 let cachedPolicy: PolicyConfig | null = null;
 
 /**
- * Resolve the active policy. Safety rule: any adapter mode other than "mock" forces the
+ * Resolve the active policy. Safety rule: any adapter mode other than the two synthetic-data modes
+ * ("mock" = local tables, "bigquery" = the synthetic Northstar dataset in BigQuery) forces the
  * conservative profile, so real integrations can never inherit prototype autonomy.
  */
+const SYNTHETIC_MODES = ['mock', 'bigquery'];
+
 export function policy(): PolicyConfig {
   if (cachedPolicy) return cachedPolicy;
   const e = env();
-  const profile = e.ADAPTER_MODE !== 'mock' ? 'pilot-conservative' : e.POLICY_PROFILE;
+  const profile = SYNTHETIC_MODES.includes(e.ADAPTER_MODE) ? e.POLICY_PROFILE : 'pilot-conservative';
   cachedPolicy = buildPolicy(profile);
   return cachedPolicy;
 }

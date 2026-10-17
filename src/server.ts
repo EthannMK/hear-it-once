@@ -6,6 +6,8 @@ import { buildApp } from './api/app.ts';
 import { log } from './lib/logger.ts';
 import { purgeExpiredTranscripts } from './reporting/retention.ts';
 import { restoreSnapshot, startSnapshots } from './db/snapshot.ts';
+import { adapters } from './adapters/registry.ts';
+import { syncReplicaFromBigQuery } from './adapters/bigquery/replica.ts';
 
 const e = env();
 // Durable storage: bring back the last saved database before opening it (no-op unless configured).
@@ -14,6 +16,15 @@ db(); // open + migrate
 if (!isSeeded()) {
   seedAll();
   log.info('seeded synthetic demo data', { db: e.HIO_DB_PATH });
+}
+// BigQuery mode: lookups go to BigQuery live; the app's copy of the bank rows is refreshed from it now.
+if (e.ADAPTER_MODE === 'bigquery') {
+  adapters();
+  try {
+    await Promise.race([syncReplicaFromBigQuery(), new Promise((_, rej) => setTimeout(() => rej(new Error('timed out after 60 s')), 60_000))]);
+  } catch (err) {
+    log.warn('could not refresh the local copy from BigQuery; live lookups still use BigQuery', { error: (err as Error).message });
+  }
 }
 const snapshots = startSnapshots(db());
 const purged = purgeExpiredTranscripts();

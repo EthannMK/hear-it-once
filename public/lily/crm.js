@@ -384,6 +384,8 @@ function previousCard(w) {
 }
 
 /* ------------------------------------------------------------------ customer page */
+const money = (minor) => `$${(Number(minor) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 async function customerPage(id) {
   let p;
   try { p = await api(`/api/crm/customers/${encodeURIComponent(id)}`); }
@@ -398,6 +400,10 @@ async function customerPage(id) {
     h('div.crm-grid2',
       h('section.card.crm-sec', h('h2', 'Cards'), h('ul.crm-acts', cu.cards.map((k) => h('li', h('div', h('b', `${k.network} ${k.product}`), h('span', `${k.masked} · ${k.holder}`)), badge(k.status === 'active' ? 'mint' : 'coral', k.status + (k.statusReason ? ` · ${k.statusReason}` : '')))))),
       h('section.card.crm-sec', h('h2', `Cases (${p.cases.length})`), p.cases.length ? h('div.crm-list.flat', p.cases.map(caseItem(null))) : h('p.small.muted', 'No cases yet.'))),
+    p.history ? h('section.card.crm-sec', h('h2', 'Account history', badge('lav', 'Live from BigQuery')),
+      h('p', `${p.history.transactions.toLocaleString()} transactions${p.history.firstAt ? ` since ${fmtWhen(p.history.firstAt)}` : ''}, ${money(p.history.spendMinor)} in card purchases.`),
+      p.history.topCategories.length ? h('div.chips', p.history.topCategories.map((c) => h('span.chip', `${c.category} · ${c.count} · ${money(c.spendMinor)}`))) : null,
+      h('p.small.muted', p.history.source)) : null,
     h('section.card.crm-sec', h('h2', 'Recent transactions'),
       h('table.crm-facts', h('thead', h('tr', h('th', 'Date'), h('th', 'Merchant'), h('th', 'Amount'), h('th', 'Status'))),
         h('tbody', p.transactions.map((t) => h('tr', h('td', fmtWhen(t.at)), h('td', t.merchant, t.disputed ? badge('amber', 'Disputed') : null, h('div.small.muted', `${t.kind}${t.card ? ` · ${t.card}` : ''}`)), h('td.mono', t.amount), h('td', t.status)))))),
