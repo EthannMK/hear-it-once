@@ -145,19 +145,32 @@ question per knowledge search, costs very little on Vertex AI.
 
   Run `setup.sh` once and make one call before relying on it in front of judges.
 
-## Where Google ADK fits (proposal, not built)
+## The back-office agent (built, on Google ADK and Vertex AI Agent Engine)
 
-Today the agent stack is Gemini Live (voice) plus a deterministic TypeScript back end. None of it is
-an ADK agent, so nothing appears under Vertex AI Agent Engine. The lowest-risk way to use ADK:
+The human agent's screen has an **AI back office** panel. Behind it is an agent built with the
+Google Agent Development Kit (Python) and deployed to Vertex AI Agent Engine. It reads BigQuery and
+nothing else, and it cannot change an account: there is no tool that writes.
 
-- **A "Northstar back-office agent" built with ADK (Python) and deployed to Vertex AI Agent Engine.**
-  It uses ADK's built-in BigQuery tools on `northstar_bank`, plus a knowledge tool over
-  `kb_embeddings`. It is read-only by design: no tool can change an account.
-- **CRM:** an "Ask about this case" box, so the human agent can ask in plain words ("has she
-  disputed before?", "what does the fee policy say?", "fraud rate for this merchant category?") and
-  get an answer with its sources from BigQuery.
-- **Lily:** her `search_knowledge_base` tool can call the same agent for general banking questions,
-  with today's search as the fallback.
-- **Kept as they are:** the live voice loop, verification, consent and every account action stay in
-  the deterministic back end. Moving those into an LLM agent before judging would add risk and remove
-  guarantees the tests prove.
+| Part | Where |
+|---|---|
+| Agent and tools | `agents/backoffice/northstar_backoffice/` |
+| Deploy | `bash agents/backoffice/deploy.sh` |
+| Views it may read | `agents/backoffice/views.sql` |
+| The app's side | `src/backoffice/backoffice.ts` |
+| Tests | `agents/backoffice/test_tools.py`, `tests/e2e/backoffice.test.ts` |
+
+**How the app reaches it.** Set `AGENT_ENGINE_RESOURCE` on Cloud Run to the resource name
+`deploy.sh` prints. With it set, the panel's questions go to Agent Engine and the answer comes back
+with the steps it took and the views it read. Without it, the same questions are answered from the
+bank records by built-in queries, and the panel says so. Both paths are read-only.
+
+**What the agent may read.** Only the `agent_*` views, which leave out the identity hashes
+(`dob_hash`, `phone_hash`, `pan_sha256`) and the authorisation codes, and which apply the demo
+clock. Every query is checked with a BigQuery dry run before it runs: one statement, a SELECT, only
+allowed views, and under the scan cap. Anything else is refused, and the refusal reaches the agent
+as the tool's answer. `agents/backoffice/test_tools.py` covers each of those refusals against a fake
+client, so the guards can be checked without a project or a bill.
+
+**What stays deterministic.** The live voice loop, verification, consent and every account action
+stay in the TypeScript back end. The back-office agent informs the human; it never acts.
+

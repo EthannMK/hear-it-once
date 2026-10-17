@@ -84,6 +84,22 @@ gcloud run deploy hear-it-once --source . --region=asia-southeast1 --allow-unaut
 
 Full steps (including creating the secret) are in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Demo data resets on each deploy and re-seeds automatically.
 
+
+### The back-office agent (Google ADK on Vertex AI Agent Engine)
+
+The agent behind the **AI back office** panel on the agent's screen is built with the Google Agent
+Development Kit and runs on Vertex AI Agent Engine. It reads BigQuery through read-only `agent_*`
+views and cannot change an account.
+
+```bash
+bash agents/backoffice/deploy.sh                    # prints the reasoningEngines/... resource name
+gcloud run services update hear-it-once --region=asia-southeast1 \
+  --update-env-vars AGENT_ENGINE_RESOURCE=<that resource name>
+```
+
+Without `AGENT_ENGINE_RESOURCE` the same panel answers from the bank records with built-in queries,
+and says so. Details in [docs/BIGQUERY.md](docs/BIGQUERY.md); the SQL guards are covered by
+`python -m pytest agents/backoffice/test_tools.py`.
 ## Demo sign-in
 
 Staff screens use **demo role selection, not real authentication** (BRD §5 allows this for the local demo). Pick a synthetic user:
@@ -108,7 +124,7 @@ Callers need no sign-in: starting a call issues a per-call token (HttpOnly cooki
 
 | Document | Contents |
 |---|---|
-| [docs/BIGQUERY.md](docs/BIGQUERY.md) | Bank data and knowledge in BigQuery (`ADAPTER_MODE=bigquery`), Kaggle and Bitext data, setup script, ADK proposal |
+| [docs/BIGQUERY.md](docs/BIGQUERY.md) | Bank data and knowledge in BigQuery (`ADAPTER_MODE=bigquery`), Kaggle and Bitext data, setup script, and the ADK back-office agent on Agent Engine |
 | [docs/CRM.md](docs/CRM.md) | Call memory (structured facts) and the Agent CRM: summary, tags, suggestions, tickets |
 | [docs/PLAN.md](docs/PLAN.md) | Phase 0 assessment and stack decision |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Modules, state machines, data model, request flow |
