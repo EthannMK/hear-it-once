@@ -1,11 +1,16 @@
-// Screen 3: safety and controls. What stops this assistant doing the wrong thing, shown live rather
-// than described — the off switch as it stands now, the audit log checked against its own hashes
-// while you watch, the last accuracy run with its date and commit, and the fraud patterns the call
-// policy is built against with what enforces each.
+// Screen 3: guardrails. What stops this assistant doing the wrong thing, written to be read rather
+// than operated — how each safeguard is built, then the evidence behind it read live from the
+// running system: where the off switch stands now, the audit log checked against its own hashes,
+// the last accuracy run with its date and commit, and the fraud patterns the call policy is built
+// against with the file that enforces each.
 //
-// It is an operations screen, so it signs in as the operations role rather than the agent one. That
-// is not decoration: an agent has neither the permission to read policy nor the permission to stop
-// the assistant, and the server would refuse. Going back to screen 2 signs in as the agent again.
+// Nothing here changes the running system. The off switch is real and is shown as it stands, but
+// it is thrown through the API, not from this page: a screen a judge is reading is the wrong place
+// to stop a live assistant by accident.
+//
+// It still signs in as the operations role rather than the agent one, because an agent has no
+// permission to read policy and the server would refuse. Going back to screen 2 signs in as the
+// agent again.
 import { api, h } from '/js/lib.js';
 
 let K = null; // { render, icon, toast }
@@ -67,12 +72,38 @@ function draw() {
   K.render('guardrails',
     h('main.sf',
       h('header.sf-head',
-        h('h1', 'Safety and controls'),
-        h('p', 'Everything on this page is read from the running system, not written into it. The switch below is live: change it and the next caller is treated differently.')),
+        h('h1', 'How the guardrails are built'),
+        h('p', 'An assistant that can block a card and move a dispute has to be stopped from doing it wrongly. This page says how, and then shows the evidence — every figure below is read from the running system as you open it, not written into the page.')),
+      howCard(),
       switchCard(),
       chainCard(),
       accuracyCard(),
       patternsCard()));
+}
+
+/* ------------------------------------------------------------------ the explanation */
+
+const HOW = [
+  ['The model never decides anything that matters.',
+    'Lily holds the conversation. Every banking decision — whether a caller is verified, whether a dispute is eligible, whether an action may run — is made by the back end from the records, and the model is told the answer. A tool call that arrives without the customer’s own words behind it changes nothing, so a model that is persuaded, confused or simply wrong cannot act on it.'],
+  ['Consent is read from what the caller actually said.',
+    'An action runs only after the customer’s own spoken yes, matched against the turn it belongs to. A “yes” the assistant produced herself is not consent, and a yes to one question is not consent to the next.'],
+  ['Nothing about an account is said before identity is proven.',
+    'Balances, charges and card status stay hidden until the security check passes, and the check is a back-end decision recorded against the call. The agent screen shows one wording — Verified, Pending, Failed, Not verified — and never infers it from what the caller claimed.'],
+  ['The caller names the charge; the bank confirms it.',
+    'The assistant does not read out a list of recent purchases to someone who has described nothing. The caller says what they are querying and the records confirm or contradict it, so a stranger learns nothing by calling.'],
+  ['Every action is reversible on paper, and an unknown outcome stays unknown.',
+    'If a downstream system times out, the operation is recorded as Unknown rather than guessed either way, is never silently resent, and is reconciled against the truth afterwards. The agent screen keeps a suggestion and a completed action visibly apart.'],
+  ['Everything is written down, and the log can be checked.',
+    'Every read, every change and every refusal is appended to an audit log where each row carries a keyed hash of itself and of the row before it. An edit, a deletion or a renumbering breaks the chain and shows up in the check below.'],
+  ['The assistant can be switched off without a deploy.',
+    'One stored position decides whether it takes calls, takes calls but changes nothing, or hands every caller straight to a person. It is enforced by the policy engine before any rule is read, so nothing a caller says and nothing a model returns can route around it.'],
+];
+
+function howCard() {
+  return h('section.card.sf-sec',
+    h('div.sf-h', h('h2', K.icon('lock'), 'The seven things that hold it together')),
+    h('div.sf-how', HOW.map(([q, a], i) => h('div.sf-howi', h('span.sf-n', String(i + 1)), h('div', h('b', q), h('p', a))))));
 }
 
 /* ------------------------------------------------------------------ the off switch */
@@ -82,38 +113,13 @@ function switchCard() {
   if (s.error) return h('section.card.sf-sec', h('h2', 'The off switch'), h('p.bad', s.error));
   const current = s.mode ?? 'normal';
   const tone = current === 'normal' ? 'mint' : current === 'actions_paused' ? 'amber' : 'coral';
-  const reason = h('textarea', { rows: '2', maxlength: '300', 'aria-label': 'Why you are changing it', placeholder: 'Why — the next shift reads this, and so does the audit log' });
-
   return h('section.card.sf-sec',
-    h('div.sf-h', h('h2', K.icon('lock'), 'The off switch'), h(`span.badge.${tone}`, MODES.find((m) => m.id === current)?.label ?? current)),
+    h('div.sf-h', h('h2', K.icon('lock'), 'Where the off switch stands now'), h(`span.badge.${tone}`, MODES.find((m) => m.id === current)?.label ?? current)),
     h('p.sf-now', s.description ?? ''),
     s.reason ? h('p.small.muted', `Set ${s.changedBy ? `by ${s.changedBy}` : ''}${s.changedAt ? ` at ${when(s.changedAt)}` : ''} — “${s.reason}”`) : null,
     s.degraded ? h('p.bad.small', 'The stored position could not be read, so the assistant is treated as switched off. A control that reverts to “on” when its own storage is damaged is not a control.') : null,
-    h('div.sf-modes', MODES.map((m) => h(`label.sf-mode${m.id === current ? '.on' : ''}`,
-      h('input', { type: 'radio', name: 'sf-mode', value: m.id, checked: m.id === current || null, disabled: !s.mayChange || null }),
-      h('div', h('b', m.label), h('span', m.blurb))))),
-    s.mayChange
-      ? h('div.sf-act', reason,
-          h('button.btn.dark', { type: 'button', onclick: (e) => apply(e.currentTarget, reason) }, 'Apply'))
-      : h('p.small.muted', 'Your role may read this but not change it. Operations and administrators can.'),
-    h('p.small.muted', 'Enforced where the decision is made, not here: a paused switch is refused by the policy engine before any eligibility rule is read, so nothing a caller says and nothing a model returns can route around it. Staff are not affected — the switch stops the assistant, not the bank.'));
-}
-
-async function apply(btn, reason) {
-  const mode = document.querySelector('input[name="sf-mode"]:checked')?.value;
-  const why = reason.value.trim();
-  if (!mode) return K.toast('Choose a position first.');
-  if (why.length < 3) { reason.focus(); return K.toast('Say why. It goes in the audit log.'); }
-  btn.disabled = true;
-  try {
-    await api('/api/safety', { method: 'PUT', body: { mode, reason: why } });
-    K.toast(mode === 'normal' ? 'The assistant is working normally again.' : 'Done. The next caller is treated differently.');
-    await load();
-  } catch (e) {
-    K.toast(`Could not change it: ${e.message}`);
-  } finally {
-    btn.disabled = false;
-  }
+    h('ul.sf-pos', MODES.map((m) => h(`li${m.id === current ? '.on' : ''}`, h('b', m.label), h('span', m.blurb)))),
+    h('p.small.muted', 'Shown, not operated: this page changes nothing. Operations staff move the switch through the API, and it is enforced where the decision is made — a paused switch is refused by the policy engine before any eligibility rule is read. Staff are not affected; the switch stops the assistant, not the bank.'));
 }
 
 /* ------------------------------------------------------------------ the audit log */
