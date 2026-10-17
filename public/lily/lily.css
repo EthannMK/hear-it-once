@@ -40,7 +40,7 @@ button { font: inherit; cursor: pointer; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 input, select, textarea { font: inherit; color: var(--text); }
 :focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: 6px; }
-.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sr-only { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .hidden { display: none !important; }
 .mono { font-family: var(--label); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
 .muted { color: var(--muted); }
@@ -90,7 +90,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 
 /* ---------------------------------------------------------------- screen 1 layout */
 .judge { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 24px 28px 48px; max-width: 1120px; margin: 0 auto; align-items: start; }
-.judge.in-call { grid-template-columns: 280px minmax(0, 1fr) 340px; max-width: 1500px; }
+.judge.in-call { grid-template-columns: minmax(0, 1fr) 360px; max-width: 1500px; }
 
 /* test data panel — deliberately compact and clearly labelled as test data */
 .copy { border: 0; background: var(--lav); color: var(--violet-d); border-radius: 8px; padding: 3px 8px; font: 600 0.72rem var(--label); }
@@ -442,7 +442,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 
 /* ---------------------------------------------------------------- responsive */
 @media (max-width: 1240px) {
-  .judge.in-call { grid-template-columns: 250px minmax(0, 1fr); }
+  .judge.in-call { grid-template-columns: minmax(0, 1fr); }
   .judge.in-call .btc { grid-column: 1 / -1; position: static; max-height: none; }
   .judge.in-call .tl { max-height: 480px; }
 }
@@ -668,7 +668,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .crm .joined p { margin: 0; color: var(--text-2); }
 
 /* "Behind the scenes" is a side panel on a desktop and a sheet on a phone. */
-.btcbtn { display: none; }
+.controls .btcbtn { display: none; }
 @media (max-width: 900px) {
   /* The demo numbers stay within reach while on a call: they are read out during the security check. */
   .judge.in-call > .dmini {
@@ -681,7 +681,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
   .judge.in-call > .dmini ul { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x mandatory; }
   .judge.in-call > .dmini li { flex: 0 0 auto; scroll-snap-align: start; min-width: 190px; }
   /* The panel is reached from the call controls instead of sitting far below the transcript. */
-  .btcbtn { display: inline-flex; align-items: center; gap: 6px; }
+  .controls .btcbtn { display: inline-flex; align-items: center; gap: 6px; }
   .judge.in-call .btc { display: none; }
   .judge.in-call .btc.sheet-open { display: grid; }
 }
@@ -715,3 +715,72 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .idcheck .ck.passed { color: var(--mint-ink); font-weight: 600; }
 .idcheck .ck.failed { color: var(--coral-ink); font-weight: 600; }
 .idcheck .ck.awaiting { color: var(--amber-ink); }
+
+/* ================================================================ Desktop: every screen fits one window
+   On a laptop or desktop the page itself never scrolls. Each screen fills the window under the
+   header; long lists (demo accounts, transcript, timeline, case list) scroll inside their own panel.
+   Phones and narrow windows keep the stacked layout above. */
+.handover .hv { display: grid; gap: 2px; min-width: 0; flex: 1 1 260px; }
+.handover .rf { font: 600 0.7rem var(--label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.handover .rf b { display: inline; font-family: var(--mono, ui-monospace, monospace); font-size: 0.95rem; letter-spacing: 0.06em; color: var(--aub); margin-left: 4px; text-transform: none; }
+.handover .jt { font-weight: 600; color: var(--violet-d); }
+.handover .row { display: flex; gap: 8px; margin-left: auto; }
+.crm .joined { padding: 14px 18px; }
+
+@media (min-width: 1101px) and (min-height: 600px) {
+  #root { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+  #root > .top { position: static; flex: none; }
+  #root > main { flex: 1 1 auto; min-height: 0; width: 100%; }
+
+  /* Screen 1, before the call: the pitch and the button beside the voice pod and the three steps. */
+  .judge:not(.in-call) { max-width: 1280px; padding: 18px 28px; overflow: hidden; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .judge:not(.in-call) > section { min-height: 0; display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto; }
+  .judge:not(.in-call) .hero { min-height: 0; padding: 0; overflow: hidden; }
+  .judge:not(.in-call) .hero h1 { font-size: clamp(2.2rem, 3.8vw, 3.5rem); margin: 0 0 14px; }
+  .judge:not(.in-call) .pod-wrap { min-height: 0; }
+  .judge:not(.in-call) .pod { width: clamp(180px, 34vh, 320px); }
+  .judge:not(.in-call) .asks { margin: 0; padding: 12px 16px; gap: 8px; }
+  /* Screen 1, on the call: three full-height columns; the transcript takes whatever is left. */
+  .judge.in-call { height: 100%; padding: 14px 24px; gap: 18px; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
+  .judge.in-call > .dmini, .judge.in-call > .btc { position: static; height: 100%; max-height: none; min-height: 0; }
+  .judge.in-call .btc { grid-column: auto; overflow: hidden; }
+  .judge.in-call .tl { max-height: none; min-height: 0; }
+  .call-main { display: flex; flex-direction: column; gap: 10px; min-height: 0; height: 100%; }
+  .call-main > * { flex: none; }
+  .call-main > .tx { flex: 1 1 0; min-height: 150px; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; }
+  .call-main .tx-list { flex: 1 1 0; max-height: none; min-height: 0; }
+  .call-main .ch { padding: 10px 16px; }
+  .call-main .stage { padding: 12px 16px; gap: 6px; border-radius: 22px; }
+  .call-main .stage canvas { width: clamp(90px, 17vh, 180px); height: clamp(90px, 17vh, 180px); }
+  /* Once a person is involved, the voice dial gives its room to the handover and the transcript. */
+  .call-main .stage[data-state='waiting'] canvas, .call-main .stage[data-state='agent'] canvas,
+  .call-main .stage[data-state='waiting'] .seg, .call-main .stage[data-state='agent'] .seg { display: none; }
+  .call-main { overflow-y: auto; }
+  .call-main .heard { padding: 10px 14px; }
+  .call-main .handover { padding: 10px 14px; gap: 10px; }
+  .call-main .controls { padding: 8px; flex-wrap: nowrap; }
+  .call-main .controls button { white-space: nowrap; }
+  .call-main .controls button { padding: 9px 14px; }
+  .call-main .sform { margin: 0; padding: 10px 12px; }
+
+  /* Screen 2, the agent workspace: the case list and the case each scroll on their own. */
+  .crm { height: 100%; padding: 14px 24px; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
+  .crm-rail { position: static; height: 100%; max-height: none; min-height: 0; }
+  .crm-main { min-height: 0; overflow-y: auto; align-content: start; padding-right: 4px; }
+}
+/* Shorter laptop screens: the dial and its labels shrink so the transcript keeps its room. */
+@media (min-width: 1101px) and (min-height: 600px) and (max-height: 860px) {
+  .call-main .stage .seg { display: none; }
+  .call-main .stage canvas { width: clamp(80px, 13vh, 120px); height: clamp(80px, 13vh, 120px); }
+  .call-main .stage .sub { font-size: 0.82rem; }
+  .judge:not(.in-call) .subs p, .judge:not(.in-call) .langnote { display: none; }
+  .judge:not(.in-call) .hero h1 { font-size: clamp(1.9rem, 3vw, 2.6rem); }
+  .judge:not(.in-call) .flow p { display: none; }
+  .judge:not(.in-call) .flow b { margin: 0; font-size: 0.9rem; }
+}
+/* Between 1101 and 1240 px the call keeps its three columns, a little narrower. */
+@media (min-width: 1101px) and (max-width: 1240px) and (min-height: 600px) {
+  .judge.in-call { grid-template-columns: minmax(0, 1fr) 300px; padding: 12px 16px; gap: 14px; }
+  .call-main .controls .human .long { display: none; }
+  .call-main .controls .human .short { display: inline; }
+}

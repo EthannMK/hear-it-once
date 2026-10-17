@@ -136,8 +136,11 @@ async function casePage(id, opts = {}) {
   C.ws = w;
   if (!opts.keepScroll) window.scrollTo({ top: 0 });
   const y = window.scrollY;
+  if (C.joinedCase !== id) { C.joinedCase = id; C.joined = null; }
   frame(id, ...caseView(w));
   if (opts.keepScroll) window.scrollTo({ top: y });
+  // Arriving from the caller's screen: the one thing to do next has the focus.
+  if (!opts.keepScroll && C.joined) document.querySelector('.crm-hand.wait button')?.focus({ preventScroll: true });
   // A live call or a waiting customer keeps the page current; edits in progress are never overwritten.
   if (w.case.live || ['requested', 'queued', 'connected'].includes(w.handoff?.status)) {
     C.timer = setInterval(async () => {
@@ -154,15 +157,21 @@ async function casePage(id, opts = {}) {
  * Shown once, when the viewer arrives here straight from a call that was just handed over: it says
  * plainly whose seat they are now in, because the screen changed under them by design.
  */
-function justJoinedBanner(sessionId) {
+function justJoinedBanner(w) {
+  const sessionId = w.case.sessionId ?? w.case.session_id ?? null;
   let flag = null;
-  try { flag = sessionStorage.getItem('hio_joined_as_agent'); } catch { /* private mode */ }
-  if (!flag || !sessionId || flag !== sessionId) return null;
-  try { sessionStorage.removeItem('hio_joined_as_agent'); } catch { /* private mode */ }
+  try { flag = sessionStorage.getItem('hio_joined_as_agent'); sessionStorage.removeItem('hio_joined_as_agent'); } catch { /* private mode */ }
+  // Kept for this page (not just the first draw), so the 4-second refresh doesn't make it vanish.
+  if (flag && flag === sessionId) C.joined = sessionId;
+  if (!sessionId || C.joined !== sessionId) return null;
+  const st = w.handoff?.status;
+  if (st === 'completed' || st === 'cancelled' || st === 'no_agent' || st === 'failed') return null;
+  const waiting = st === 'requested' || st === 'queued';
   return h('section.card.joined', { role: 'status' },
     h('span.badge.dark', K.icon('headset'), 'You are now the agent'),
-    h('p', 'Lily transferred this caller to you. Everything below was written while they were still talking to her — the verified identity, what the bank’s systems returned, and what was already done.'),
-    h('a.btn.sm.ghost', { href: '#/' }, '← Back to the caller’s screen'));
+    h('p', waiting
+      ? 'The caller asked for a person. They are on hold and Lily has given them their reference. Read the case, then press “Accept handover” to join them.'
+      : 'You joined the caller. Everything below was written while they were talking to Lily: verified identity, what the bank’s systems returned and what was already done.'));
 }
 
 function caseView(w) {
@@ -180,7 +189,7 @@ function caseView(w) {
       h('div.meta2', h('span', `${eff.category} · ${eff.issueType}`))));
 
   return [
-    justJoinedBanner(w.case.sessionId ?? w.case.session_id ?? null),
+    justJoinedBanner(w),
     head,
     handoverBar(w),
     h('div.crm-grid2.lead', keyInfo(w), recommendation(w)),
@@ -199,7 +208,7 @@ function handoverBar(w) {
   if (hd.status === 'queued' || hd.status === 'requested') {
     return h('section.crm-hand.wait', { role: 'status' }, K.icon('headset'),
       h('div', h('b', 'The customer is waiting for an agent'), h('span', `${hd.reasonLabel}. Lily has told them a colleague will pick up with the full case, so they won’t repeat anything.`)),
-      h('button.btn.dark', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/accept`, { method: 'POST', body: {} }), 'Handover accepted. The customer has been told you joined.') }, 'Accept handover'));
+      h('button.btn.dark.cta', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/accept`, { method: 'POST', body: {} }), 'Handover accepted. The customer has been told you joined.') }, 'Accept handover'));
   }
   if (hd.status === 'connected') {
     const input = h('input', { type: 'text', maxlength: '500', placeholder: mine ? 'Message the customer…' : 'Accepted by another agent', 'aria-label': 'Message to the customer', disabled: !mine });

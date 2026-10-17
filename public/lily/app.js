@@ -18,7 +18,10 @@ const fmtTime = (iso) => { try { return new Date(iso).toLocaleTimeString([], { h
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 const group4 = (d) => String(d ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/g, '$1 ');
 /** How long the caller's screen stays up after an agent accepts, before the demo moves to the agent's side. */
-const JUMP_MS = 7000;
+// Seconds of notice before the screen moves to the agent's seat, once Lily has stopped speaking.
+const JUMP_MS = 4000;
+const JUMP_AFTER_SPEECH_MS = 1500;
+const JUMP_MAX_HOLD_MS = 20000;
 const STAGES = ['understand', 'verify', 'investigate', 'explain', 'confirm', 'act', 'record', 'resolve', 'handoff'];
 const STAGE_LABEL = { understand: 'Understand', verify: 'Verify', investigate: 'Investigate', explain: 'Explain', confirm: 'Confirm', act: 'Act', record: 'Record', resolve: 'Resolve', handoff: 'Handover' };
 
@@ -139,9 +142,9 @@ function demoMini() {
 /** The three things a judge does, read beside the animation rather than below the page. */
 function steps() {
   return h('div.flow',
-    h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. For card matters Lily asks for a card number from the table.')),
+    h('div.card', h('b', h('span', '1'), 'Talk'), h('p', 'Speak naturally. Interrupt, change topic, ask follow-ups. For card matters Lily asks for your card number.')),
     h('div.card', h('b', h('span', '2'), 'Watch'), h('p', '“Behind the conversation” shows each step as it happens: checks, decisions, actions and handover.')),
-    h('div.card', h('b', h('span', '3'), 'Agent CRM'), h('p', 'When you end the call, you land in the agent’s case workspace: summary, verified facts, suggested next step and tickets.')));
+    h('div.card', h('b', h('span', '3'), 'Agent CRM'), h('p', 'Ask for a person or end the call and the screen moves to the agent’s case workspace: summary, verified facts, suggested next step and tickets.')));
 }
 
 function drawHome() {
@@ -165,7 +168,7 @@ function drawHome() {
           h('div.pod', h('span.spin', { 'aria-hidden': 'true' }), h('div', bars, h('div.mic', icon('wave')))),
           steps())),
       !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
-      demoTable(),
+      // Demo data panel removed for now (demoTable() is kept below to bring it back).
       h('div.card.asks', h('span.cap', 'Or just ask'), h('div.chips', ['Where is your nearest branch?', 'How do I make a deposit?', 'What is APR and how is it calculated?', 'How do I spot a card scam?', 'I want to speak to a person', 'How are you today?'].map((x) => h('span', `“${x}”`)))),
       )));
 }
@@ -341,8 +344,12 @@ class Call {
     try { const r = await api(`/api/calls/${this.id}/timeline`); this.events = r.items ?? []; this.ui.activity?.(); } catch { /* the transcript still works */ }
   }
   async requestHuman() {
+    // One request at a time: a double click must not ask twice (the back end also ignores repeats).
+    if (this.askingHuman || (this.view?.handoff && this.view.handoff.status !== 'cancelled')) return;
+    this.askingHuman = true;
     try { this.absorb(await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'request_human' } })); await this.loadTimeline(); say('Handover requested'); }
     catch (e) { this.banner = { kind: 'bad', text: e.message }; this.ui.refresh?.(); }
+    finally { this.askingHuman = false; }
   }
   async end() {
     if (this.ended || this.ending) return;
@@ -351,10 +358,31 @@ class Call {
     else { try { this.view = await api(`/api/calls/${this.id}/input`, { method: 'POST', body: { kind: 'hangup' } }); } catch { /* the agent view still loads */ } this.finish(); }
     setTimeout(() => { if (!this.ended) this.finish(); }, 4000);
   }
+  /**
+   * Count down to the agent's seat. The countdown holds while Lily is still speaking or the back
+   * end is still answering (she is reading out the queue position and reference), up to a limit,
+   * so she is never cut off mid-sentence.
+   */
+  startAgentJump() {
+    const started = Date.now();
+    const j = { started, at: started + JUMP_MS, held: false, timer: 0 };
+    j.timer = setInterval(() => {
+      if (this.agentJump !== j) return clearInterval(j.timer);
+      if (this.ended || this.ending || this.jumpCancelled) { clearInterval(j.timer); this.agentJump = null; return; }
+      const busy = !!this.player?.speaking || this.phase === 'processing';
+      j.held = busy && Date.now() - started < JUMP_MAX_HOLD_MS;
+      if (j.held) j.at = Math.max(j.at, Date.now() + JUMP_AFTER_SPEECH_MS);
+      if (Date.now() >= j.at) this.toAgentView();
+      else this.ui.refresh?.();
+    }, 250);
+    this.agentJump = j;
+  }
   /** Hand the viewer over to the agent's workspace for this same call. */
   toAgentView() {
     if (this.agentJump?.timer) clearInterval(this.agentJump.timer);
     this.agentJump = null;
+    if (this.movedToAgent) return;
+    this.movedToAgent = true;
     try { sessionStorage.setItem('hio_joined_as_agent', this.id); } catch { /* private mode */ }
     this.destroy();
     say('You are now the agent. Opening the case workspace.');
@@ -376,6 +404,8 @@ class Call {
     location.hash = `#/crm/call/${encodeURIComponent(this.id)}`;
   }
   destroy() {
+    if (this.agentJump?.timer) clearInterval(this.agentJump.timer);
+    this.agentJump = null;
     this.mic?.stop(); this.player?.close(); this.mic = this.player = null;
     this.ended = true;
     try { this.ws?.close(); } catch { /* already closed */ }
@@ -502,7 +532,9 @@ function callScreen(c) {
     // What Lily heard (card number capture) and simulated passcode.
     const bits = [];
     const cc = v.cardCapture;
-    if (cc) bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.cap', 'What Lily heard'), h('b.num', group4(String(cc.digits ?? '').replace(/ /g, '').padEnd(16, '•'))), h('p', cc.confirming ? 'All 16 digits heard. Say “yes” if this is right, or say the correct digits.' : `${cc.count ?? 0} of 16 digits. Keep reading the card number from the test-data panel.`)));
+    // Once a person has been asked for, the card-number read-back is no longer the next step.
+    const withPerson = ['requested', 'queued', 'connected'].includes(v.handoff?.status);
+    if (cc && !withPerson) bits.push(h('div.heard', { role: 'status', 'aria-live': 'polite' }, h('span.cap', 'What Lily heard'), h('b.num', group4(String(cc.digits ?? '').replace(/ /g, '').padEnd(16, '•'))), h('p', cc.confirming ? 'All 16 digits heard. Say “yes” if this is right, or say the correct digits.' : `${cc.count ?? 0} of 16 digits. Keep reading the card number from the test-data panel.`)));
     // During an agent's own check the code is typed into the private box, never read out loud.
     const forAgent = v.agentCheck?.status === 'awaiting';
     if (v.demoDevice) bits.push(h('div.passcode', icon('lock'), h('span', h('b', 'Test passcode: '), forAgent ? `type this in the box below for ${v.agentCheck.requestedByName}` : 'read this to Lily'), h('b.mono', v.demoDevice.code)));
@@ -521,24 +553,34 @@ function callScreen(c) {
       const acc = hd.status === 'connected' || hd.status === 'completed';
       // The moment the agent accepts, the demo moves from the caller's seat to the agent's. The
       // viewer is told what is about to happen and can stay where they are.
-      if (acc && !c.agentJump && !c.jumpCancelled) {
-        c.agentJump = { at: Date.now() + JUMP_MS, timer: setInterval(() => c.ui.refresh?.(), 300) };
-        setTimeout(() => { if (c.agentJump && !c.jumpCancelled) c.toAgentView(); }, JUMP_MS);
+      // As soon as a person is asked for (spoken or the button: both arrive here as the same
+      // handoff state, so it can only start once), the demo moves to the agent's seat on its own.
+      // It waits for the case to exist, for a live queue (never "no agent" or a cancelled one) and
+      // for Lily to finish telling the caller their queue position and reference.
+      const open = hd.status === 'requested' || hd.status === 'queued';
+      if ((open || acc) && v.case && !c.agentJump && !c.jumpCancelled && !c.ending) c.startAgentJump();
+      const jumping = !!(c.agentJump && !c.jumpCancelled);
+      const secs = jumping ? Math.max(0, Math.ceil((c.agentJump.at - Date.now()) / 1000)) : 0;
+      const jumpText = !jumping ? '' : c.agentJump.held ? 'Lily is finishing her sentence first.' : `Opening the agent’s screen in ${secs}s.`;
+      // Rebuilt only when something visible changes (the countdown text is updated in place), so
+      // a click on "Go now" or "Stay" is never lost to a redraw between mouse-down and mouse-up.
+      const key = [hd.status, hd.agentName, hd.reference, jumping, !!c.jumpCancelled].join('|');
+      if (handEl.dataset.key !== key) {
+        handEl.dataset.key = key;
+        handEl.replaceChildren(h(`div.handover${acc ? '.ok' : ''}`, { role: 'status' }, h('span.ic', icon('headset')),
+          h('div.hv',
+            h('b', acc ? `Agent connected${hd.agentName ? ' · ' + hd.agentName : ''}` : hd.status === 'no_agent' ? 'No agent available' : 'Waiting for a human agent'),
+            h('span', acc ? 'A person accepted the handover and can see everything so far.' : hd.status === 'no_agent' ? 'Your details are saved for a callback.' : 'Your case is with the agent team, with everything you told Lily.'),
+            hd.reference ? h('span.rf', 'Your reference ', h('b', hd.reference)) : null,
+            jumping ? h('span.jt', { 'aria-live': 'off' }, jumpText) : null),
+          jumping
+            ? h('div.row', h('button.btn.sm.mint', { type: 'button', onclick: () => c.toAgentView() }, 'Go now'), h('button.btn.sm.ghost', { type: 'button', onclick: () => c.stayHere() }, 'Stay here'))
+            : hd.status !== 'no_agent' && hd.status !== 'completed' && c.jumpCancelled ? h('button.btn.sm.primary', { type: 'button', onclick: () => c.toAgentView() }, 'Go to the agent’s screen') : null));
+        if (jumping) say('Switching to the agent’s screen once Lily finishes.');
       }
-      const handParts = [h(`div.handover${acc ? '.ok' : ''}`, { role: 'status' }, h('span.ic', icon('headset')),
-        h('div', h('b', acc ? `Agent connected${hd.agentName ? ' · ' + hd.agentName : ''}` : hd.status === 'no_agent' ? 'No agent available' : 'Waiting for a human agent'),
-          h('span', acc ? 'A person accepted the handover and can see everything so far.' : hd.status === 'no_agent' ? 'Your details are saved for a callback.' : 'Your case is with the agent team. Open the Agent CRM to accept it as the agent.')),
-        !acc && hd.status !== 'no_agent' ? h('a.btn.sm.primary.cta', { href: `/#/crm/call/${encodeURIComponent(c.id)}`, target: '_blank', rel: 'noopener' }, 'Accept as the agent ↗') : null),
-        hd.reference ? h('p.ref', h('span', 'Your reference'), h('b', hd.reference)) : null,
-        acc && c.agentJump && !c.jumpCancelled
-          ? h('div.jump', { role: 'status' },
-              h('p', h('b', 'Switching to the agent’s screen'), h('span', `You are about to see this same call from the agent’s side — in ${Math.max(0, Math.ceil((c.agentJump.at - Date.now()) / 1000))}s.`)),
-              h('div.row',
-                h('button.btn.sm.mint', { type: 'button', onclick: () => c.toAgentView() }, 'Go now'),
-                h('button.btn.sm.ghost', { type: 'button', onclick: () => c.stayHere() }, 'Stay on the caller’s screen')))
-          : null];
-      handEl.replaceChildren(...handParts.filter(Boolean));
-    } else handEl.replaceChildren();
+      const jt = handEl.querySelector('.jt');
+      if (jt && jt.textContent !== jumpText) jt.textContent = jumpText;
+    } else if (handEl.dataset.key) { handEl.dataset.key = ''; handEl.replaceChildren(); }
     const banners = [];
     if (c.micDenied && c.voiceReady) banners.push(h('p.banner', 'Microphone blocked — type below. Lily will still answer out loud.'));
     if (c.banner) banners.push(h(`p.banner.${c.banner.kind}`, c.banner.text));
@@ -556,7 +598,7 @@ function callScreen(c) {
     muteBtn.disabled = !c.mic || !c.voiceReady;
     muteBtn.setAttribute('aria-pressed', String(c.muted));
     muteBtn.replaceChildren(icon(c.muted ? 'micOff' : 'mic'), h('span.lbl', c.muted ? 'Unmute' : 'Mute'));
-    humanBtn.disabled = !!(c.view?.handoff && c.view.handoff.status !== 'cancelled');
+    humanBtn.disabled = !!c.askingHuman || !!(c.view?.handoff && c.view.handoff.status !== 'cancelled');
     endBtn.disabled = c.ending;
     drawSide(); drawSecure();
   }
@@ -600,7 +642,7 @@ function callScreen(c) {
   c.ui = { refresh, transcript: drawTranscript, activity: drawActivity, stop: () => { cancelAnimationFrame(raf); clearInterval(tick); } };
 
   render('talk', h('main.judge.in-call',
-    demoMini(),
+    // Demo data panel removed for now (demoMini() is kept to bring it back).
     h('section.call-main', { 'aria-label': 'Live call with Lily' }, head, stage, bannerEl, extras, handEl, consentEl,
       h('section.card.tx', h('div.tx-h', h('h2', 'Live transcript'), h('span.badge.lav', c.voiceReady ? 'Live captions' : 'Typed')), list, secureEl, form),
       h('div.controls', { role: 'toolbar', 'aria-label': 'Call controls' }, muteBtn, ccBtn, btcToggle, h('span.sp'), humanBtn, endBtn)),
