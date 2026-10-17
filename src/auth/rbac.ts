@@ -27,6 +27,7 @@ export type Permission =
   | 'audit.read'
   | 'qa.review'
   | 'policy.read'
+  | 'safety.control'
   | 'demo.reset'
   | 'demo.faults';
 
@@ -37,12 +38,12 @@ export const ROLE_PERMISSIONS: Record<StaffRole, { description: string; permissi
     permissions: ['call.read', 'case.read', 'case.update', 'handoff.read', 'handoff.accept', 'handoff.complete', 'handoff.message', 'action.request', 'action.approve', 'action.reconcile'],
   },
   qa: {
-    description: 'Operations / QA reviewer: KPI dashboard, cases, audit events, QA review',
-    permissions: ['call.read', 'case.read', 'kpi.read', 'audit.read', 'qa.review', 'policy.read'],
+    description: 'Operations / QA reviewer: KPI dashboard, cases, audit events, QA review, and the assistant’s off switch',
+    permissions: ['call.read', 'case.read', 'kpi.read', 'audit.read', 'qa.review', 'policy.read', 'safety.control'],
   },
   admin: {
-    description: 'Administrator / developer: reset synthetic data, configure mock faults; cannot execute banking actions',
-    permissions: ['kpi.read', 'audit.read', 'policy.read', 'demo.reset', 'demo.faults', 'case.read', 'call.read'],
+    description: 'Administrator / developer: reset synthetic data, configure mock faults, throw the assistant’s off switch; cannot execute banking actions',
+    permissions: ['kpi.read', 'audit.read', 'policy.read', 'safety.control', 'demo.reset', 'demo.faults', 'case.read', 'call.read'],
   },
 };
 

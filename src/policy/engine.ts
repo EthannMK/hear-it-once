@@ -11,6 +11,7 @@ import { nowIso } from '../lib/clock.ts';
 import type { ErrorCode } from '../lib/errors.ts';
 import { assessSources, loadSnapshot, sourceData, type Snapshot } from '../retrieval/retrieval.ts';
 import { assessDuplicate, feeReversalEligibility, fraudDisputeEligibility, type EligibilityDecision, type RuleCheck } from './eligibility.ts';
+import { assistantMayAct, safetyState } from '../safety/control.ts';
 
 export interface ActionRequest {
   type: ActionType;
@@ -55,6 +56,13 @@ export function authorizeAction(req: ActionRequest): PolicyDecision {
   const checks: RuleCheck[] = [];
   let eligibility: EligibilityDecision | null = null;
   const add = (check: string, passed: boolean, detail: string, code: ErrorCode) => checks.push({ check, passed, detail: passed ? 'ok' : `${code}: ${detail}` });
+
+  // 0. The off switch. Checked first and before any eligibility rule is read: whatever the caller
+  // said, whatever a model returned, the assistant changes nothing while the switch is thrown. A
+  // member of staff is not stopped — the switch is there to stop the assistant, not the bank.
+  if (req.actor.type === 'customer_session') {
+    add('assistant_enabled', assistantMayAct(), `The assistant is not carrying out actions at the moment: ${safetyState().reason ?? 'a safety switch is set'}`, 'FORBIDDEN');
+  }
 
   // 1. Least privilege: actor type.
   add('actor_allowed', ap.allowedActors.includes(req.actor.type), `Actor type ${req.actor.type} may not request ${req.type}.`, 'FORBIDDEN');

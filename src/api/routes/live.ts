@@ -12,6 +12,7 @@ import { subscribeAll, subscribeTurns } from '../../events/timeline.ts';
 import { callerOwns } from '../app.ts';
 import { LiveBridge, auditLiveStart, type ServerMessage } from '../../live/bridge.ts';
 import { createLiveProvider, liveAvailability } from '../../live/registry.ts';
+import { assistantMayHandleCalls } from '../../safety/control.ts';
 import { allProfileCards, BANK_NAME } from '../../live/profiles.ts';
 import { env } from '../../config/env.ts';
 
@@ -50,6 +51,10 @@ export function registerLiveRoutes(app: FastifyInstance): void {
     if (!get('SELECT 1 FROM call_sessions WHERE id = ?', [id])) return reject('NOT_FOUND', 'Call not found.');
     if (!callerOwns(req, id)) return reject('FORBIDDEN', 'This call belongs to a different caller session.');
     if (get<{ ended_at: string | null }>('SELECT ended_at FROM call_sessions WHERE id = ?', [id])?.ended_at) return reject('CALL_ENDED', 'This call has ended.');
+
+    // Switched off: no voice session is opened at all. The call itself has already been passed to a
+    // person, and the caller's screen shows that; connecting a microphone to nothing would not.
+    if (!assistantMayHandleCalls()) return reject('ASSISTANT_OFF', 'The assistant is not taking calls at the moment. Your call is with one of our team.');
 
     const avail = await liveAvailability();
     if (!avail.available) return reject('VOICE_UNAVAILABLE', avail.reason ?? 'Live voice is unavailable.');

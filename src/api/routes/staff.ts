@@ -11,7 +11,8 @@ import { AppError } from '../../lib/errors.ts';
 import { audit } from '../../audit/audit.ts';
 import { queryAudit } from '../../audit/audit.ts';
 import { verifyAuditChain } from '../../audit/chain.ts';
-import { issueStaffToken, listStaffUsers, requirePermission, staffActor } from '../../auth/rbac.ts';
+import { issueStaffToken, listStaffUsers, permissionsFor, requirePermission, staffActor } from '../../auth/rbac.ts';
+import { describeMode, safetyState, setSafetyMode } from '../../safety/control.ts';
 import { getCaseDetail } from '../../cases/case-service.ts';
 import { acceptHandoff, agentMessage, completeHandoff, getHandoff, listHandoffs } from '../../handoff/handoff-service.ts';
 import { approveAction, getOp, opHistory, reconcile, rejectApproval } from '../../actions/action-service.ts';
@@ -168,6 +169,24 @@ export function registerStaffRoutes(app: FastifyInstance): void {
     const q = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50), cursor: z.coerce.number().int().optional(), sessionId: z.string().max(40).optional(), event: z.string().max(60).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional() }).parse(req.query);
     audit({ actor: staffActor(p), event: 'audit.viewed', status: 'ok' });
     return queryAudit(q);
+  });
+
+  /* ---------------------------------------------------------------- the off switch */
+  app.get('/api/safety', async (req) => {
+    requirePermission(req.staff, 'policy.read');
+    const s = safetyState();
+    return { ...s, description: describeMode(s.mode), mayChange: !!req.staff && permissionsFor(req.staff.role).has('safety.control') };
+  });
+
+  /**
+   * Stop the assistant, or let it work again. A reason is required: the next person on shift needs
+   * to know why without asking, and it is what the audit row carries.
+   */
+  app.put('/api/safety', async (req) => {
+    const p = requirePermission(req.staff, 'safety.control');
+    const body = z.object({ mode: z.enum(['normal', 'actions_paused', 'assistant_off']), reason: z.string().min(3).max(300) }).strict().parse(req.body);
+    const s = setSafetyMode(body.mode, body.reason, staffActor(p));
+    return { ...s, description: describeMode(s.mode) };
   });
 
   /**
