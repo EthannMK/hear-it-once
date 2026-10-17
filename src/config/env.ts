@@ -33,6 +33,13 @@ const EnvSchema = z.object({
   BQ_API_ENDPOINT: z.string().url().optional(),
   /** Remote embedding model for knowledge search, as dataset.model. Empty or "off" uses keyword search only. */
   BQ_EMBEDDING_MODEL: z.string().default('northstar_bank.embedding_model'),
+  /**
+   * The back-office agent (Google ADK on Vertex AI Agent Engine), as
+   * projects/<project>/locations/<location>/reasoningEngines/<id>. Unset: the CRM uses built-in
+   * answers computed from the bank records instead.
+   */
+  AGENT_ENGINE_RESOURCE: z.string().regex(/^projects\/[^/]+\/locations\/[a-z0-9-]+\/reasoningEngines\/[0-9]+$/).optional().or(z.literal('').transform(() => undefined)),
+  AGENT_ENGINE_TIMEOUT_MS: z.coerce.number().int().min(2000).max(120000).default(45000),
   POLICY_PROFILE: z.enum(['prototype-mock', 'pilot-conservative']).default('prototype-mock'),
   INTENT_MODEL: z.enum(['rules', 'anthropic', 'gemini']).default('rules'),
   /** Used when INTENT_MODEL=gemini: reads the full sentence when the keyword rules are unsure. */

@@ -5,7 +5,9 @@ import { AppError } from '../../lib/errors.ts';
 import { adapters } from '../../adapters/registry.ts';
 import { customerHistory } from '../../adapters/bigquery/replica.ts';
 import { requirePermission, staffActor } from '../../auth/rbac.ts';
-import { caseIdForSession, caseWorkspace, createTicket, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
+import { audit } from '../../audit/audit.ts';
+import { ask, backOfficeEngine, insights } from '../../backoffice/backoffice.ts';
+import { caseIdForSession, caseWorkspace, latestCaseId, createTicket, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
 
 const Id = z.string().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/);
 
@@ -30,9 +32,35 @@ export function registerCrmRoutes(app: FastifyInstance): void {
     return history ? { ...profile, history } : profile;
   });
 
+  /* -------- back-office agent (read-only): insights for a case or customer, and questions */
+  const Target = z.object({ caseId: Id.optional(), customerId: Id.optional() }).refine((t) => !!t.caseId !== !!t.customerId, 'Give a caseId or a customerId.');
+  app.get('/api/backoffice/status', async (req) => {
+    requirePermission(req.staff, 'case.read');
+    return { engine: backOfficeEngine() };
+  });
+  app.get('/api/backoffice/insights', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
+    const p = requirePermission(req.staff, 'case.read');
+    const t = Target.parse(req.query);
+    return insights(t, p.userId);
+  });
+  app.post('/api/backoffice/ask', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req) => {
+    const p = requirePermission(req.staff, 'case.read');
+    const body = z.object({ caseId: Id.optional(), customerId: Id.optional(), question: z.string().min(1).max(500) }).parse(req.body ?? {});
+    const t = Target.parse({ caseId: body.caseId, customerId: body.customerId });
+    const r = await ask(t, body.question, p.userId);
+    audit({ actor: staffActor(p), event: 'backoffice.asked', status: 'ok', resourceType: t.caseId ? 'case' : 'customer', resourceId: (t.caseId ?? t.customerId)!, metadata: { mode: r.mode, ms: r.ms, tools: r.steps.map((s) => s.tool) } });
+    return r;
+  });
+
   app.get('/api/crm/cases', async (req) => {
     const p = requirePermission(req.staff, 'case.read');
     return listCrmCases(req.query, staffActor(p));
+  });
+
+  /** The case to open when the agent's screen is opened without one (waiting or live call first). */
+  app.get('/api/crm/latest', async (req) => {
+    requirePermission(req.staff, 'case.read');
+    return { caseId: latestCaseId() };
   });
 
   /** The case for a call (used when a call ends and the page flips to the agent's view). */
@@ -45,7 +73,10 @@ export function registerCrmRoutes(app: FastifyInstance): void {
 
   app.get<{ Params: { id: string } }>('/api/crm/cases/:id', async (req) => {
     const p = requirePermission(req.staff, 'case.read');
-    return caseWorkspace(Id.parse(req.params.id), staffActor(p));
+    const w = caseWorkspace(Id.parse(req.params.id), staffActor(p));
+    // BigQuery mode: the verified customer's full account history, read live from BigQuery.
+    const history = adapters().mode === 'bigquery' && w.account && w.customer ? await customerHistory(w.customer.id).catch(() => null) : null;
+    return history ? { ...w, history } : w;
   });
 
   app.patch<{ Params: { id: string } }>('/api/crm/cases/:id', async (req) => {

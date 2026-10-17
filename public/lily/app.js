@@ -232,6 +232,44 @@ async function startCall() {
   setTimeout(() => { closeSheet(); callScreen(call); }, 400);
 }
 
+/* ------------------------------------------------------------------ changing seats */
+/**
+ * A short scene between the caller's screen and the agent's, so the audience knows the point of
+ * view has changed: the call is passed to a person, Lily's brief goes with it, and from now on
+ * the screen shows what that bank agent sees. The agent's page loads underneath while it plays.
+ */
+function handoverScene(kind, v) {
+  document.querySelector('.scene')?.remove();
+  const transfer = kind === 'transfer';
+  const verified = v?.tags?.identity === 'verified';
+  const who = verified ? v?.persona?.name ?? 'The customer' : 'The caller';
+  const brief = [
+    [verified ? 'check' : 'lock', verified ? `${who}, identity verified` : 'Identity not verified yet'],
+    ['activity', v?.tags?.intentLabel ? `Issue: ${String(v.tags.intentLabel).replace(/_/g, ' ')}` : 'What the customer said, word for word'],
+    ['wave', 'What Lily checked and already did'],
+    ['headset', v?.handoff?.reference ? `Reference ${v.handoff.reference}` : v?.case?.id ? `Case ${v.case.id}` : 'The full case record'],
+  ];
+  let timer = 0;
+  const close = () => { clearTimeout(timer); ov.classList.add('out'); setTimeout(() => { ov.remove(); document.querySelector('.cx-hand.wait button')?.focus({ preventScroll: true }); }, 450); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') close(); };
+  const ov = h('div.scene', { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'scene-t' },
+    h('div.scene-in',
+      h('p.scene-k', transfer ? 'Transferring the call' : 'Call ended'),
+      h('h2#scene-t', transfer ? 'Lily is handing this call to a human agent' : 'The call is saved as a case'),
+      h('div.scene-row',
+        h('div.scene-p', h('span.ic', icon('person')), h('b', transfer ? `${who} on hold` : who), h('small', 'with Lily')),
+        h('div.scene-brief', h('span.cap', 'Lily’s brief travels with the call'), h('ul', brief.map(([ic, text], i) => h('li', { style: `--i:${i}` }, icon(ic), h('span', text))))),
+        h('div.scene-p.agent', h('span.ic', icon('headset')), h('b', 'Bank agent'), h('small', 'Northstar support'))),
+      h('p.scene-pov', transfer
+        ? [h('b', 'Now you are the bank agent. '), 'Next is what the agent sees when the call arrives: the caller, their account and Lily’s notes. Accept the handover to keep talking to the customer, without asking them to repeat anything.']
+        : [h('b', 'Now you see the bank’s side. '), 'This is the case the agent team receives: what was said, what was checked and what was done.']),
+      h('div.row', h('button.btn.primary', { type: 'button', onclick: close }, transfer ? 'Show me the agent’s screen' : 'Show me the case'))));
+  document.body.append(ov);
+  document.addEventListener('keydown', onKey);
+  ov.querySelector('button')?.focus({ preventScroll: true });
+  timer = setTimeout(close, transfer ? 6500 : 4000);
+}
+
 /* ------------------------------------------------------------------ call controller */
 class Call {
   constructor() {
@@ -384,7 +422,9 @@ class Call {
     if (this.movedToAgent) return;
     this.movedToAgent = true;
     try { sessionStorage.setItem('hio_joined_as_agent', this.id); } catch { /* private mode */ }
+    const v = this.view;
     this.destroy();
+    handoverScene('transfer', v);
     say('You are now the agent. Opening the case workspace.');
     location.hash = `#/crm/call/${encodeURIComponent(this.id)}`;
   }
@@ -399,7 +439,9 @@ class Call {
   finish() {
     if (this.ended) return;
     this.ended = true;
+    const v = this.view;
     this.destroy();
+    if (v?.case) handoverScene('ended', v);
     say('Call ended. Opening the agent’s case workspace.');
     location.hash = `#/crm/call/${encodeURIComponent(this.id)}`;
   }
