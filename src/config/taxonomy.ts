@@ -21,6 +21,29 @@ export const ESCALATION_REASONS = [
   'Security concern',
   'Assistant unsure of the request',
 ] as const;
+/**
+ * Call tags: the agent's own labels for what a call turns out to be, chosen at wrap-up. They are
+ * reporting labels, not a classification the assistant acts on, which is why they are kept apart
+ * from the category and issue type. The list is a starting set; an agent may add their own.
+ */
+export const CALL_TAGS = [
+  'First contact resolution',
+  'Repeat contact',
+  'Vulnerable customer',
+  'Complaint risk',
+  'Fraud suspected',
+  'Dispute raised',
+  'Fee reversed',
+  'Card blocked',
+  'Card replaced',
+  'Payment chased',
+  'Identity check failed',
+  'Escalated to specialist',
+  'Callback promised',
+  'Customer education',
+  'Process gap',
+] as const;
+
 export const TEAMS = ['Card services', 'Disputes', 'Fraud and security', 'Payments operations', 'Complaints'] as const;
 
 export type Priority = (typeof PRIORITIES)[number];

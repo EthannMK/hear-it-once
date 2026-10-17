@@ -25,10 +25,13 @@ import { ACTION_LABELS, HANDOFF_REASON_LABELS, ISSUE_LABELS, OP_STATUS_LABELS, f
 import { factRows, setFact, type Facts } from '../conversation/facts.ts';
 import type { CallContext } from '../conversation/orchestrator.ts';
 import { SOURCE_DISPLAY } from '../retrieval/labels.ts';
+import { KB_ARTICLES, kbReferencesFor, knowledgeBase, type KbArticle } from '../kb/kb.ts';
+import { INFO_ARTICLES } from '../kb/bank-info.ts';
 import { PROFILE_DEFS } from '../live/profiles.ts';
+import { adapters } from '../adapters/registry.ts';
 import { SCENARIOS } from '../db/scenarios.ts';
 import {
-  CATEGORIES, ESCALATION_MAP, ESCALATION_REASONS, HIGH_VALUE_MINOR, ISSUE_MAP, ISSUE_TYPES, PRIORITIES, RESOLUTION_TYPES, STATUSES, STATUS_LABELS, TEAMS,
+  CALL_TAGS, CATEGORIES, ESCALATION_MAP, ESCALATION_REASONS, HIGH_VALUE_MINOR, ISSUE_MAP, ISSUE_TYPES, PRIORITIES, RESOLUTION_TYPES, STATUSES, STATUS_LABELS, TEAMS,
   type CrmStatus, type Priority,
 } from '../config/taxonomy.ts';
 
@@ -94,10 +97,35 @@ function customerBrief(id: string) {
 
 const DEMO_CUSTOMER_IDS = () => PROFILE_DEFS.map((p) => SCENARIOS.find((s) => s.id === p.scenarioId)?.customer.id).filter(Boolean) as string[];
 
-/** Customer search by name, account reference, phone last digits or case reference. Card numbers are refused. */
-export function searchCustomers(query: string, actor: Actor) {
+/**
+ * An exact directory lookup for a full phone number or a bank account number, through the same
+ * identity adapter the call itself uses. That matters for two reasons: the phone number is held as
+ * a keyed hash and is never stored in the clear, so only a hash-for-hash comparison can find it;
+ * and in BigQuery mode this runs against the bank's `customers` table in BigQuery rather than any
+ * local copy. Identification only — finding a record is not proof of who is on the line.
+ */
+async function directoryLookup(q: string): Promise<{ id: string; matched: string } | null> {
+  const digits = q.replace(/\D/g, '');
+  if (digits.length < 6) return null;
+  const id = adapters().identity;
+  const ctx = { correlationId: newId('CRMLOOK') };
+  // A number written like a phone (a leading +, or 9 digits and more) is tried as one first; a
+  // shorter run of digits is an account reference. Both are tried when it could be either.
+  const phoneFirst = /^\+/.test(q.trim()) || digits.length >= 9;
+  const tries: [() => Promise<{ customerId: string } | null>, string][] = phoneFirst
+    ? [[() => id.identifyByAni(ctx, q), 'phone number'], [() => id.identifyByCustomerNumber(ctx, digits), 'account number']]
+    : [[() => id.identifyByCustomerNumber(ctx, digits), 'account number'], [() => id.identifyByAni(ctx, q), 'phone number']];
+  for (const [run, matched] of tries) {
+    const hit = await run().catch(() => null);
+    if (hit) return { id: hit.customerId, matched };
+  }
+  return null;
+}
+
+/** Customer search by name, phone number, bank account number or case reference. Card numbers are refused. */
+export async function searchCustomers(query: string, actor: Actor) {
   const q = query.trim().slice(0, 120);
-  if (looksLikeCardNumber(q)) throw new AppError('VALIDATION_FAILED', 'Card numbers can’t be used to search. Search by name, account reference, phone or case reference.');
+  if (looksLikeCardNumber(q)) throw new AppError('VALIDATION_FAILED', 'Card numbers can’t be used to search. Search by name, account number, phone number or case reference.');
   let rows: { id: string; score: number; matched: string }[] = [];
   if (!q) {
     // Default view: the demo customers first, then customers with recent cases.
@@ -127,6 +155,9 @@ export function searchCustomers(query: string, actor: Actor) {
       if (cs?.customer_id) add(cs.customer_id, 6, 'case reference');
     }
     rows = [...hits.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, 20).map(([id, h]) => ({ id, score: h.score, matched: [...h.matched].join(', ') }));
+    // An exact hit on the full phone number or the account number outranks every fuzzy match.
+    const exact = await directoryLookup(q);
+    if (exact) rows = [{ id: exact.id, score: 99, matched: exact.matched }, ...rows.filter((r) => r.id !== exact.id)].slice(0, 20);
   }
   const items = rows.map((r) => {
     const b = customerBrief(r.id);
@@ -431,9 +462,12 @@ export const CaseListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(40),
 });
 
-export function listCrmCases(raw: unknown, actor: Actor) {
+export async function listCrmCases(raw: unknown, actor: Actor) {
   const f = CaseListQuery.parse(raw ?? {});
   if (f.q && looksLikeCardNumber(f.q)) throw new AppError('VALIDATION_FAILED', 'Card numbers can’t be used to search.');
+  // A phone number or an account number names a customer, not a case. Resolving it here means the
+  // agent can type either one and still get that customer's cases back, not an empty result.
+  const byNumber = f.q ? await directoryLookup(f.q) : null;
   const rows = all<CaseRow>('SELECT * FROM cases ORDER BY updated_at DESC LIMIT 400');
   let items = rows.map(caseListItem);
   if (f.view === 'attention') items = items.filter((i) => i.status !== 'resolved' && (i.live || i.waitingForAgent || i.priority !== 'normal' || i.status === 'escalated' || i.status === 'awaiting_bank' || i.status === 'new'));
@@ -441,7 +475,7 @@ export function listCrmCases(raw: unknown, actor: Actor) {
   if (f.view === 'resolved') items = items.filter((i) => i.status === 'resolved');
   if (f.q) {
     const t = f.q.toLowerCase();
-    items = items.filter((i) => `${i.id} ${i.customer ?? ''} ${i.issueType} ${i.category} ${i.headline}`.toLowerCase().includes(t));
+    items = items.filter((i) => i.customerId === byNumber?.id || `${i.id} ${i.customer ?? ''} ${i.issueType} ${i.category} ${i.headline}`.toLowerCase().includes(t));
   }
   // Live and waiting calls first, then by priority, then most recent.
   const rank = (i: (typeof items)[number]) => (i.live || i.waitingForAgent ? 0 : 1) * 10 + (2 - PRIORITIES.indexOf(i.priority));
@@ -714,12 +748,13 @@ export function caseWorkspace(caseId: string, actor: Actor) {
     timeline: buildTimeline(c, s),
     transcript,
     notes: c.agent_notes ?? '',
+    callTags: callTags(c.id),
     previousCases: previous,
     taxonomy: taxonomy(),
   };
 }
 
-export const taxonomy = () => ({ categories: CATEGORIES, issueTypes: ISSUE_TYPES, priorities: PRIORITIES, statuses: STATUSES.map((s) => ({ id: s, label: STATUS_LABELS[s] })), resolutionTypes: RESOLUTION_TYPES, escalationReasons: ESCALATION_REASONS, teams: TEAMS });
+export const taxonomy = () => ({ categories: CATEGORIES, issueTypes: ISSUE_TYPES, priorities: PRIORITIES, statuses: STATUSES.map((s) => ({ id: s, label: STATUS_LABELS[s] })), resolutionTypes: RESOLUTION_TYPES, escalationReasons: ESCALATION_REASONS, teams: TEAMS, callTags: CALL_TAGS });
 
 const INTENDED: Record<string, string> = {
   unrecognised_transaction: 'Have the unrecognised charge investigated and the card protected',
@@ -1011,4 +1046,67 @@ function buildTimeline(c: CaseRow, s: SessionRow | undefined) {
   const out = [...call, ...caseEv].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
   if (!out.length) out.push({ at: c.created_at, kind: 'case', title: 'Case opened', detail: null, status: 'info' });
   return out;
+}
+
+/* ================================================================== knowledge for the agent */
+
+/**
+ * What the agent may read out, and where each line came from. Three separate lists, because the
+ * distinction matters on a call: `used` is what the assistant actually retrieved on this call and
+ * is recorded against the session; `suggested` is what the knowledge base returns for this case's
+ * issue type and the customer's own words; `library` is everything the knowledge base holds, so
+ * the screen can search it without another request per keystroke. Nothing is generated here — an
+ * article the knowledge base does not hold is simply absent.
+ */
+export async function caseKnowledge(caseId: string, actor: Actor) {
+  const c = get<CaseRow>('SELECT * FROM cases WHERE id = ?', [caseId]);
+  if (!c) throw new AppError('NOT_FOUND', 'Case not found.');
+  const s = get<SessionRow>('SELECT * FROM call_sessions WHERE id = ?', [c.session_id]);
+  const said = real(c.customer_reported) ?? real(s?.issue_statement ?? null) ?? '';
+  const art = (a: KbArticle) => ({ id: a.id, title: a.title, excerpt: a.excerpt, steps: a.steps, ruleRefs: a.ruleRefs, version: a.version, categories: a.categories, keywords: a.keywords, synthetic: true as const });
+  const found = await knowledgeBase().search({ issueType: c.issue_type ?? null, text: said, context: [] }).catch(() => []);
+  audit({ actor, event: 'crm.knowledge_viewed', status: 'ok', resourceType: 'case', resourceId: caseId, metadata: { suggested: found.length } });
+  return {
+    query: said,
+    used: kbReferencesFor(c.session_id),
+    suggested: found.map((r) => ({ ...art(r.article), reason: r.reason })),
+    library: [...KB_ARTICLES, ...INFO_ARTICLES].map(art),
+    source: knowledgeBase().name,
+    notice: 'Synthetic demo guidance derived from this prototype’s configured rules. Not real Northstar Bank policy.',
+  };
+}
+
+/* ================================================================== call tagging */
+
+export function callTags(caseId: string) {
+  return all<{ tag: string; source: string; actor_id: string | null; created_at: string }>(
+    'SELECT tag, source, actor_id, created_at FROM case_tags WHERE case_id = ? ORDER BY created_at, tag',
+    [caseId],
+  ).map((t) => ({ tag: t.tag, source: t.source, by: staffName(t.actor_id) ?? t.actor_id, at: t.created_at }));
+}
+
+const TagBody = z.object({ tag: z.string().trim().min(2).max(40) });
+
+/**
+ * Add a call tag. A tag the agent types is kept as typed (trimmed and capped); re-adding one that
+ * is already on the case is not an error, so a double click cannot fail a wrap-up.
+ */
+export function addCallTag(caseId: string, actor: StaffActor, raw: unknown) {
+  const { tag } = TagBody.parse(raw);
+  const c = get<CaseRow>('SELECT id, session_id FROM cases WHERE id = ?', [caseId]);
+  if (!c) throw new AppError('NOT_FOUND', 'Case not found.');
+  const clean = redactText(tag);
+  run('INSERT INTO case_tags (case_id, tag, source, actor_id, created_at) VALUES (?,?,?,?,?) ON CONFLICT(case_id, tag) DO NOTHING', [caseId, clean, 'agent', actor.id, nowIso()]);
+  audit({ actor, event: 'crm.call_tagged', status: 'ok', resourceType: 'case', resourceId: caseId, sessionId: c.session_id, metadata: { tag: clean } });
+  emitTimeline(c.session_id, { type: 'case.tagged', stage: 'record', title: `Agent tagged the call “${clean}”`, detail: null, status: 'info', source: 'agent workspace', ref: caseId });
+  return { caseId, tags: callTags(caseId) };
+}
+
+export function removeCallTag(caseId: string, actor: StaffActor, raw: unknown) {
+  const { tag } = TagBody.parse(raw);
+  const c = get<CaseRow>('SELECT id, session_id FROM cases WHERE id = ?', [caseId]);
+  if (!c) throw new AppError('NOT_FOUND', 'Case not found.');
+  run('DELETE FROM case_tags WHERE case_id = ? AND tag = ?', [caseId, tag]);
+  audit({ actor, event: 'crm.call_tag_removed', status: 'ok', resourceType: 'case', resourceId: caseId, sessionId: c.session_id, metadata: { tag } });
+  return { caseId, tags: callTags(caseId) };
 }
