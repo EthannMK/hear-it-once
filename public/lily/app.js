@@ -9,6 +9,7 @@ import { Mic, Player } from '/lily/audio.js';
 import { t, tList } from '/lily/i18n.js';
 import { initCrm, crmRoute } from '/lily/crm.js';
 import { initSafety, safetyRoute } from '/lily/safety.js';
+import { initDemo, demoRoute } from '/lily/demo.js';
 
 const root = document.getElementById('root');
 const srLive = document.getElementById('sr-live');
@@ -81,6 +82,9 @@ function header(active) {
       h('img.bankmk', { src: '/brand/northstar.svg', alt: '' }),
       h('span.bn', S.bank)),
     h('nav.tabs', { 'aria-label': 'Screens' },
+      // The instructions come before the numbered screens and carry no number of their own: they
+      // are what a judge reads first, not a step in the demo.
+      h('a.t0', { href: '#/demo', 'aria-current': active === 'demo' ? 'page' : null, title: 'How to run this demo, and the data to use' }, 'Demo instructions'),
       h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Bank customer'),
       h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Bank agent'),
       h('a', { href: '#/guardrails', 'aria-current': active === 'guardrails' ? 'page' : null, title: 'How the safeguards are built, as a walkthrough' }, '3 · Guardrails')),
@@ -114,6 +118,10 @@ async function route() {
   }
   // Guardrails is the screen's name in the header; #/safety is what earlier links used, and both
   // open the same screen rather than leaving one of them pointing nowhere.
+  if (hash.startsWith('#/demo')) {
+    if (S.call && !S.call.ended) S.call.destroy();
+    return demoRoute();
+  }
   if (hash.startsWith('#/guardrails') || hash.startsWith('#/safety')) {
     if (S.call && !S.call.ended) S.call.destroy();
     return safetyRoute();
@@ -123,6 +131,7 @@ async function route() {
 }
 initCrm({ render, icon, toast });
 initSafety({ render, icon, toast });
+initDemo({ render, icon, toast });
 
 /* ================================================================== SCREEN 1 · talk to Lily */
 async function home() {
