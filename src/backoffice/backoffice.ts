@@ -19,6 +19,8 @@ import { log } from '../lib/logger.ts';
 import { AppError } from '../lib/errors.ts';
 import { ACTION_LABELS, ISSUE_LABELS, formatMoney } from '../conversation/format.ts';
 import { accountOverview } from '../crm/crm.ts';
+import { claimsUnconfirmedAction, scanUntrusted, untrusted, UNTRUSTED_PREAMBLE } from '../security/untrusted.ts';
+import { audit, type Actor } from '../audit/audit.ts';
 
 export interface AgentStep { tool: string; detail: string | null }
 export interface AgentAnswer {
@@ -30,6 +32,12 @@ export interface AgentAnswer {
   steps: AgentStep[];
   ms: number;
   fallbackReason?: string;
+  /**
+   * Things the agent should know about the answer itself rather than about the customer: a record
+   * that contains an instruction-like line, or a draft that had to be replaced because it claimed
+   * something no system confirmed. Shown next to the answer, never hidden.
+   */
+  warnings?: string[];
 }
 
 /* ------------------------------------------------------------------ context */
@@ -72,15 +80,36 @@ function customerBits(customerId: string, txnIds: string[], targets: string[]) {
   return { name, card: k ? { ref: k.id, label: `${k.network} •••• ${k.last4}, ${k.status}` } : null, txns };
 }
 
+/**
+ * What the agent's question is answered against. The parts written by the bank — identifiers,
+ * amounts, dates, verification state — are stated plainly. The parts written by somebody else — a
+ * merchant name from the card network, the customer's own words — are wrapped as quoted data, so a
+ * sentence in a record cannot read as an instruction to whatever is answering. See
+ * src/security/untrusted.ts.
+ */
 function contextText(x: Ctx): string {
   const lines = [
+    UNTRUSTED_PREAMBLE,
     x.caseId ? `Case ${x.caseId}${x.issue ? ` (${x.issue})` : ''}.` : 'No case: the agent is looking up a customer.',
     x.verified && x.customerId ? `Customer: ${x.name}, customer_id ${x.customerId}, identity verified.` : 'The caller is NOT verified: do not look up or reveal any account details; answer only about rules and guidance.',
     x.card ? `Card on this call: ${x.card.ref} (${x.card.label}).` : null,
-    x.txns.length ? `Transactions in question: ${x.txns.map((t) => `${t.id} ${t.merchant ?? ''} ${t.amount} on ${t.at}`).join('; ')}.` : null,
-    x.said ? `The customer said: "${x.said.slice(0, 300)}"` : null,
+    x.txns.length
+      ? `Transactions in question: ${x.txns.map((t) => `${t.id} ${t.merchant ? untrusted('merchant_name', t.merchant, 120) : ''} ${t.amount} on ${t.at}`).join('; ')}.`
+      : null,
+    x.said ? `What the customer said, as recorded: ${untrusted('customer_words', x.said, 300)}` : null,
   ];
   return lines.filter(Boolean).join('\n');
+}
+
+/** Record text that reads like an instruction rather than a description, with where it was found. */
+function instructionLikeRecords(x: Ctx): { field: string; signals: string[] }[] {
+  const found: { field: string; signals: string[] }[] = [];
+  for (const [field, text] of [['customer_words', x.said], ...x.txns.map((t) => [`merchant_name ${t.id}`, t.merchant] as const)] as [string, string | null][]) {
+    if (!text) continue;
+    const s = scanUntrusted(text);
+    if (s.instructionLike) found.push({ field, signals: s.signals });
+  }
+  return found;
 }
 
 /* ------------------------------------------------------------------ Agent Engine (ADK) */
@@ -137,7 +166,22 @@ export function parseEngineStream(raw: string): { text: string; steps: AgentStep
   return { text: text.trim(), steps, sources: [...sources] };
 }
 
+export type EngineCall = (message: string) => Promise<{ text: string; steps: AgentStep[]; sources: string[] }>;
+let engineStub: EngineCall | null = null;
+
+/**
+ * Stand something in for Agent Engine. The guards that sit between the agent's answer and the human
+ * reading it — the check that a draft does not claim an unconfirmed action, the warning about
+ * instruction-like records — only run on the deployed path, so this is how they are tested without
+ * a project, a bill, or a model that has to be persuaded to misbehave on cue.
+ */
+export function setBackOfficeEngineForTests(fn: EngineCall | null): void {
+  engineStub = fn;
+  sessions.clear();
+}
+
 async function askEngine(resource: string, userId: string, sessionKey: string, message: string): Promise<{ text: string; steps: AgentStep[]; sources: string[] }> {
+  if (engineStub) return engineStub(message);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), env().AGENT_ENGINE_TIMEOUT_MS);
   try {
@@ -295,22 +339,57 @@ export function backOfficeEngine(): string {
   return r ? `ADK agent on Vertex AI Agent Engine (${r.split('/').pop()})` : 'Built-in answers (ADK agent not connected)';
 }
 
-async function run(x: Ctx, userId: string, message: string, builtin: () => { text: string; bullets: string[]; sources: string[]; steps: AgentStep[] }): Promise<AgentAnswer> {
+async function run(
+  x: Ctx,
+  userId: string,
+  message: string,
+  builtin: () => { text: string; bullets: string[]; sources: string[]; steps: AgentStep[] },
+  /** Action types a system confirmed on this case. A drafted message may not claim any other. */
+  confirmed?: string[],
+): Promise<AgentAnswer> {
   const t0 = Date.now();
-  const resource = env().AGENT_ENGINE_RESOURCE;
+  const resource = env().AGENT_ENGINE_RESOURCE ?? (engineStub ? 'projects/test/locations/test/reasoningEngines/stub' : undefined);
+  const warnings: string[] = [];
+  const actor: Actor = { type: 'agent', id: userId };
+
+  // A record that reads like an instruction is told to the agent and written to the log. It is not
+  // removed: the agent is the one who needs to know a merchant line is trying something, and a
+  // silently cleaned record is a record nobody investigates.
+  const suspicious = instructionLikeRecords(x);
+  for (const f of suspicious) {
+    warnings.push(`A record on this case (${f.field}) contains instruction-like text — ${f.signals.join('; ')}. It is quoted as data and nothing acted on it. Worth reporting.`);
+    audit({
+      actor,
+      event: 'safety.injection_in_record',
+      status: 'info',
+      resourceType: x.caseId ? 'case' : 'customer',
+      resourceId: x.caseId ?? x.customerId,
+      metadata: { field: f.field, signals: f.signals },
+    });
+  }
+
   let fallbackReason: string | undefined;
   if (resource) {
     try {
       const out = await askEngine(resource, userId, `${userId}:${x.caseId ?? x.customerId}`, `${contextText(x)}\n\n${message}`);
       const shaped = shapeAnswer(out.text);
-      return { mode: 'adk', engine: backOfficeEngine(), text: shaped.text, bullets: shaped.bullets, sources: [...new Set([...shaped.sources, ...out.sources])], steps: out.steps, ms: Date.now() - t0 };
+      // A draft is a message the bank may send. Whatever wrote it, it may only speak of an action as
+      // done if a system confirmed it; otherwise the records answer instead of the model.
+      const overclaims = confirmed ? claimsUnconfirmedAction(`${shaped.text} ${shaped.bullets.join(' ')}`, confirmed) : [];
+      if (overclaims.length) {
+        audit({ actor, event: 'safety.draft_overclaimed', status: 'denied', resourceType: 'case', resourceId: x.caseId, metadata: { claimed: overclaims } });
+        log.warn('a drafted reply claimed an action no system confirmed; using the records instead', { caseId: x.caseId, claimed: overclaims });
+        warnings.push(`The drafted wording claimed ${overclaims.map((a) => ACTION_LABELS[a] ?? a).join(', ')} had been done, which the records do not show. It was replaced with a draft written from the records.`);
+      } else {
+        return { mode: 'adk', engine: backOfficeEngine(), text: shaped.text, bullets: shaped.bullets, sources: [...new Set([...shaped.sources, ...out.sources])], steps: out.steps, ms: Date.now() - t0, warnings: warnings.length ? warnings : undefined };
+      }
     } catch (e) {
       fallbackReason = (e as Error).name === 'AbortError' ? 'The ADK agent took too long; built-in answer shown.' : 'The ADK agent is unavailable; built-in answer shown.';
       log.warn('back-office agent failed, using built-in answer', { error: (e as Error).message });
     }
   }
   const b = builtin();
-  return { mode: 'builtin', engine: 'Built-in answers from the bank records', ...b, ms: Date.now() - t0, fallbackReason };
+  return { mode: 'builtin', engine: 'Built-in answers from the bank records', ...b, ms: Date.now() - t0, fallbackReason, warnings: warnings.length ? warnings : undefined };
 }
 
 export async function insights(target: { caseId?: string; customerId?: string }, userId: string): Promise<AgentAnswer> {
@@ -362,7 +441,7 @@ export async function draftReply(caseId: string, userId: string): Promise<AgentA
       : f.ticketRef ? `Your reference is ${f.ticketRef} if you need to quote it.` : 'Let me pick up from here.';
     const ask = f.verified ? 'Is there anything else about this you would like me to check while we are on the call?' : 'First, I need to check a couple of details with you so I can look at the account.';
     return { text: [hello, did, next, ask].join(' '), bullets: [], sources: ['the case record', 'action_operations'], steps: [{ tool: 'customer_snapshot', detail: f.customer_id ? `customer ${f.customer_id}` : null }] };
-  });
+  }, f.confirmed.map((o) => o.action_type));
 }
 
 /**
@@ -382,7 +461,7 @@ export async function draftWrapUp(caseId: string, userId: string): Promise<Agent
       f.ticketRef ? `Reference ${f.ticketRef}.` : null,
     ].filter(Boolean);
     return { text: parts.join(' '), bullets: [], sources: ['the case record', 'action_operations'], steps: [{ tool: 'customer_snapshot', detail: `case ${caseId}` }] };
-  });
+  }, f.confirmed.map((o) => o.action_type));
   const followUp = !f.verified
     ? 'Verify the customer another way before any account change, and record how it was done.'
     : f.open.length ? `Confirm ${actionSaid(f.open[0].action_type).toLowerCase()} completed, then tell the customer.` : null;

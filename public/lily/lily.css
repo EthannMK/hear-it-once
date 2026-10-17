@@ -819,6 +819,10 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .cx-hand.wait { background: #fff4ef; border-color: rgba(241, 138, 114, 0.55); }
 .cx-hand.on { background: rgba(191, 232, 213, 0.35); border-color: var(--mint); }
 .cx-hand form input { flex: 1 1 220px; min-width: 0; border: 1px solid var(--hair-2); border-radius: 999px; padding: 8px 14px; background: var(--white); }
+/* Something the agent must read before sending a draft. It stays until the next draft replaces it. */
+.cx-warn { display: grid; gap: 6px; margin-top: 2px; }
+.cx-warn p { display: flex; gap: 8px; align-items: start; font-size: 0.82rem; line-height: 1.45; color: #7a3410; background: #fff4ef; border: 1px solid rgba(241, 138, 114, 0.55); border-radius: 12px; padding: 8px 12px; margin: 0; }
+.cx-warn svg.i { flex: none; width: 16px; height: 16px; margin-top: 2px; color: #c2410c; }
 
 .cx-grid { display: grid; grid-template-columns: minmax(270px, 0.9fr) minmax(0, 1.35fr) minmax(320px, 1fr); gap: 14px; align-items: start; min-height: 0; }
 .cx-cust, .cx-case { display: grid; gap: 12px; align-content: start; min-width: 0; }
