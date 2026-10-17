@@ -8,6 +8,7 @@ import { api, h } from '/js/lib.js';
 import { Mic, Player } from '/lily/audio.js';
 import { t, tList } from '/lily/i18n.js';
 import { initCrm, crmRoute } from '/lily/crm.js';
+import { initSafety, safetyRoute } from '/lily/safety.js';
 
 const root = document.getElementById('root');
 const srLive = document.getElementById('sr-live');
@@ -70,7 +71,8 @@ function header(active) {
     h('span.badge.lav.bank', h('img.bankmk', { src: '/brand/northstar.svg', alt: '', width: '16', height: '16' }), S.bank),
     h('nav.tabs', { 'aria-label': 'Screens' },
       h('a', { href: '#/', 'aria-current': active === 'talk' ? 'page' : null }, '1 · Bank customer'),
-      h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Bank agent')),
+      h('a', { href: callLive ? `/#/crm/call/${encodeURIComponent(S.call.id)}` : S.lastCall ? `#/crm/call/${encodeURIComponent(S.lastCall)}` : '#/crm', target: callLive ? '_blank' : null, rel: callLive ? 'noopener' : null, 'aria-current': active === 'crm' ? 'page' : null, title: 'The human agent’s case workspace' }, '2 · Bank agent'),
+      h('a', { href: '#/safety', 'aria-current': active === 'safety' ? 'page' : null, title: 'The off switch, the audit log and what the policy is built against' }, '3 · Safety')),
     h('span.grow'),
   );
 }
@@ -97,10 +99,15 @@ async function route() {
     if (S.call && !S.call.ended) S.call.destroy();
     return crmRoute(hash);
   }
+  if (hash.startsWith('#/safety')) {
+    if (S.call && !S.call.ended) S.call.destroy();
+    return safetyRoute();
+  }
   if (S.call && !S.call.ended) return; // the call screen is already on the page
   return home();
 }
 initCrm({ render, icon, toast });
+initSafety({ render, icon, toast });
 
 /* ================================================================== SCREEN 1 · talk to Lily */
 async function home() {

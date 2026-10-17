@@ -14,6 +14,7 @@ import { verifyAuditChain } from '../../audit/chain.ts';
 import { issueStaffToken, listStaffUsers, permissionsFor, requirePermission, staffActor } from '../../auth/rbac.ts';
 import { describeMode, safetyState, setSafetyMode } from '../../safety/control.ts';
 import { lastScorecard } from '../../reporting/scorecard.ts';
+import { FRAUD_PATTERNS } from '../../security/fraud-patterns.ts';
 import { getCaseDetail } from '../../cases/case-service.ts';
 import { acceptHandoff, agentMessage, completeHandoff, getHandoff, listHandoffs } from '../../handoff/handoff-service.ts';
 import { approveAction, getOp, opHistory, reconcile, rejectApproval } from '../../actions/action-service.ts';
@@ -180,6 +181,15 @@ export function registerStaffRoutes(app: FastifyInstance): void {
   app.get('/api/scorecard', async (req) => {
     requirePermission(req.staff, 'policy.read');
     return lastScorecard();
+  });
+
+  /**
+   * The fraud patterns the call policy is built against, and what enforces each. Served rather than
+   * written into the page so the safety screen cannot drift from the knowledge base the code cites.
+   */
+  app.get('/api/fraud-patterns', async (req) => {
+    requirePermission(req.staff, 'policy.read');
+    return { items: FRAUD_PATTERNS, note: 'Sources are listed in docs/FRAUD_CONTROLS.md. A pattern marked out of scope is named so it is not mistaken for a solved problem.' };
   });
 
   /* ---------------------------------------------------------------- the off switch */
