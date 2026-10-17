@@ -50,6 +50,7 @@ import { FAREWELL, LET_ME_TALK } from '../ai/parsers.ts';
 import { normaliseSpoken } from '../live/speech.ts';
 import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
 import { readUnavailable, saysCredentialUnavailable } from './unavailable.ts';
+import { assistantMayAct, assistantMayHandleCalls, safetyState, OFF_MESSAGE, PAUSED_DETAIL } from '../safety/control.ts';
 
 export type Stage =
   | 'awaiting_issue'
@@ -341,17 +342,44 @@ export async function startCall(input: StartCallInput): Promise<string> {
     }
   }
   tl(s, { type: 'call.initiated', stage: 'understand', title: 'Call answered — no menu, no queue', detail: profile ? `Caller ID matched ${sc!.customer.name}. That identifies the caller but doesn’t prove who they are.` : null, status: 'ok', source: 'phone line', ref: correlationId });
+  // The recording notice stands whoever takes the call.
   say(s, M.GREETING_NOTICE, 'system');
+  event(s, 'call_answered', { channel: input.channel ?? 'text_simulator' });
+  audit({ actor: s.actor, event: 'call.started', status: 'ok', resourceType: 'session', resourceId: id, sessionId: id, correlationId, metadata: { scenarioId: input.scenarioId ?? null, channel: input.channel } });
+  // The off switch is read before Lily introduces herself. Asking "how can I help?" and then saying
+  // she is not taking calls is worse than not asking: the caller has already started explaining.
+  if (!assistantMayHandleCalls()) {
+    await handoffForSwitch(s);
+    save(s);
+    return id;
+  }
   // On a live voice call Lily speaks her own greeting; the AI disclosure is recorded when she has
   // actually said it (see the voice bridge), not assumed here.
   if (input.channel !== 'voice_browser') {
     say(s, M.GREETING);
     tl(s, { type: 'disclosure.given', stage: 'understand', title: 'AI and recording disclosure given', detail: 'The caller was told they are speaking with an AI assistant and given the recording/privacy notice before any assistance.', status: 'ok', source: 'conversation', ref: correlationId });
   }
-  event(s, 'call_answered', { channel: input.channel ?? 'text_simulator' });
-  audit({ actor: s.actor, event: 'call.started', status: 'ok', resourceType: 'session', resourceId: id, sessionId: id, correlationId, metadata: { scenarioId: input.scenarioId ?? null, channel: input.channel } });
   save(s);
   return id;
+}
+
+/**
+ * The assistant has been switched off. The caller goes to a person with whatever is known so far,
+ * and the case says why, so nobody picking it up thinks the assistant failed at something.
+ */
+async function handoffForSwitch(s: Session): Promise<void> {
+  const state = safetyState();
+  s.ctx.flags.push('assistant_switched_off');
+  event(s, 'assistant_switched_off', { reason: state.reason });
+  tl(s, {
+    type: 'safety.switch',
+    stage: 'understand',
+    title: 'The assistant is switched off — the caller goes straight to a person',
+    detail: state.reason ?? 'A safety switch is set. The assistant takes no calls while it is.',
+    status: 'warn',
+    source: 'safety switch',
+  });
+  await handoff(s, 'assistant_unavailable', state.reason ?? 'the assistant is switched off', OFF_MESSAGE, { priority: 'normal' });
 }
 
 export async function handleInput(sessionId: string, input: CallInput): Promise<void> {
@@ -475,6 +503,12 @@ const SENSITIVE_STAGES: Stage[] = ['identifying', 'awaiting_dob', 'awaiting_otp'
 
 async function dispatch(s: Session, input: CallInput): Promise<void> {
   const c = s.ctx;
+  // Switched off part way through a call: the caller is passed to a person rather than being
+  // answered by something that is supposed to have stopped. Hanging up and asking for a person
+  // still do what they say.
+  if (!assistantMayHandleCalls() && c.stage !== 'handoff' && input.kind !== 'hangup' && input.kind !== 'interrupt' && input.kind !== 'request_human') {
+    return handoffForSwitch(s);
+  }
   switch (input.kind) {
     case 'hangup':
       event(s, 'customer_hangup');
@@ -1605,6 +1639,21 @@ async function applyResult(s: Session, r: WorkflowResult, prefixIn = ''): Promis
 
 async function propose(s: Session, r: Extract<WorkflowResult, { kind: 'propose' }>, pre: string): Promise<void> {
   const c = s.ctx;
+  // Actions are paused. The customer is not offered something that would then be refused: the
+  // work found so far goes to a person, with what the assistant would have proposed written down.
+  if (!assistantMayAct()) {
+    const wanted = r.actions.map((a) => a.type).join(', ');
+    tl(s, {
+      type: 'safety.switch',
+      stage: 'resolve',
+      title: 'Actions are paused — this goes to a person instead',
+      detail: `The assistant would have offered: ${wanted}. ${safetyState().reason ?? 'A safety switch is set.'} Nothing was changed on the account.`,
+      status: 'warn',
+      source: 'safety switch',
+    });
+    if (c.caseId) caseEvent(c.caseId, 'actions_paused', { wouldHaveProposed: r.actions.map((a) => ({ type: a.type, target: a.targetRef })) });
+    return handoff(s, 'out_of_policy', `${PAUSED_DETAIL} (${wanted})`, 'I can see what needs doing here, but I’m not able to make changes to accounts at the moment, so I’ll put you through to one of our team who can. I’ve written down everything we’ve covered so you won’t have to repeat it.');
+  }
   const snap = loadSnapshot(c.snapshotId!)!;
   const customerId = c.verification.identifiedCustomerId!;
   const actions: ProposedAction[] = [...r.actions];

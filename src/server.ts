@@ -3,6 +3,7 @@ import { env } from './config/env.ts';
 import { db } from './db/db.ts';
 import { backfillTxnDetail, isSeeded, seedAll } from './db/seed.ts';
 import { sealExistingRows } from './audit/chain.ts';
+import { seedRoles } from './auth/rbac.ts';
 import { buildApp } from './api/app.ts';
 import { log } from './lib/logger.ts';
 import { purgeExpiredTranscripts } from './reporting/retention.ts';
@@ -21,6 +22,9 @@ if (!isSeeded()) {
   // A database saved by an older build has the card-detail columns but no values in them.
   backfillTxnDetail();
 }
+// The role model is authoritative in the database, so a build that adds a permission has to put it
+// there. INSERT OR IGNORE: existing roles and users are left alone.
+seedRoles();
 // Audit rows written before the log was chained are hashed in place, so the chain covers the whole
 // log. Verification reports which rows were sealed this way rather than as they were written.
 const sealed = sealExistingRows();
