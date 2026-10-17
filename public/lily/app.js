@@ -9,13 +9,16 @@ import { Mic, Player } from '/lily/audio.js';
 import { t, tList } from '/lily/i18n.js';
 import { initCrm, crmRoute } from '/lily/crm.js';
 import { initSafety, safetyRoute } from '/lily/safety.js';
-import { initDemo, demoRoute } from '/lily/demo.js';
+import { initDemo, demoRoute, person } from '/lily/demo.js';
 
 const root = document.getElementById('root');
 const srLive = document.getElementById('sr-live');
 const say = (m) => { srLive.textContent = m; };
-const S = { cards: [], selected: null, status: null, bank: 'Northstar Bank', call: null, lastCall: null };
+const S = { cards: [], selected: null, status: null, bank: 'Northstar Bank', call: null, lastCall: null, personaId: null, railOpen: true };
 try { S.lastCall = sessionStorage.getItem('hio.lastCall'); } catch { /* storage blocked */ }
+// "Start a call as this persona" opens this tab with the account it chose. Read once: the hash
+// changes as the judge moves between screens, the query does not.
+try { S.personaId = new URLSearchParams(location.search).get('persona'); } catch { /* no query */ }
 const fmtTime = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; } };
 const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 const group4 = (d) => String(d ?? '').replace(/\D/g, '').replace(/(.{4})(?=.)/g, '$1 ');
@@ -173,6 +176,38 @@ function demoMini() {
 }
 
 /**
+ * THE PERSONA RAIL.
+ *
+ * A judge driving the demo is playing a customer, and a customer knows their own card number. When
+ * the data lived only on the instructions screen they had to keep a second tab open and switch to
+ * it every time Lily asked for something — which is not what being that customer is like, and it
+ * cost them the call while they looked away.
+ *
+ * So the account chosen on the instructions screen travels with the call and sits beside it, with
+ * everything still copyable. It collapses, because on a narrow screen the call matters more.
+ */
+function personaRail() {
+  const x = S.personaId ? S.cards.find((c) => c.id === S.personaId) : null;
+  if (!x) return null;
+  const body = h('div.pr-body', person(x, { compact: true }));
+  const toggle = h('button.pr-tog', {
+    type: 'button',
+    'aria-expanded': String(S.railOpen),
+    onclick: () => {
+      S.railOpen = !S.railOpen;
+      toggle.setAttribute('aria-expanded', String(S.railOpen));
+      rail.classList.toggle('shut', !S.railOpen);
+      toggle.replaceChildren(icon(S.railOpen ? 'x' : 'flask'), h('span', S.railOpen ? 'Hide' : 'Show the account'));
+    },
+  }, icon(S.railOpen ? 'x' : 'flask'), h('span', S.railOpen ? 'Hide' : 'Show the account'));
+  const rail = h(`aside.pr${S.railOpen ? '' : '.shut'}`, { 'aria-label': `You are calling as ${x.name}` },
+    h('div.pr-h', h('h2', icon('person'), 'You are ', h('b', x.name)), toggle),
+    h('p.pr-note', 'Lily works out who you are from the card number, so read or paste it when she asks. Everything here is copyable.'),
+    body);
+  return rail;
+}
+
+/**
  * THE HERO: one call, played out.
  *
  * Three stages — understand, act, connect — are what the product actually does, so the animation
@@ -313,7 +348,11 @@ function hero() {
 function drawHome() {
   const ready = !!S.status?.available;
   const bars = h('div.bars', { 'aria-hidden': 'true' }, [14, 26, 38, 48, 34, 44, 24, 16].map((n, i) => h('i', { style: `height:${n}px;--d:${i * 90}ms` })));
-  render('talk', h('main.judge',
+  // A judge who arrived here from "Start a call as this persona" gets their account straight away,
+  // not only once the call has started: they need the card number the moment Lily asks for it.
+  const rail = personaRail();
+  render('talk', h(`main.judge${rail ? '.with-rail' : ''}`,
+    rail,
     h('section', { 'aria-label': 'Talk to Lily' },
       h('div.hero',
         h('div.hero-t',
@@ -322,7 +361,7 @@ function drawHome() {
           h('ul.langs', { 'aria-label': 'Languages and agents' }, [['en', 'English', 'Lily'], ['my', 'Burmese', 'Hnin'], ['fil', 'Tagalog', 'Maya']].map(([k, n, a]) => h('li', h(`i.flag.${k}`), h('span', h('b', n), h('small', a))))),
           h('p.langnote', 'Lily speaks English. Speak Burmese or Tagalog and she will offer Hnin or Maya.'),
           h('button.connect', { type: 'button', onclick: () => startCall() },
-            h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', 'Voice or typing, your choice')), icon('arrow')),
+            h('span.ic', icon('phone')), h('span', h('b', 'Connect with Lily'), h('small', rail ? `As ${S.cards.find((c) => c.id === S.personaId)?.name ?? 'your chosen account'} — voice or typing` : 'Voice or typing, your choice')), icon('arrow')),
           h('div.subs',
             h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
             h('p', icon('info'), h('span', 'You are speaking with an AI. Your browser will ask for the microphone and no audio is stored. No microphone? Start anyway and type.')))),
@@ -861,8 +900,9 @@ function callScreen(c) {
   }, 250);
   c.ui = { refresh, transcript: drawTranscript, activity: drawActivity, stop: () => { cancelAnimationFrame(raf); clearInterval(tick); } };
 
-  render('talk', h('main.judge.in-call',
-    // Demo data panel removed for now (demoMini() is kept to bring it back).
+  const rail = personaRail();
+  render('talk', h(`main.judge.in-call${rail ? '.with-rail' : ''}`,
+    rail,
     h('section.call-main', { 'aria-label': 'Live call with Lily' }, head, stage, bannerEl, extras, handEl, consentEl,
       h('section.card.tx', h('div.tx-h', h('h2', 'Live transcript'), h('span.badge.lav', c.voiceReady ? 'Live captions' : 'Typed')), list, secureEl, form),
       h('div.controls', { role: 'toolbar', 'aria-label': 'Call controls' }, muteBtn, ccBtn, btcToggle, h('span.sp'), humanBtn, endBtn)),

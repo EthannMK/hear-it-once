@@ -1476,3 +1476,46 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
   .dm-cards { grid-template-columns: minmax(0, 1fr); }
   .dm-f { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
+
+/* ==========================================================================
+   The persona rail
+   The account a judge chose on the instructions screen, pinned beside the call
+   so they can read their own card number back without leaving the call. Same
+   card as the instructions screen, narrowed; see person() in demo.js.
+   ========================================================================== */
+.judge.with-rail { grid-template-columns: 320px minmax(0, 1fr); max-width: 1500px; }
+.judge.in-call.with-rail { grid-template-columns: 300px minmax(0, 1fr) 340px; max-width: 1680px; }
+.pr { position: sticky; top: 78px; display: grid; gap: 10px; align-content: start; padding: 16px 16px 18px; background: var(--white); border: 1px solid var(--hair); border-radius: 20px; box-shadow: var(--shadow-1); max-height: calc(100vh - 100px); overflow: auto; min-width: 0; }
+.pr-h { display: flex; align-items: center; gap: 10px; }
+.pr-h h2 { flex: 1 1 auto; min-width: 0; margin: 0; font: 500 1rem var(--sans); color: var(--text-2); display: flex; align-items: baseline; gap: 6px; }
+.pr-h h2 b { color: var(--aub); font-weight: 600; }
+.pr-h h2 svg.i { color: var(--violet); align-self: center; flex: none; }
+.pr-tog { display: flex; align-items: center; gap: 5px; flex: none; border: 1px solid var(--hair-2); background: var(--white); border-radius: 999px; padding: 5px 11px; font: 600 0.74rem var(--label); color: var(--text-2); cursor: pointer; }
+.pr-tog:hover { border-color: var(--violet); color: var(--violet-d); }
+.pr-tog svg.i { width: 13px; height: 13px; }
+.pr-note { margin: 0; font-size: 0.79rem; line-height: 1.5; color: var(--text-2); }
+.pr.shut { max-height: none; overflow: visible; }
+.pr.shut .pr-note, .pr.shut .pr-body { display: none; }
+
+/* The card itself, narrowed: the launch button is gone and the rows stack. */
+.dm-card.compact { padding: 0; border: 0; box-shadow: none; background: none; gap: 9px; }
+.dm-card.compact .dm-top h3 { font-size: 1rem; }
+.dm-card.compact .dm-fields { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.dm-card.compact .dm-f { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; }
+.dm-card.compact .dm-f dt { grid-column: 1 / -1; font-size: 0.68rem; }
+.dm-card.compact .dm-v { font-size: 0.85rem; overflow-wrap: anywhere; }
+.dm-card.compact .dm-sit, .dm-card.compact .dm-try { font-size: 0.8rem; }
+.dm-card.compact .dm-txt { font-size: 0.74rem; }
+.dm-card.compact .dm-extra { font-size: 0.76rem; }
+
+@media (max-width: 1400px) {
+  /* Three columns stop fitting: the activity panel drops under the call and the rail stays. */
+  .judge.in-call.with-rail { grid-template-columns: 290px minmax(0, 1fr); }
+  .judge.in-call.with-rail .btc { grid-column: 2; }
+}
+@media (max-width: 1040px) {
+  /* The call is what matters on a narrow screen, so the rail goes above it and stops sticking. */
+  .judge.with-rail, .judge.in-call.with-rail { grid-template-columns: minmax(0, 1fr); }
+  .pr { position: static; max-height: none; }
+  .judge.in-call.with-rail .btc { grid-column: 1; }
+}
