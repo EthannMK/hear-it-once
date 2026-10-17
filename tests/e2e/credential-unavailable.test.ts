@@ -48,18 +48,38 @@ describe('the words themselves', () => {
 });
 
 describe('scenario 1 — the card and the phone are both gone', () => {
-  it('goes to a person instead of asking for a number the caller cannot read', async () => {
+  it('asks for the card number once, saying how to move on if it cannot be reached', async () => {
     const c = await call();
     await c.say("I'm Ethan. I lost my phone and card.");
-    const h = handoff(c);
-    expect(h?.reason).toBe('credential_unavailable');
-    expect(askedForCard(c)).toBe(0);
+    // The number may still be in the app or on a statement, so it is worth one ask.
+    expect(askedForCard(c)).toBe(1);
+    expect(said(c, 1)).toMatch(/can'?t get to it|just say so/i);
+    expect(handoff(c)).toBeUndefined();
+  });
+
+  it('goes to a person as soon as the caller says they cannot reach it, and asks no more', async () => {
+    const c = await call();
+    await c.say("I'm Ethan. I lost my phone and card.");
+    await c.say("I don't have it");
+    expect(handoff(c)?.reason).toBe('credential_unavailable');
+    expect(askedForCard(c)).toBe(1);
     expect(said(c)).toMatch(/colleague|passing you/i);
+  });
+
+  it('still blocks the card on the call when the caller does have the number', async () => {
+    const s = SCENARIOS.find((x) => x.id === 'S02')!;
+    const c = await call();
+    await c.say('I lost my phone and my card');
+    await c.say(s.customer.cardNumber ?? '4999 0200 0074 1014');
+    await c.say('yes');
+    expect(get<{ verification_status: string }>('SELECT verification_status FROM call_sessions WHERE id = ?', [c.sessionId])?.verification_status).toBe('verified');
+    expect(handoff(c)).toBeUndefined();
   });
 
   it('never claims the card was blocked, and says so in the brief', async () => {
     const c = await call();
     await c.say('I lost my phone and my card was stolen');
+    await c.say('I lost it, I don’t know the number');
     expect(said(c)).not.toMatch(/\b(card is|card has been|I have) blocked\b/i);
     expect(ops(c).filter((o) => o.action_type === 'block_card' && o.status === 'succeeded')).toHaveLength(0);
     const brief = JSON.parse(handoff(c)!.brief_json);
@@ -69,6 +89,7 @@ describe('scenario 1 — the card and the phone are both gone', () => {
   it('carries the reason for the call into the handover so it is not asked again', async () => {
     const c = await call();
     await c.say('I lost my phone and card');
+    await c.say("I can't find it");
     const brief = JSON.parse(handoff(c)!.brief_json);
     expect(brief.issue.customerStatement ?? brief.issue.label).toMatch(/lost|card/i);
     expect(brief.customer.verification).not.toMatch(/^verified$/i);
