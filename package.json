@@ -15,6 +15,7 @@
     "db:reset": "tsx --disable-warning=ExperimentalWarning src/db/cli.ts reset",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "scorecard": "tsx scripts/scorecard.ts",
     "test:watch": "vitest",
     "audit:deps": "npm audit --omit=dev",
     "check:secrets": "tsx scripts/check-secrets.ts",

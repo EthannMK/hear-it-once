@@ -13,6 +13,7 @@ import { queryAudit } from '../../audit/audit.ts';
 import { verifyAuditChain } from '../../audit/chain.ts';
 import { issueStaffToken, listStaffUsers, permissionsFor, requirePermission, staffActor } from '../../auth/rbac.ts';
 import { describeMode, safetyState, setSafetyMode } from '../../safety/control.ts';
+import { lastScorecard } from '../../reporting/scorecard.ts';
 import { getCaseDetail } from '../../cases/case-service.ts';
 import { acceptHandoff, agentMessage, completeHandoff, getHandoff, listHandoffs } from '../../handoff/handoff-service.ts';
 import { approveAction, getOp, opHistory, reconcile, rejectApproval } from '../../actions/action-service.ts';
@@ -169,6 +170,16 @@ export function registerStaffRoutes(app: FastifyInstance): void {
     const q = z.object({ limit: z.coerce.number().int().min(1).max(200).default(50), cursor: z.coerce.number().int().optional(), sessionId: z.string().max(40).optional(), event: z.string().max(60).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional() }).parse(req.query);
     audit({ actor: staffActor(p), event: 'audit.viewed', status: 'ok' });
     return queryAudit(q);
+  });
+
+  /**
+   * The last accuracy run that was recorded, read from the file the scorecard script writes. It is
+   * read on each request rather than cached at boot, and it says plainly when there is no run to
+   * show instead of returning zeroes that would read as a result.
+   */
+  app.get('/api/scorecard', async (req) => {
+    requirePermission(req.staff, 'policy.read');
+    return lastScorecard();
   });
 
   /* ---------------------------------------------------------------- the off switch */

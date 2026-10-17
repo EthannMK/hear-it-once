@@ -928,6 +928,7 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
     c.stage = 'clarifying_issue';
     c.pending = { kind: 'yes_no', purpose: 'offer_agent', agentReason: 'ai_uncertain' };
     event(s, 'issue_unclear_offer_agent', { confidence: cls.confidence });
+    event(s, 'agent_offered', { reason: 'ai_uncertain' });
     tl(s, { type: 'clarification.requested', stage: 'understand', title: 'Still unclear, offered a person', detail: 'Unclear input does not transfer the call by itself. The customer chooses.', status: 'pending', source: 'conversation' });
     c.offerCount = (c.offerCount ?? 0) + 1;
     say(s, [
@@ -1491,6 +1492,7 @@ async function unclear(s: Session, reprompt: string): Promise<void> {
     const resumePrompt = c.lastPrompt;
     c.unclearCount = 0;
     c.pending = { kind: 'yes_no', purpose: 'offer_agent', agentReason: 'communication_breakdown', resume, resumePrompt };
+    event(s, 'agent_offered', { reason: 'communication_breakdown' });
     return say(s, "I'm sorry, I'm not getting this right. Would you like me to connect you with a person? Say yes for a person, or no and we will carry on.");
   }
   say(s, reprompt);
@@ -1626,6 +1628,10 @@ async function applyResult(s: Session, r: WorkflowResult, prefixIn = ''): Promis
       regenerateSummary(caseId);
       if (r.offerAgent) {
         c.pending = { kind: 'yes_no', purpose: 'offer_agent', agentReason: r.offerAgent.reason };
+        // Recorded, not just held in the live context: if the caller hangs up instead of answering,
+        // the records should still show that a person was offered rather than withheld.
+        event(s, 'agent_offered', { reason: r.offerAgent.reason });
+        tl(s, { type: 'handoff.offered', stage: 'resolve', title: 'A person was offered', detail: `This could not be completed automatically, so the customer was asked whether they would like an agent. ${HANDOFF_REASON_LABELS[r.offerAgent.reason] ?? r.offerAgent.reason}.`, status: 'pending', source: 'conversation' });
         say(s, `${pre}${r.message} ${r.offerAgent.question}`.trim());
         return;
       }

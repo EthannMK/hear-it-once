@@ -47,9 +47,11 @@ export const SCENARIOS: ScenarioDef[] = [
   { id: 'S08', title: 'Customer asks for a human immediately', issue: '—', customer: c(8, 'Lena Fischer', '1988-03-14'),
     script: ['I want to speak to a real person'],
     expected: 'Handoff starts without resistance; brief preserves the context; status shows queued until a demo agent accepts.' },
+  // Three vague lines, because the assistant asks twice in different words before it gives up. Two
+  // would stop the walkthrough one turn before the interesting part.
   { id: 'S09', title: 'AI uncertainty → human', issue: '—', customer: c(9, 'Omar Haddad', '1995-12-01'),
-    script: ['Something is off with my stuff', "It's the thing from before, you know"],
-    expected: 'Intent stays below the confidence threshold after one clarification; assistant hands off with reason "ai_uncertain".' },
+    script: ['Something is off with my stuff', "It's the thing from before, you know", 'You know what I mean, the usual thing'],
+    expected: 'Intent stays below the confidence threshold after two clarifications; the assistant offers a person rather than transferring unasked, and keeps listening if the caller would rather carry on. Reason "ai_uncertain".' },
   { id: 'S10', title: 'Identity verification fails', issue: 'unrecognised_transaction', customer: c(10, 'Chloe Martin', '1991-07-07'),
     script: ["There's a charge I don't recognise", '<wrong date of birth: 1990-01-01>', '1990-01-02', '1990-01-03'],
     expected: 'After 3 failed attempts verification is locked; no protected data is disclosed and no action possible; handoff offered.' },
