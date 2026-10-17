@@ -431,6 +431,73 @@ describe('interruption (barge-in)', () => {
   });
 });
 
+describe('Lily stops taking the call once it is going to a person', () => {
+  /** Take a live call to the point where the customer has agreed to be transferred. */
+  async function upToTransfer() {
+    const ctx = await connect('S01');
+    ctx.client.send({ type: 'text', text: 'I want to speak to a person' });
+    await sleep(250);
+    ctx.client.send({ type: 'text', text: 'yes' });
+    await sleep(350);
+    return ctx;
+  }
+
+  it('finishes the sentence she is saying before stopping, rather than being cut off', async () => {
+    const { session } = await upToTransfer();
+    // The transfer has been confirmed but she has not finished speaking, so the session is open.
+    expect(session.closed).toBe(false);
+    session.turnComplete();
+    await sleep(80);
+    expect(session.closed).toBe(true);
+  });
+
+  it('hears nothing the customer says after that', async () => {
+    const { client, session } = await upToTransfer();
+    session.turnComplete();
+    await sleep(80);
+    const heardSoFar = session.audioIn.length;
+    client.send({ type: 'audio', data: 'AAAA' });
+    client.send({ type: 'audio', data: 'BBBB' });
+    await sleep(120);
+    expect(session.audioIn).toHaveLength(heardSoFar);
+  });
+
+  it('stops even if the model never finishes its turn', async () => {
+    const { session } = await upToTransfer();
+    expect(session.closed).toBe(false);
+    await sleep(6200); // the fallback timer
+    expect(session.closed).toBe(true);
+  }, 12_000);
+
+  it('does not reconnect itself afterwards', async () => {
+    const { session, sessionId } = await upToTransfer();
+    session.turnComplete();
+    await sleep(80);
+    const was = ScriptedProvider.last;
+    session.drop('provider went away');
+    await sleep(400);
+    // A reconnect would have opened a new provider session; nothing should have.
+    expect(ScriptedProvider.last).toBe(was);
+    expect(timelineTypes(sessionId)).not.toContain('voice.reconnecting');
+  });
+
+  it('says so on the record, so the agent can see where she stopped', async () => {
+    const { client, session, sessionId } = await upToTransfer();
+    session.turnComplete();
+    await sleep(120);
+    expect(timelineTypes(sessionId)).toContain('voice.stepped_back');
+    expect(client.msgs.some((m) => m.type === 'voice' && /stepped back/i.test(m.message ?? ''))).toBe(true);
+  });
+
+  it('the call itself stays open: the transfer is not a dropped call', async () => {
+    const { session, sessionId } = await upToTransfer();
+    session.turnComplete();
+    await sleep(120);
+    expect(get<any>('SELECT ended_at FROM call_sessions WHERE id = ?', [sessionId]).ended_at).toBeNull();
+    expect(get<any>('SELECT status FROM handoffs WHERE session_id = ?', [sessionId])?.status).toBe('queued');
+  });
+});
+
 describe('mute and typed fallback during a live call', () => {
   it('stops sending microphone audio to the provider while muted', async () => {
     const { client, session, sessionId } = await connect('S01');
