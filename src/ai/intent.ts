@@ -47,7 +47,7 @@ export interface IntentModel {
 
 const KEYWORDS: Record<IssueType, RegExp[]> = {
   lost_stolen_card: [/\blost\b/, /\bstolen\b/, /\bsto(le|len)\b/, /\bmissing (credit )?card\b/, /\bcan'?t find my (credit )?card\b/, /\bmisplaced\b/, /\b(wallet|purse|bag) (was )?(stolen|taken|lost)\b/, /\bpickpocket/, /\brobbed\b/],
-  unrecognised_transaction: [/\b(don'?t|do not|didn'?t|did not) recogni[sz]e\b/, /\bunrecogni[sz]ed\b/, /\b(didn'?t|did not|never) (make|made|authori[sz]e|buy|purchase)\b/, /\bnot mine\b/, /\b(wasn'?t|was not|it'?s not|that'?s not|not) me\b/, /\bi (didn'?t|did not) do (this|that|it)\b/, /\bfraud(ulent)?\b/, /\bunauthori[sz]ed\b/, /\bunknown (charge|transaction)\b/, /\bsuspicious\b/, /\bnever (heard of|shopped)\b/, /\bi never\b/, /\b(unfamiliar|unknown|strange|odd|weird|mysterious|unexpected)\b.*\b(charge|transaction|purchase|payment)/, /\b(charge|transaction|purchase|payment)s?\b.*\b(look|looks|seem|seems|is|was)\b.*\b(unfamiliar|unknown|strange|odd|weird|wrong|off|suspicious|not (right|mine))/, /\b(don'?t|do not|can'?t|cannot) (remember|recall|place|identify)\b.*\b(charge|transaction|purchase|payment)/, /\bwho (is|was) (this|that)\b.*\b(charge|payment|merchant)/],
+  unrecognised_transaction: [/\b(don'?t|do not|didn'?t|did not) recogni[sz]e\b/, /\bunrecogni[sz]ed\b/, /\b(didn'?t|did not|never) (make|made|authori[sz]e|buy|purchase)\b/, /\bnot mine\b/, /\b(wasn'?t|was not|it'?s not|that'?s not|not) me\b/, /\bi (didn'?t|did not) do (this|that|it)\b/, /\bfraud(ulent)?\b/, /\bunauthori[sz]ed\b/, /\bunknown (charge|transaction)\b/, /\bsuspicious\b/, /\bnever (heard of|shopped)\b/, /\bi never\b/, /\b(unfamiliar|unknown|strange|odd|weird|mysterious|unexpected)\b.*\b(charge|transaction|purchase|payment)/, /\b(charge|transaction|purchase|payment)s?\b.*\b(look|looks|seem|seems|is|was)\b.*\b(unfamiliar|unknown|strange|odd|weird|wrong|off|suspicious|not (right|mine))/, /\b(don'?t|do not|can'?t|cannot) (remember|recall|place|identify)\b.*\b(charge|transaction|purchase|payment)/, /\bwho (is|was) (this|that)\b.*\b(charge|payment|merchant)/, /\b(someone|somebody|some ?one|a stranger|another person) (else )?(used|is using|has used|took|stole|got|accessed|made) (my|the) (card|account|details)\b/, /\b(my )?card (was|got|has been|been) (used|cloned|copied|skimmed)\b/, /\bwithout (my )?(permission|consent|authorisation|authorization|knowing|my knowledge)\b/],
   wrong_or_duplicate_charge: [/\btwice\b/, /\bdouble[- ]?(charged|charge|billed)\b/, /\bduplicate\b/, /\bcharged (two|2) times\b/, /\bwrong amount\b/, /\bover ?charged\b/, /\bcharged (me )?more\b/, /\bincorrect (amount|charge)\b/, /\bcharged (me )?the wrong\b/],
   payment_not_showing: [/\bpayment\b.*\b(not|isn'?t|hasn'?t|didn'?t|missing|showing|posted|reflect)/, /\b(made|sent|paid) (a |my )?payment\b/, /\bpaid\b.*\b(not|isn'?t|hasn'?t|missing|showing)\b/, /\bpayment (is )?missing\b/, /\bmy payment\b/, /\bpaid (my|the) (bill|balance|card)\b/],
   card_declined: [/\b(card|payment|transaction)\b.*\b(declin\w*|reject\w*|refus\w*|not (going|went) through|(keeps?|keep) failing|(won'?t|will not|wouldn'?t|doesn'?t|not) work)\b/, /\bdeclin(e|ed|es|ing)\b/, /\bcard\b.*\b(keeps?|keep) (getting )?(declin|fail|reject)/, /\b(can'?t|cannot|couldn'?t|unable to) (pay|use my card|use the card|make a purchase)\b/],
@@ -65,8 +65,15 @@ const UNSUPPORTED: [RegExp, string][] = [
   [/\b(reward|points|cashback)\b/, 'rewards'],
 ];
 
+/**
+ * Speech recognition returns curly apostrophes as often as straight ones, and "don’t recognise"
+ * must read the same as "don't recognise". Matching is done on this form; what the customer said is
+ * stored unchanged.
+ */
+export const plainQuotes = (text: string) => text.replace(/[\u2018\u2019\u02bc\u2032]/g, "'").replace(/[\u201c\u201d]/g, '"');
+
 export function extractSlots(text: string): IssueSlots {
-  const lower = text.toLowerCase();
+  const lower = plainQuotes(text).toLowerCase();
   let feeType: string | null = null;
   if (/\blate\b/.test(lower) && /\bfee\b/.test(lower)) feeType = 'late_payment';
   else if (/\bannual fee\b/.test(lower)) feeType = 'annual_fee';
@@ -105,7 +112,7 @@ function extractMerchantHint(text: string): string | null {
 export class RulesIntentModel implements IntentModel {
   name = 'rules-v1';
   async classify(text: string): Promise<Classification> {
-    const lower = text.toLowerCase();
+    const lower = plainQuotes(text).toLowerCase();
     const scores = Object.entries(KEYWORDS).map(([type, res]) => ({ type: type as IssueType, score: res.filter((r) => r.test(lower)).length }));
     // Disambiguation: "late fee ... paid" is a fee query; "charged twice" outranks generic fraud words.
     const fee = scores.find((s) => s.type === 'fee_query')!;
@@ -145,7 +152,7 @@ const SCAM_COACHING =
 
 /** Deterministic safety signals. Never delegated to a model. */
 export function detectSignals(text: string): SafetySignals {
-  const t = text.toLowerCase();
+  const t = plainQuotes(text).toLowerCase();
   return {
     humanRequested: /\b(human|real person|a person|live person|someone real|representative|rep\b|operator|an agent|the agent|agent please|speak to (someone|somebody)|talk to (someone|somebody)|customer service person)\b/.test(t),
     thirdPartyCaller: /\b(on behalf of|for my (wife|husband|mother|mom|mum|father|dad|son|daughter|friend|partner|boss|client|grandmother|grandfather))\b|\bmy (wife|husband|mother|mom|mum|father|dad|son|daughter|friend|partner|boss|client|grandmother|grandfather)'?s (card|account)\b/.test(t),

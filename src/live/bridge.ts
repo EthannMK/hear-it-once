@@ -22,6 +22,12 @@ import { addTurn } from '../handoff/handoff-service.ts';
 import { buildCallView } from '../api/views.ts';
 import type { LiveConnectOptions, LiveProvider, LiveSession, LiveToolCall } from './provider.ts';
 import { LILY_TOOLS, TOOL, lilySystemInstruction } from './lily.ts';
+
+/**
+ * Tools whose work the back end records itself. While one of these is in flight the transcript
+ * belongs to the back end, so Lily's spoken version of the same words is not stored again.
+ */
+const OWNS_TRANSCRIPT = new Set<string>([TOOL.banking, TOOL.card, TOOL.human]);
 import { LANGUAGES, isLang, type LangCode } from './languages.ts';
 import { runTool } from './tools.ts';
 import { normaliseSpoken } from './speech.ts';
@@ -66,6 +72,8 @@ export class LiveBridge {
   private turnCounter = 0;
   // Per model turn
   private modelText = '';
+  /** Highest transcript sequence when a transcript-owning tool was requested. */
+  private seqBeforeTool = 0;
   private suppressModelText = false;
   private modelSpoke = false;
   /** True from a tool response until Lily has spoken the result; her paraphrase is not stored twice. */
@@ -327,7 +335,12 @@ export class LiveBridge {
   /** Persist what Lily said ONLY when she spoke freely (no tool result owns this turn). */
   private flushModelTurn(interrupted: boolean): void {
     const text = this.modelText.trim();
-    if (text && !this.suppressModelText) {
+    // While a tool that writes the transcript is running, and once it has written, the back end's
+    // words are the record: anything she says meanwhile is the same thing in her own phrasing.
+    // If the tool finished and wrote nothing (it failed), what she says is the only record, so it
+    // is kept rather than leaving a silent gap.
+    const toolOwnsTurn = this.suppressModelText && (this.pendingTools > 0 || this.maxSeq() > this.seqBeforeTool);
+    if (text && !toolOwnsTurn) {
       addTurn(this.sessionId, 'assistant', interrupted ? `${text} …` : text, { kind: interrupted ? 'voice_interrupted' : 'voice' });
       this.syncTurns();
       if (this.awaitingGreeting && !interrupted) {
@@ -337,8 +350,9 @@ export class LiveBridge {
     }
     this.modelText = '';
     this.modelSpoke = false;
-    // Keep suppressing until the spoken result of a tool call has been heard (or she was interrupted).
-    if (interrupted || !this.toolSpeechPending || this.toolSpeechStarted) {
+    // Keep suppressing until the spoken result of a tool call has been heard. An interruption clears
+    // it too, unless a tool is still running: its result would otherwise be stored twice.
+    if ((interrupted && this.pendingTools === 0) || !this.toolSpeechPending || this.toolSpeechStarted) {
       this.suppressModelText = false;
       this.toolSpeechPending = false;
       this.toolSpeechStarted = false;
@@ -346,6 +360,17 @@ export class LiveBridge {
   }
 
   private onToolCalls(calls: LiveToolCall[]): void {
+    // From the moment one of these tools is requested, the back end's own words are the record for
+    // this turn. Lily says the same thing aloud in her own words, so storing hers as well would put
+    // every line in the transcript twice. The flags are set here, not after the tool returns,
+    // because her turn can complete while the tool is still running.
+    if (calls.some((call) => OWNS_TRANSCRIPT.has(call.name))) {
+      this.suppressModelText = true;
+      this.toolSpeechPending = true;
+      this.toolSpeechStarted = false;
+      this.modelText = '';
+      this.seqBeforeTool = this.maxSeq();
+    }
     // Serialise: tool calls are handled strictly in order, and each one is fully validated server-side.
     this.pendingTools += calls.length;
     for (const call of calls) this.toolQueue = this.toolQueue.then(() => this.runOne(call)).finally(() => { this.pendingTools--; });
@@ -366,11 +391,15 @@ export class LiveBridge {
         this.userConsumed = true;
       },
     });
-    // The orchestrator owns the transcript for this turn; Lily's paraphrase must not be stored twice.
-    this.suppressModelText = true;
-    this.toolSpeechPending = true;
-    this.toolSpeechStarted = false;
-    this.modelText = '';
+    // Still suppressed (set when the call arrived); reset the flags for the spoken result itself.
+    // Tools that write nothing to the transcript — a guidance search, an account status read — leave
+    // her own words as the only record of the answer, so those are not suppressed.
+    if (OWNS_TRANSCRIPT.has(call.name)) {
+      this.suppressModelText = true;
+      this.toolSpeechPending = true;
+      this.toolSpeechStarted = false;
+      this.modelText = '';
+    }
     this.send({ type: 'partial', speaker: 'customer', text: '' });
     this.syncTurns();
     this.pushView();

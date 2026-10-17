@@ -49,6 +49,7 @@ import { sideTalk } from './sidetalk.ts';
 import { FAREWELL, LET_ME_TALK } from '../ai/parsers.ts';
 import { normaliseSpoken } from '../live/speech.ts';
 import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
+import { readUnavailable, saysCredentialUnavailable } from './unavailable.ts';
 
 export type Stage =
   | 'awaiting_issue'
@@ -116,6 +117,12 @@ export interface CallContext {
   agentLang?: string;
   /** How many times in a row the card number could not be read; picks gentler, more specific help each time. */
   cardUnparsed?: number;
+  /** The caller has said they cannot supply a credential: it is not asked for a third time. */
+  cannotSupply?: { card?: boolean; phone?: boolean; otp?: boolean };
+  /** The second identity route (date of birth and a passcode) has been offered once. */
+  altOffered?: boolean;
+  /** Answers in a row that were not the credential asked for, so the same thing is not asked again. */
+  unparsed?: { step: string; n: number } | null;
   /** basic = normal identity check passed. strong = also passed the second-level check in this call. */
   assurance?: Assurance;
   /** A second-level check is being asked for; `then` is what happens once it passes. */
@@ -526,6 +533,17 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
   if (!sensitive) {
     noteEarlyCardNumber(s, text);
     factsFromCustomerText(c.facts, extractSlots(text), { correction: isCorrection(text) });
+    // Losing the phone is remembered from the moment it is mentioned: a passcode cannot be sent to
+    // a phone the caller no longer has, so that route is never offered later in the call.
+    const lost = readUnavailable(text);
+    if (lost.lostPhone && !c.flags.includes('lost_phone')) {
+      c.flags.push('lost_phone');
+      c.cannotSupply = { ...c.cannotSupply, phone: true };
+      setFact(c.facts, 'contact_reachable', 'Registered phone is lost or unreachable — no passcode can be sent to it', 'provided', 'customer');
+      event(s, 'lost_phone_noted');
+      tl(s, { type: 'verification.phone_unavailable', stage: 'verify', title: 'Caller has lost their phone — passcode route ruled out', detail: 'A one-time passcode goes to the registered phone. The caller no longer has it, so that check cannot be used and is not offered.', status: 'warn', source: 'identity verification' });
+    }
+    if (lost.lostCard && !c.flags.includes('lost_card')) c.flags.push('lost_card');
   }
 
   if ((c.stage === 'awaiting_issue' || c.stage === 'clarifying_issue') && !c.issue) {
@@ -764,7 +782,42 @@ function tryBankInfo(s: Session, text: string, opts: { allowNotFound: boolean })
 function tryGeneralFirst(s: Session, text: string): boolean {
   // An amount or a specific figure ("a payment of 98765 dollars to Zorbo Mart") is about one transaction, not a general topic.
   const personal = /\b(my|mine|i was|i've been|i have been|i got|i lost|i did not|i didn't|i don't recognise|i do not recognise)\b/i.test(text) || /\$|\d{2,}/.test(text) || /\b(paid|payment|purchase|charged?|transaction)\b/i.test(text);
-  return !personal && QUESTION_START.test(text.trim()) && tryBankInfo(s, text, { allowNotFound: false });
+  if (!personal && QUESTION_START.test(text.trim()) && tryBankInfo(s, text, { allowNotFound: false })) return true;
+  // "How do I block my card?" is a question about how the bank works, not a report that something
+  // happened. It says "my card", so the rule above holds back; this one lets it through.
+  return isGeneralHowTo(text) && tryBankInfo(s, text, { allowNotFound: false });
+}
+
+/** Someone saying what has happened to them. These words start a case; nothing here is answered as general information. */
+const REPORTS_AN_EVENT = [
+  /\bi (?:have |'ve )?(?:just )?(?:lost|misplaced|dropped)\b/i,
+  /\bi (?:can'?t|cannot|could ?n'?t) find\b/i,
+  /\bmy [\w\s]{0,20}?(?:is|was|has been|have been|got|'s) (?:lost|stolen|missing|gone|taken|blocked|declined|frozen|cloned)\b/i,
+  /\b(?:someone|somebody|some ?one) (?:used|took|stole|has|had|is using|charged)\b/i,
+  /\bi (?:don'?t|do not|did ?n'?t|didn't) (?:recognise|recognize|make|authorise|authorize)\b/i,
+  /\bi (?:was|got|have been|'ve been) (?:charged|billed|declined|double ?charged)\b/i,
+  /\b(?:was|were) (?:stolen|taken)\b/i,
+  /\bstolen\b/i,
+  /\bunauthorised|unauthorized\b/i,
+];
+/** Asking for this caller's own records, which needs the security check first. */
+const ASKS_OWN_RECORDS = /\b(my|mine)\b[\w\s]{0,24}\b(last|recent|latest|balance|statement|transaction|transactions|charge|charges|payment|payments|fee|fees|limit|history|spending)\b|\b(what|when|how much|which)\b[\w\s]{0,20}\bi (?:spend|spent|paid|owe|was charged)\b|\bdo i have\b/i;
+/** "How do I …", "What is …", "Where can I …": a question about how the bank works, never a report. */
+const HOW_TO_START = /^(?:so\s+|and\s+|also\s+|hi,?\s+|hello,?\s+|ok(?:ay)?,?\s+)*(?:can you tell me |could you tell me |please tell me |tell me |i('?d| would) like to know |i want to know )?(?:how (?:do|can|would|should|does|is|are|long|much|old)|what(?:'s| is| are| does| do)|where (?:can|do|is|are)|when (?:can|do|does|is|are)|which|why (?:do|does|is|are)|can i |could i |is there |are there |do you (?:offer|have|do|accept|charge))\b/i;
+
+/**
+ * True when the sentence asks how something works rather than reporting that something happened.
+ * "How do I replace a lost card?" and "How do I block my card?" are general; "I lost my card" and
+ * "what was my last charge" are not, and keep the security check they need.
+ */
+export function isGeneralHowTo(text: string): boolean {
+  // Curly apostrophes arrive from speech recognition as often as straight ones.
+  const t = text.replace(/[\u2018\u2019\u02bc\u2032]/g, "'").trim();
+  if (!HOW_TO_START.test(t)) return false;
+  if (REPORTS_AN_EVENT.some((re) => re.test(t))) return false;
+  if (ASKS_OWN_RECORDS.test(t)) return false;
+  // A figure or a named merchant means one particular charge, not a general topic.
+  return !/\$\s?\d|\d{2,}/.test(t);
 }
 
 /**
@@ -808,6 +861,14 @@ async function onIssueText(s: Session, text: string, distressed: boolean): Promi
   // General bank questions are answered from the bank information without starting a case.
   if (!cls.issueType && tryBankInfo(s, text, { allowNotFound: true })) { c.unclearCount = 0; c.issue = null; c.pending = null; c.stage = 'awaiting_issue'; return; }
   if (cls.unsupportedTopic && !cls.issueType && tryBankInfo(s, text, { allowNotFound: false })) { c.issue = null; c.pending = null; c.stage = 'awaiting_issue'; return; }
+  // A question about how something works is never a report that it happened, so it never starts a
+  // case or a security check. If the bank information does not cover it, say so rather than guess.
+  if (isGeneralHowTo(text)) {
+    c.unclearCount = 0; c.issue = null; c.pending = null; c.stage = 'awaiting_issue';
+    if (tryBankInfo(s, text, { allowNotFound: true })) return;
+    event(s, 'bank_info_not_found', { generalHowTo: true });
+    return say(s, `${NOT_FOUND}`);
+  }
   const min = policy().conversation.minIntentConfidence;
   const clarifications = c.issue?.clarifications ?? 0;
   c.issue = { ...cls, statement: combined, slots: mergeSlots(c.issue?.slots, cls.slots), clarifications };
@@ -883,6 +944,15 @@ async function setIssue(s: Session, issueType: IssueType, confidence: number, di
     c.verification.status = 'awaiting_dob';
     run("UPDATE call_sessions SET verification_status = 'identified' WHERE id = ?", [s.id]);
     run("INSERT INTO verification_attempts (session_id, customer_id, step, method, outcome, created_at) VALUES (?,?, 'identify', 'ani', 'passed', ?)", [s.id, c.verification.identifiedCustomerId, nowIso()]);
+  }
+  // Both the card and the registered phone are gone: neither approved check can run, so the call
+  // goes to a person now rather than asking for a number the caller cannot read and a passcode that
+  // cannot reach them.
+  if (c.flags.includes('lost_card') && c.flags.includes('lost_phone') && !isVerified(c.verification)) {
+    c.cannotSupply = { ...c.cannotSupply, card: true, phone: true };
+    event(s, 'credential_unavailable', { step: 'card', lostPhone: true, atStart: true });
+    tl(s, { type: 'verification.alternative_exhausted', stage: 'verify', title: 'Card and registered phone both lost — no approved check can run on this line', detail: 'The card number cannot be read and a passcode cannot be sent to a phone the caller no longer has. Passing to a person to verify another way. Nothing was weakened and no account data was read.', status: 'warn', source: 'identity verification' });
+    return handoff(s, 'credential_unavailable', 'card and registered phone both lost — no approved check can run', M.LOST_CARD_AND_PHONE, { priority: 'urgent', missing: ['Identity not confirmed — verify another way before discussing or changing the account', 'Card reported lost by the caller but NOT blocked: it cannot be blocked until identity is confirmed'] });
   }
   if (c.cardIdentify && !c.verification.identifiedCustomerId) {
     // Nobody is assumed. Ask for the card number; whoever holds it is who the caller is.
@@ -1034,11 +1104,67 @@ function collectCard(s: Session, text: string): string | null {
 
 const MONEY_MENTION = /\$\s?\d[\d,]*(?:\.\d{1,2})?|\b\d[\d,]*(?:\.\d{1,2})?\s*(?:dollars?|usd|bucks)\b/gi;
 
+/**
+ * The caller cannot give what was asked for: the card is gone, or the phone that would receive the
+ * passcode is. Asking again would not help them, so the call moves to the next approved route, and
+ * to a person when none is left. No check is skipped or softened to get past this.
+ */
+async function onCredentialUnavailable(s: Session, step: 'card' | 'otp' | 'dob' | 'identify', text: string): Promise<void> {
+  const c = s.ctx;
+  const u = readUnavailable(text);
+  c.cannotSupply = { ...c.cannotSupply, [step === 'identify' ? 'card' : step]: true };
+  if (u.lostPhone) c.cannotSupply.phone = true;
+  if (u.lostPhone && !c.flags.includes('lost_phone')) c.flags.push('lost_phone');
+  if (u.lostCard && !c.flags.includes('lost_card')) c.flags.push('lost_card');
+  setFact(c.facts ??= {}, 'identity', `Could not supply the ${step === 'otp' ? 'passcode' : step === 'dob' ? 'date of birth' : step === 'identify' ? 'customer number' : 'card number'}${c.cannotSupply.phone ? '; no access to the registered phone' : ''}`, 'needs_clarification', 'verification');
+  event(s, 'credential_unavailable', { step, lostPhone: !!c.cannotSupply.phone });
+
+  // A passcode cannot reach a phone the caller no longer has, and there is no third route here.
+  const phoneGone = !!c.cannotSupply.phone;
+  const noRouteLeft = step === 'otp' || step === 'dob' || phoneGone || c.altOffered;
+  if (noRouteLeft) {
+    tl(s, {
+      type: 'verification.alternative_exhausted',
+      stage: 'verify',
+      title: 'Caller cannot complete any approved check on this line — passing to a person',
+      detail: phoneGone
+        ? 'The card cannot be read and the registered phone is gone, so neither approved check can run. Nothing was weakened and no account data was read.'
+        : 'Both approved checks were offered and neither could be completed. Nothing was weakened and no account data was read.',
+      status: 'warn',
+      source: 'identity verification',
+    });
+    return handoff(
+      s,
+      'credential_unavailable',
+      phoneGone && c.flags.includes('lost_card') ? 'card and registered phone both lost — no approved check can run' : `caller cannot supply the ${step === 'otp' ? 'passcode' : step === 'identify' ? 'customer number' : step}`,
+      phoneGone && c.flags.includes('lost_card') ? M.LOST_CARD_AND_PHONE : M.ALT_NOT_POSSIBLE,
+      { priority: c.flags.includes('lost_card') ? 'urgent' : 'normal', missing: ['Identity not confirmed — verify another way before discussing or changing the account'] },
+    );
+  }
+
+  // The second approved route: customer number, date of birth, then a passcode to the registered phone.
+  c.altOffered = true;
+  c.unclearCount = 0;
+  c.cardUnparsed = 0;
+  captures.delete(s.id);
+  c.verificationMode = 'dob_otp';
+  tl(s, { type: 'verification.alternative_offered', stage: 'verify', title: 'Card number unavailable — offered the second approved check', detail: 'Date of birth plus a one-time passcode to the registered phone. The requirement is not reduced: it is a different approved way to prove identity.', status: 'pending', source: 'identity verification' });
+  const ev = await startVerification(vctx(s), c.verification, null, 'dob_otp');
+  c.stage = ev.type === 'need_dob' ? 'awaiting_dob' : 'identifying';
+  return say(s, ev.type === 'need_dob' ? `That's all right — you don't need the card in front of you. I can check it's you another way. ${M.ASK_DOB}` : M.OFFER_ALT_CHECK);
+}
+
 async function onVerificationAnswer(s: Session, text: string): Promise<void> {
   const c = s.ctx;
+  // "I don't have it", "I lost it", "I don't know the number": a credential that cannot be supplied.
+  // This is not a wrong answer and never counts as a failed attempt.
+  if (saysCredentialUnavailable(text)) {
+    const step = c.stage === 'awaiting_otp' ? 'otp' : c.stage === 'awaiting_dob' ? 'dob' : c.stage === 'identifying' ? 'identify' : 'card';
+    return onCredentialUnavailable(s, step, text);
+  }
   // A general question in the middle of the check ("what are your hours?") is answered, then the check carries on.
   // It never counts as a failed answer and never touches the card digits held so far.
-  if (c.stage === 'awaiting_card' && text.replace(/\D/g, '').length < 3 && QUESTION_START.test(text.trim()) && !/\b(my|mine)\b/i.test(text) && parseYesNo(text) === null) {
+  if (c.stage === 'awaiting_card' && text.replace(/\D/g, '').length < 3 && parseYesNo(text) === null && (isGeneralHowTo(text) || (QUESTION_START.test(text.trim()) && !/\b(my|mine)\b/i.test(text)))) {
     const f = answerFromInfo(text);
     if (f) {
       event(s, 'bank_info_answered', { topic: f.entry.id, during: 'verification' });
@@ -1100,8 +1226,12 @@ async function runVerification(s: Session, answer: string): Promise<void> {
     case 'retry':
       if (ev.unparsed) {
         c.unclearCount++;
+        // The same credential is asked for once more and no further: a second answer that is not
+        // the thing we asked for means the caller does not have it, whatever words they used.
+        c.unparsed = c.unparsed?.step === ev.step ? { step: ev.step, n: c.unparsed.n + 1 } : { step: ev.step, n: 1 };
+        if (c.unparsed.n >= 2 && ev.step !== 'card') return onCredentialUnavailable(s, ev.step === 'identify' ? 'identify' : ev.step === 'dob' ? 'dob' : 'otp', answer);
         if (c.unclearCount >= 3) return handoff(s, 'communication_breakdown', `could not capture ${ev.step} answer`, "I'm having trouble capturing that. Let me connect you with an agent who can help verify you.");
-      }
+      } else c.unparsed = null;
       if (!ev.unparsed) tl(s, { type: 'verification.retry', stage: 'verify', title: ev.step === 'card' ? `Card number check failed — no match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)` : `Verification answer did not match (${ev.remaining} attempt${ev.remaining === 1 ? '' : 's'} left)`, detail: ev.step === 'card' ? 'The number given did not match the active customer’s record. The expected number is never revealed and the call carries on.' : 'Generic message given — the caller is not told which detail was wrong.', status: 'warn', source: 'identity verification', data: { attemptResult: 'failed', attemptsRemaining: ev.remaining } });
       else if (ev.step === 'card') tl(s, { type: 'verification.unclear', stage: 'verify', title: 'Card number not captured clearly — asked again (no attempt used)', status: 'info', source: 'identity verification' });
       c.cardUnparsed = ev.unparsed && ev.step === 'card' ? (c.cardUnparsed ?? 0) + 1 : 0;
