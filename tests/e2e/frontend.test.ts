@@ -39,3 +39,23 @@ describe('journey front end', () => {
     for (const c of j.items) expect(String(c.cardNumber).replace(/\D/g, '')).toHaveLength(16);
   });
 });
+
+/**
+ * Every front-end file has to parse.
+ *
+ * The browser modules are not compiled and the type checker does not read them, so a stray
+ * apostrophe inside a single-quoted string ships a blank page: the module fails to parse, nothing
+ * renders, and the only clue is one line in a console nobody has open. This catches it here.
+ */
+describe('the browser modules', () => {
+  it('all parse as JavaScript', async () => {
+    const { readdirSync } = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const files = ['public/js', 'public/lily'].flatMap((d) => readdirSync(d).filter((f) => f.endsWith('.js')).map((f) => `${d}/${f}`));
+    expect(files.length).toBeGreaterThan(3);
+    for (const f of files) {
+      // node parses these with the same grammar the browser does. Nothing is executed.
+      expect(() => execFileSync(process.execPath, ['--check', f], { stdio: 'pipe' }), f).not.toThrow();
+    }
+  });
+});

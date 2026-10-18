@@ -90,7 +90,7 @@ function patternsCard() {
   const items = p.items ?? [];
   return h('section.card.sf-sec',
     h('div.sf-h', h('h2', K.icon('alert'), 'What the call policy is built against'), h('span.badge.lav', `${items.length} documented patterns`)),
-    h('p.sf-now', 'Each of these is an attack contact centres actually see. The control beside it runs in the back end; none of it is left to the model's judgement. A pattern marked out of scope is named so it is not mistaken for a solved problem.'),
+    h('p.sf-now', 'Each of these is an attack contact centres actually see. The control beside it runs in the back end; none of it is left to the model’s judgement. A pattern marked out of scope is named so it is not mistaken for a solved problem.'),
     h('div.sf-pats', items.map((x) => {
       const [tone, label] = STATE_TONE[x.state] ?? ['lav', x.state];
       return h('details.sf-pat',
