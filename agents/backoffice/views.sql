@@ -68,13 +68,25 @@ FROM `PROJECT_ID.DATASET.declines` d
 CROSS JOIN (SELECT TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(anchor_at), SECOND) AS s FROM `PROJECT_ID.DATASET.dataset_meta`) m;
 
 -- What happened during calls (written live by the voice agent's back end).
+-- Disputes raised on this call, not every dispute ever raised. Demo data is put back between
+-- calls, so a submission from before the reset belongs to a customer state that no longer exists:
+-- left in, the same charge disputed on two demo calls reads to the agent as two live disputes.
 CREATE OR REPLACE VIEW `PROJECT_ID.DATASET.agent_disputes` AS
-SELECT submission_id, customer_id, card_id, transaction_id, merchant, amount_minor / 100 AS amount, currency, transaction_date, reason_code, case_id, created_at
-FROM `PROJECT_ID.DATASET.dispute_submissions`;
+SELECT d.submission_id, d.customer_id, d.card_id, d.transaction_id, d.merchant, d.amount_minor / 100 AS amount, d.currency,
+       d.transaction_date, d.reason_code, d.case_id, d.created_at
+FROM `PROJECT_ID.DATASET.dispute_submissions` d
+LEFT JOIN (SELECT customer_id, MAX(reset_at) AS reset_at FROM `PROJECT_ID.DATASET.demo_resets` GROUP BY customer_id) rs USING (customer_id)
+WHERE d.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01')  -- the same demo reset the app applies;
 CREATE OR REPLACE VIEW `PROJECT_ID.DATASET.agent_card_events` AS
-SELECT customer_id, card_id, status, reason, created_at FROM `PROJECT_ID.DATASET.card_status_events`;
+SELECT e.customer_id, e.card_id, e.status, e.reason, e.created_at
+FROM `PROJECT_ID.DATASET.card_status_events` e
+LEFT JOIN (SELECT customer_id, MAX(reset_at) AS reset_at FROM `PROJECT_ID.DATASET.demo_resets` GROUP BY customer_id) rs USING (customer_id)
+WHERE e.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01')  -- the same demo reset the app applies;
 CREATE OR REPLACE VIEW `PROJECT_ID.DATASET.agent_replacements` AS
-SELECT order_id, customer_id, card_id, delivery, created_at FROM `PROJECT_ID.DATASET.replacement_orders`;
+SELECT r.order_id, r.customer_id, r.card_id, r.delivery, r.created_at
+FROM `PROJECT_ID.DATASET.replacement_orders` r
+LEFT JOIN (SELECT customer_id, MAX(reset_at) AS reset_at FROM `PROJECT_ID.DATASET.demo_resets` GROUP BY customer_id) rs USING (customer_id)
+WHERE r.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01')  -- the same demo reset the app applies;
 
 -- Rules, policies and knowledge.
 CREATE OR REPLACE VIEW `PROJECT_ID.DATASET.agent_dispute_rules` AS SELECT * FROM `PROJECT_ID.DATASET.dispute_rules`;

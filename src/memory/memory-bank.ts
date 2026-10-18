@@ -64,11 +64,16 @@ export function setMemoryStoreForTests(s: MemoryStore | null): void { stub = s; 
 
 let auth: GoogleAuth | null = null;
 
+/**
+ * Memories live on the engine resource, and only in v1beta1: the v1 API has no Memory type and the
+ * agent_engines SDK wrapper does not expose the memory bank at all. The engine's own context spec
+ * is set the same way, by deploy.py.
+ */
 function engineBase(): string | null {
   const r = env().AGENT_ENGINE_RESOURCE;
   if (!r) return null;
   const location = r.split('/')[3];
-  return `https://${location}-aiplatform.googleapis.com/v1/${r}`;
+  return `https://${location}-aiplatform.googleapis.com/v1beta1/${r}`;
 }
 
 async function callMemory(url: string, init: RequestInit): Promise<Record<string, unknown>> {
@@ -101,11 +106,11 @@ const vertexStore: MemoryStore = {
     if (!base) return 0;
     const r = await callMemory(`${base}/memories?filter=${encodeURIComponent(`scope.customer_id="${scope}"`)}`, { method: 'GET' });
     const items = (r.memories as { name?: string }[] | undefined) ?? [];
-    const host = base.split('/v1/')[0];
+    const host = base.split('/v1beta1/')[0];
     let n = 0;
     for (const m of items) {
       if (!m.name) continue;
-      await callMemory(`${host}/v1/${m.name}`, { method: 'DELETE' });
+      await callMemory(`${host}/v1beta1/${m.name}`, { method: 'DELETE' });
       n += 1;
     }
     return n;
