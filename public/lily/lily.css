@@ -1567,3 +1567,8 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
 
 /* The one disclosure the landing page owes a visitor, in its own quiet line. */
 .synth { margin: 18px 0 0; font-size: 0.82rem; text-align: center; }
+
+/* A full-width list of tickets reads better in two columns than as one long thin row of text. */
+.ag-mini.ag-two { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 22px; }
+.ag-mini.ag-two li:nth-child(2) { border-top: 0; }
+@media (max-width: 1180px) { .ag-mini.ag-two { grid-template-columns: minmax(0, 1fr); } .ag-mini.ag-two li:nth-child(2) { border-top: 1px solid var(--hair); } }

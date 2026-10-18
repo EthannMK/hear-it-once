@@ -844,11 +844,6 @@ function overview(w) {
         balanceBody(w.account))
       : unverifiedNotice(w),
 
-    cu && w.account
-      ? h('section.ag-sec',
-        agH('Spending and usage', w.history ? badge('lav', 'BigQuery') : null),
-        usageBody(w.account, w.history))
-      : null,
 
     h('section.ag-sec.ag-span', agH('What Lily recorded'), summaryBody(w)),
 
@@ -861,11 +856,15 @@ function overview(w) {
         ? h('ul.cx-acts', done.map((a) => h('li', h('div', h('b', a.label), h('span', a.reference ? `Ref ${a.reference}` : a.error ?? '')), badge(ACT[a.state] ?? 'lav', a.stateLabel))))
         : h('p.small.muted', 'No change has been made to this account on this call.')),
 
-    h('section.ag-sec',
+    // Full width, two columns of tickets. Half a card of white space next to four rows read as a
+    // panel that had failed to load; an empty list now says what that means for this call rather
+    // than leaving the agent to work it out.
+    h('section.ag-sec.ag-span',
       agH('Open service requests', badge(openTickets.length ? 'violet' : 'lav', String(openTickets.length))),
       openTickets.length
-        ? h('ul.ag-mini', openTickets.slice(0, 4).map((t) => h('li', h('b', `${t.typeLabel} · ${t.id}`), badge(tkTone(t.status), cap(t.status)), h('span', t.reason))))
-        : h('p.small.muted', 'None open for this customer.')),
+        ? h('ul.ag-mini.ag-two', openTickets.slice(0, 6).map((t) => h('li', h('b', `${t.typeLabel} · ${t.id}`), badge(tkTone(t.status), cap(t.status)), h('span', t.reason))))
+        : h('p.small.muted', 'Nothing is open for this customer, so anything agreed on this call starts a new request.'),
+      openTickets.length > 6 ? h('p.small.muted', `${openTickets.length - 6} more open on this account.`) : null),
 
     s.unresolved.length
       ? h('section.ag-sec.ag-open', agH('Still to resolve', badge('coral', String(s.unresolved.length))),
@@ -900,7 +899,6 @@ function balanceBody(a) {
     h(`div.cx-meter${a.utilisation > 90 ? '.hot' : ''}`, { role: 'img', 'aria-label': `${a.utilisation}% of the ${a.limit} limit used` }, bar),
     h('div.cx-kv',
       h('span', 'Credit limit'), h('b', a.limit),
-      a.pending ? [h('span', 'Pending'), h('b', a.pending)] : null,
       a.lastPayment ? [h('span', 'Last payment'), h('b', `${a.lastPayment.amount} · ${fmtWhen(a.lastPayment.at)}`)] : null,
       h('span', 'Limit used'), h('b', `${a.utilisation}%`)));
 }
