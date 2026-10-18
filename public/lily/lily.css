@@ -1570,5 +1570,11 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
 
 /* A full-width list of tickets reads better in two columns than as one long thin row of text. */
 .ag-mini.ag-two { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 22px; }
+/* Ticket, state, then the reason under both: without this the badge wraps onto its own row and
+   stretches the full width of the column, which reads as a status bar rather than a label. */
+.ag-mini.ag-two li { grid-template-columns: minmax(0, 1fr) auto; }
+.ag-mini.ag-two li > b { grid-column: 1; }
+.ag-mini.ag-two li > .badge { grid-column: 2; justify-self: end; }
+.ag-mini.ag-two li > span { grid-column: 1 / -1; }
 .ag-mini.ag-two li:nth-child(2) { border-top: 0; }
 @media (max-width: 1180px) { .ag-mini.ag-two { grid-template-columns: minmax(0, 1fr); } .ag-mini.ag-two li:nth-child(2) { border-top: 1px solid var(--hair); } }

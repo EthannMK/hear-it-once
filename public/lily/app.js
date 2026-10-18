@@ -99,13 +99,15 @@ function header(active) {
 function render(active, ...nodes) {
   // Anything still animating on the screen being replaced is stopped first.
   for (const el of root.querySelectorAll('[data-loop]')) el.stopLoop?.();
-  root.replaceChildren(header(active), ...nodes.flat().filter(Boolean), credit());
+  root.replaceChildren(header(active), ...nodes.flat().filter(Boolean));
 }
 
 /**
- * Who built this and what for, and nothing else. It sits in the shared shell rather than on each
- * screen so it cannot be forgotten on one of them. The synthetic-data notice belongs to the demo
- * instructions screen, where someone is about to type a card number and needs to read it.
+ * Who built this and what for, and nothing else.
+ *
+ * Landing screen only. It was in the shared shell, which put it under the agent workspace and the
+ * live call too — screens that fill the window and scroll inside their own panels, so a footer
+ * appended after them had nowhere to sit and followed the layout around.
  */
 function credit() {
   return h('footer.credit',
@@ -414,7 +416,7 @@ function drawHome() {
         ['headset', 'People where they count'],
         ['activity', 'Measured, not claimed'],
       ]),
-      )));
+      credit())));
 }
 
 /* ------------------------------------------------------------------ connecting */
