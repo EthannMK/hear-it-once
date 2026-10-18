@@ -7,6 +7,7 @@ import { customerHistory } from '../../adapters/bigquery/replica.ts';
 import { requirePermission, staffActor } from '../../auth/rbac.ts';
 import { audit } from '../../audit/audit.ts';
 import { ask, backOfficeEngine, draftReply, draftWrapUp, insights } from '../../backoffice/backoffice.ts';
+import { forgetCustomer } from '../../memory/memory-bank.ts';
 import { addCallTag, caseIdForSession, caseKnowledge, caseWorkspace, latestCaseId, createTicket, customerTransactions, removeCallTag, customerProfile, decideRecommendation, editCase, listCrmCases, searchCustomers, taxonomy, updateTicket } from '../../crm/crm.ts';
 
 const Id = z.string().min(3).max(40).regex(/^[A-Za-z0-9_-]+$/);
@@ -113,6 +114,17 @@ export function registerCrmRoutes(app: FastifyInstance): void {
     const r = createTicket(Id.parse(req.params.id), { ...staffActor(p), id: p.userId }, req.body ?? {});
     reply.code(r.duplicate ? 200 : 201);
     return r;
+  });
+
+  /**
+   * Forget a customer. Soft context only — the bank's own records are untouched, and nothing a
+   * decision rests on was ever in there. Audited, because erasing a record is itself a record.
+   */
+  app.delete<{ Params: { id: string } }>('/api/crm/customers/:id/memory', async (req) => {
+    const p = requirePermission(req.staff, 'case.update');
+    const id = Id.parse(req.params.id);
+    const deleted = await forgetCustomer(id, { ...staffActor(p), id: p.userId });
+    return { customerId: id, deleted };
   });
 
   app.post<{ Params: { id: string } }>('/api/crm/cases/:id/tags', async (req) => {

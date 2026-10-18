@@ -5,7 +5,9 @@
  * the transcript and call record intact and can be retried.
  */
 import { all, get, parseJson, run } from '../db/db.ts';
+import { rememberFromCall } from '../memory/memory-bank.ts';
 import { nowIso } from '../lib/clock.ts';
+import { log } from '../lib/logger.ts';
 import { redactText } from '../lib/redact.ts';
 import { audit, type Actor } from '../audit/audit.ts';
 import { buildResolution } from '../api/brief.ts';
@@ -131,6 +133,29 @@ function build(sessionId: string) {
 }
 
 /** Start (or restart) the analysis for a call. Never throws: a failure is stored and can be retried. */
+/** The merchant the caller actually raised, from the call's own recorded facts. */
+function merchantsRaised(sessionId: string): string[] {
+  const row = get<{ context_json: string }>('SELECT context_json FROM call_sessions WHERE id = ?', [sessionId]);
+  if (!row) return [];
+  const ctx = parseJson<CallContext>(row.context_json, {} as CallContext);
+  const m = ctx.facts?.merchant?.value;
+  return m ? [String(m)] : [];
+}
+
+/**
+ * Hand the finished call to memory. Everything here — reading the facts as much as writing the
+ * memory — sits behind one guard and outside the analysis's own try, because the call record is
+ * complete and correct by this point and a memory is a nicety that must never be able to fail it.
+ */
+function remember(sessionId: string, reasonLabel: string | null, resolution: string | null, actor: Actor | null): void {
+  try {
+    const cust = get<{ customer_id: string | null }>('SELECT customer_id FROM call_sessions WHERE id = ?', [sessionId])?.customer_id ?? null;
+    void rememberFromCall(cust, { reasonLabel, resolution, merchants: merchantsRaised(sessionId) }, actor ?? { type: 'system', id: 'analysis' });
+  } catch (e) {
+    log.warn('memory.skipped', { sessionId, err: (e as Error).message });
+  }
+}
+
 export function analyseCall(sessionId: string, actor: Actor | null = null): AnalysisStatus {
   const now = nowIso();
   run(
@@ -147,6 +172,7 @@ export function analyseCall(sessionId: string, actor: Actor | null = null): Anal
     );
     run('UPDATE call_sessions SET call_reason_summary = COALESCE(call_reason_summary, ?) WHERE id = ?', [a.reasonLabel, sessionId]);
     audit({ actor: actor ?? { type: 'system', id: 'analysis' }, event: 'call.analysis_ready', status: 'ok', resourceType: 'session', resourceId: sessionId, sessionId });
+    remember(sessionId, a.reasonLabel, a.resolution, actor);
     return 'ready';
   } catch (e) {
     try { run("UPDATE call_analysis SET status = 'failed', error = ?, updated_at = ? WHERE session_id = ?", [(e as Error).message.slice(0, 300), nowIso(), sessionId]); } catch { /* the call record is already saved */ }

@@ -3,7 +3,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { setup, Caller, staffLogin } from './harness.ts';
 import { all, get, run } from '../../src/db/db.ts';
-import { analyseCall, setAnalysisFaultForTests } from '../../src/analysis/analysis.ts';
+import { analyseCall, getAnalysis, setAnalysisFaultForTests } from '../../src/analysis/analysis.ts';
+import { setMemoryStoreForTests } from '../../src/memory/memory-bank.ts';
 
 let app: FastifyInstance;
 beforeEach(async () => { app = await setup(); });
@@ -108,4 +109,26 @@ describe('agent workspace', () => {
     const anon = await app.inject({ method: 'GET', url: '/api/completed-calls' });
     expect(anon.statusCode).toBeGreaterThanOrEqual(401);
   });
+});
+
+/**
+ * A memory is a nicety. It must never be able to fail the call record it comes from — an early
+ * version of this reached into a table that did not exist and turned every finished call's
+ * analysis into a failure.
+ */
+it('a memory that cannot be written still leaves the call analysis ready', async () => {
+  setMemoryStoreForTests({
+    async write() { throw new Error('memory bank unreachable'); },
+    async list() { throw new Error('memory bank unreachable'); },
+    async deleteAll() { throw new Error('memory bank unreachable'); },
+  });
+  try {
+    const c = new Caller(app);
+    await c.start();
+    await c.say('There is a charge from Novaplay I do not recognise.');
+    await c.input({ kind: 'hangup' });
+    expect(getAnalysis(c.sessionId).status).toBe('ready');
+  } finally {
+    setMemoryStoreForTests(null);
+  }
 });

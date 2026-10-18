@@ -92,3 +92,36 @@ Integrity: foreign keys, unique `(action_type, idempotency_key)`, one case per s
 ## Replacing a mock with a real provider
 
 Implement the interface in `src/adapters/types.ts`, register it in `src/adapters/registry.ts` behind a new `ADAPTER_MODE`. Any non-`mock` mode **forces the `pilot-conservative` policy profile** (human approval for every consequential action) until a bank owner approves otherwise. Workflows, policy, actions and UI do not change.
+
+## The memory boundary
+
+The back-office agent on Vertex AI Agent Engine has a Memory Bank. It is worth being exact about
+what that does and does not mean, because "the assistant remembers you" is the kind of sentence
+that quietly turns into "the assistant decided something about you".
+
+Memory holds **soft context**: a preferred name, that someone travels often, that they raised this
+merchant before, that the last call needed a person. It exists so a customer is not treated as a
+stranger on their second call.
+
+Memory holds **nothing a decision rests on**. Identity, verification state, card status, balances,
+limits and eligibility are read from the bank's records on every call, every time. A memory may
+colour how the assistant talks to someone; it may never decide anything about them.
+
+Four things hold that line, and none of them is a prompt:
+
+1. **On the way in** (`src/memory/memory-bank.ts`) lines are built from the call analysis the app
+   already computed, not from free model output. Each is redacted, then checked against
+   `DECIDING_FACTS` — verification, identity, card status, balance, limit, eligibility, approval,
+   or any bare number. A line that matches is dropped, not reworded.
+2. **On the way out** a memory is wrapped by `untrusted()` under the standard preamble before a
+   model reads it. It is model-written text derived from customer speech, which is exactly the
+   threat FP-07 describes, so it gets the same treatment as a merchant name.
+3. **Nothing that authorises reads it.** `authorizeAction` does not import the memory module. A
+   memory claiming the caller is verified changes nothing, and there is a test that proves a card
+   block is still refused with one planted in the store.
+4. **A customer can be forgotten.** `DELETE /api/crm/customers/:id/memory` clears everything scoped
+   to them and audits it.
+
+The write happens when a call's analysis completes (`src/analysis/analysis.ts`), scoped to the
+customer id. It is deliberately not awaited and cannot throw: the call record is finished and
+correct by then, and a memory is a nicety that must never be able to fail it.

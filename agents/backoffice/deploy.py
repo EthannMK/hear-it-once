@@ -41,6 +41,16 @@ def main() -> None:
         display_name=DISPLAY_NAME,
         description="Read-only back-office analyst over the Northstar Bank BigQuery dataset (Hear It Once).",
         env_vars={"BQ_PROJECT": a.project, "BQ_DATASET": a.dataset, "BQ_LOCATION": a.bq_location, "AGENT_MODEL": a.model},
+        # Memory Bank, on this same engine. It holds soft context between calls — a preferred name,
+        # that someone travels, that they raised this merchant before — and nothing a decision rests
+        # on. Identity, card status, balances and eligibility are read from the bank's records every
+        # call; see src/memory/memory-bank.ts for what is allowed in and what is dropped.
+        context_spec={
+            "memory_bank_config": {
+                "generation_config": {"model": f"projects/{a.project}/locations/{a.location}/publishers/google/models/{a.model}"},
+                "similarity_search_config": {"embedding_model": f"projects/{a.project}/locations/{a.location}/publishers/google/models/text-embedding-005"},
+            }
+        },
     )
     existing = [e for e in agent_engines.list(filter=f'display_name="{DISPLAY_NAME}"')]
     if existing:
