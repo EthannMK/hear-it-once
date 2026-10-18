@@ -197,9 +197,6 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .float svg.i { width: 15px; height: 15px; color: var(--violet); }
 .float.f1 { top: 4%; right: 0; }
 .float.f2 { bottom: 8%; left: 2%; }
-.asks { margin-top: 28px; padding: 18px 20px; display: grid; gap: 10px; }
-.asks .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.asks .chips span { font: italic 400 0.98rem var(--serif); color: var(--text-2); background: var(--ivory); border: 1px solid var(--hair); border-radius: 999px; padding: 6px 14px; }
 .banner { padding: 11px 14px; border-radius: 14px; font-size: 0.9rem; background: var(--lav); color: var(--aub); }
 .banner.warn { background: var(--amber-soft); color: var(--amber-ink); }
 .banner.bad { background: rgba(241, 138, 114, 0.15); color: #6e2311; border: 1px solid rgba(241, 138, 114, 0.5); }
@@ -660,7 +657,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
 .hero-cv { animation: rise 0.6s 0.1s both; }
 .pod .bars i { transform-origin: center; animation: eq 1.6s ease-in-out infinite; animation-delay: var(--d, 0ms); }
 @keyframes eq { 0%, 100% { transform: scaleY(0.55); } 50% { transform: scaleY(1.08); } }
-.asks { animation: rise 0.5s both; }
+.value { animation: rise 0.5s both; }
 .connect { transition: transform 0.18s, box-shadow 0.25s; }
 .connect:hover { transform: translateY(-2px); }
 .connect:active { transform: translateY(0) scale(0.98); }
@@ -796,7 +793,7 @@ svg.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
   .judge:not(.in-call) .hero h1 { font-size: clamp(2.2rem, 3.8vw, 3.5rem); margin: 0 0 14px; }
   .judge:not(.in-call) .hero-cv { min-height: 0; }
   .judge:not(.in-call) .pod { width: clamp(180px, 34vh, 320px); }
-  .judge:not(.in-call) .asks { margin: 0; padding: 12px 16px; gap: 8px; }
+  .judge:not(.in-call) .value { margin: 0; padding: 12px 16px; gap: 8px; }
   /* Screen 1, on the call: three full-height columns; the transcript takes whatever is left. */
   .judge.in-call { height: 100%; padding: 14px 24px; gap: 18px; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
   .judge.in-call > .dmini, .judge.in-call > .btc { position: static; height: 100%; max-height: none; min-height: 0; }
@@ -1523,3 +1520,38 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
 /* A language that is coming but cannot take a call yet: present, named, and plainly not ready. */
 .langs li.soon { opacity: 0.72; border-style: dashed; }
 .langs li.soon .pill { margin-left: 6px; font: 600 0.62rem var(--label); letter-spacing: 0.05em; text-transform: uppercase; color: var(--violet-d); background: var(--lav); border-radius: 999px; padding: 2px 7px; white-space: nowrap; }
+
+/* ------------------------------------------------------------------ ambient home background
+   Only the landing screen carries it, and only behind the page rather than inside any card: it is
+   there to warm the empty margins, not to sit under text. The body keeps its own colour, so a
+   browser that will not load the image loses nothing. */
+.judge:not(.in-call)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: url('/brand/ambient.webp') center / cover no-repeat;
+  opacity: 0.65;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .judge:not(.in-call)::before { animation: ambient 0.9s ease-out both; }
+}
+@keyframes ambient { from { opacity: 0; } to { opacity: 0.65; } }
+
+/* ------------------------------------------------------------------ what it is worth
+   The landing page makes the case for the product. Two columns on a desktop, one on a phone. */
+.value { margin-top: 28px; padding: 20px 22px; display: grid; gap: 14px; }
+.vgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; }
+.value .v { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+.value .vi { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--lav, #eceaff); color: var(--text); }
+.value .vi .i { width: 17px; height: 17px; }
+.value .v b { display: block; font: 600 0.95rem var(--sans); color: var(--text); }
+.value .v p { margin: 2px 0 0; font-size: 0.86rem; color: var(--text-2); line-height: 1.45; }
+@media (max-width: 760px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ------------------------------------------------------------------ who built it */
+.credit { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; max-width: 1120px; margin: 8px auto 26px; padding: 14px 28px 0; border-top: 1px solid var(--hair); }
+.credit .kd { height: 20px; width: auto; opacity: 0.85; }
+.credit p { margin: 0; font-size: 0.76rem; color: var(--text-2); text-align: center; }
+@media (max-width: 760px) { .credit { margin-bottom: 18px; } }

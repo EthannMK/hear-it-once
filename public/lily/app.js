@@ -35,6 +35,8 @@ const STAGE_LABEL = { understand: 'Understand', verify: 'Verify', investigate: '
 /* ------------------------------------------------------------------ icons */
 const NS = 'http://www.w3.org/2000/svg';
 const P = {
+  clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
+  globe: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M3 12h18', 'M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z'],
   wave: ['M4 10v4', 'M8 7v10', 'M12 4v16', 'M16 7v10', 'M20 10v4'],
   mic: ['M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z', 'M19 11a7 7 0 0 1-14 0', 'M12 18v3'],
   micOff: ['M3 3l18 18', 'M9 9v3a3 3 0 0 0 5 2.2', 'M15 10V6a3 3 0 0 0-5.7-1.3', 'M5 11a7 7 0 0 0 11 5.7', 'M12 18v3'],
@@ -97,7 +99,17 @@ function header(active) {
 function render(active, ...nodes) {
   // Anything still animating on the screen being replaced is stopped first.
   for (const el of root.querySelectorAll('[data-loop]')) el.stopLoop?.();
-  root.replaceChildren(header(active), ...nodes.flat().filter(Boolean));
+  root.replaceChildren(header(active), ...nodes.flat().filter(Boolean), credit());
+}
+
+/**
+ * Who built this and what for. It sits in the shared shell rather than on each screen so it cannot
+ * be forgotten on one of them, and it is quiet enough to stay out of the way of a live call.
+ */
+function credit() {
+  return h('footer.credit',
+    h('img.kd', { src: '/brand/koda.png', alt: 'Team KODA', width: 180, height: 43, loading: 'lazy' }),
+    h('p', 'Built by Team KODA for the Google Cloud AI Builder Cup 2026. Northstar Bank is fictional and all data is synthetic.'));
 }
 let toastT = 0;
 function toast(m) {
@@ -372,7 +384,19 @@ function drawHome() {
         hero()),
       !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
       // Demo data panel removed for now (demoTable() is kept below to bring it back).
-      h('div.card.asks', h('span.cap', 'Or just ask'), h('div.chips', ['Where is your nearest branch?', 'How do I make a deposit?', 'What is APR and how is it calculated?', 'How do I spot a card scam?', 'I want to speak to a person', 'How are you today?'].map((x) => h('span', `“${x}”`)))),
+      // What the bank gets out of this, next to what the caller gets. A judge reading the landing
+      // page should see the case for the product, not a list of things to type: the questions are on
+      // the demo instructions screen, where someone about to make a call will look for them.
+      h('div.card.value',
+        h('span.cap', 'Why it is worth building'),
+        h('div.vgrid', [
+          ['clock', 'Shorter calls', 'No menu tree and no transfer queue. Lily identifies the caller and pulls the account while they are still describing the problem.'],
+          ['wave', 'Said once, not three times', 'Everything the caller has already said travels with the call, so the person who picks up starts from the full story.'],
+          ['lock', 'The same rules every time', 'Eligibility comes from written policy, not from what an assistant felt like saying. Every decision is logged against the rule it used.'],
+          ['headset', 'People on the calls that need people', 'Routine queries resolve in the conversation; anything sensitive or contested goes to a human with the case already written up.'],
+          ['cc', 'More of the queue answered', 'English and Tagalog today, Burmese next, without hiring a separate team for each language.'],
+          ['activity', 'Measured, not asserted', 'Containment, accuracy and handover quality are scored against the records and shown on the Guardrails screen.'],
+        ].map(([ic, t, d]) => h('div.v', h('span.vi', icon(ic)), h('div', h('b', t), h('p', d)))))),
       )));
 }
 
