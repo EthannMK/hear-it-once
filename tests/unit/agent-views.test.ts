@@ -42,6 +42,29 @@ describe('the agent views', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('no statement ends inside a comment', () => {
+    // deploy.sh feeds this file to bq, which splits on semicolons. A `;` written after `--` on the
+    // same line is inside the comment: the statement never terminates and BigQuery reports the
+    // NEXT statement as a syntax error. That is how it failed once, and the message points at the
+    // wrong line, so it is worth catching here.
+    const trapped = RAW.split('\n')
+      .map((line, i) => ({ line, n: i + 1 }))
+      .filter(({ line }) => line.includes('--') && line.slice(line.indexOf('--')).includes(';'))
+      .map(({ n, line }) => `${n}: ${line.trim()}`);
+    expect(trapped).toEqual([]);
+  });
+
+  it('every statement is terminated', () => {
+    const statements = RAW.split('\n')
+      .filter((l) => !l.trim().startsWith('--'))
+      .join('\n')
+      .split(';')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    // nothing left over after the last semicolon, and every chunk is a statement we recognise
+    for (const st of statements) expect(st).toMatch(/^(CREATE|ALTER|--)/);
+  });
+
   it('exposes nothing that identifies a person beyond what an agent needs', () => {
     // These columns exist in the dataset and must never reach the agent's views.
     for (const forbidden of ['pan_sha256', 'dob_hash', 'phone_hash']) {

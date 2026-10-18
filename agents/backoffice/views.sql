@@ -76,17 +76,20 @@ SELECT d.submission_id, d.customer_id, d.card_id, d.transaction_id, d.merchant, 
        d.transaction_date, d.reason_code, d.case_id, d.created_at
 FROM `PROJECT_ID.DATASET.dispute_submissions` d
 LEFT JOIN (SELECT customer_id, MAX(reset_at) AS reset_at FROM `PROJECT_ID.DATASET.demo_resets` GROUP BY customer_id) rs USING (customer_id)
-WHERE d.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01')  -- the same demo reset the app applies;
+-- the same demo reset the app applies
+WHERE d.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01');
 CREATE OR REPLACE VIEW `PROJECT_ID.DATASET.agent_card_events` AS
 SELECT e.customer_id, e.card_id, e.status, e.reason, e.created_at
 FROM `PROJECT_ID.DATASET.card_status_events` e
 LEFT JOIN (SELECT customer_id, MAX(reset_at) AS reset_at FROM `PROJECT_ID.DATASET.demo_resets` GROUP BY customer_id) rs USING (customer_id)
-WHERE e.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01')  -- the same demo reset the app applies;
+-- the same demo reset the app applies
+WHERE e.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01');
 CREATE OR REPLACE VIEW `PROJECT_ID.DATASET.agent_replacements` AS
 SELECT r.order_id, r.customer_id, r.card_id, r.delivery, r.created_at
 FROM `PROJECT_ID.DATASET.replacement_orders` r
 LEFT JOIN (SELECT customer_id, MAX(reset_at) AS reset_at FROM `PROJECT_ID.DATASET.demo_resets` GROUP BY customer_id) rs USING (customer_id)
-WHERE r.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01')  -- the same demo reset the app applies;
+-- the same demo reset the app applies
+WHERE r.created_at > IFNULL(rs.reset_at, TIMESTAMP '1970-01-01');
 
 -- Rules, policies and knowledge.
 CREATE OR REPLACE VIEW `PROJECT_ID.DATASET.agent_dispute_rules` AS SELECT * FROM `PROJECT_ID.DATASET.dispute_rules`;
