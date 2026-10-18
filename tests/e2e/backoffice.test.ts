@@ -85,6 +85,22 @@ describe('reading a reply from Agent Engine', () => {
     expect(parseEngineStream(messy).text).toBe('All good.');
   });
 
+  it('keeps the whole answer when the model sends it in pieces', () => {
+    const pieces = [
+      JSON.stringify({ content: { role: 'model', parts: [{ text: 'The customer has ' }] } }),
+      JSON.stringify({ content: { role: 'model', parts: [{ text: '3 earlier disputes, all refunded.' }] } }),
+    ].join('\n');
+    expect(parseEngineStream(pieces).text).toBe('The customer has 3 earlier disputes, all refunded.');
+  });
+
+  it('does not double the answer when each event restates it in full', () => {
+    const cumulative = [
+      JSON.stringify({ content: { role: 'model', parts: [{ text: 'The customer has ' }] } }),
+      JSON.stringify({ content: { role: 'model', parts: [{ text: 'The customer has 3 earlier disputes.' }] } }),
+    ].join('\n');
+    expect(parseEngineStream(cumulative).text).toBe('The customer has 3 earlier disputes.');
+  });
+
   it('an empty or unparseable stream yields no answer, so the caller can fall back', () => {
     expect(parseEngineStream('').text).toBe('');
     expect(parseEngineStream('not json at all').text).toBe('');

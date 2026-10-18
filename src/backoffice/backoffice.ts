@@ -137,6 +137,19 @@ async function callEngine(resource: string, method: 'query' | 'streamQuery', bod
   return text;
 }
 
+/**
+ * Agent Engine may send the answer whole on one event, or in pieces across several. Each later piece
+ * either restates everything so far or carries on from it, so this keeps the longer of the two
+ * readings rather than assuming the last event holds the full answer.
+ */
+function joinAnswer(have: string, chunk: string): string {
+  if (!chunk) return have;
+  if (!have) return chunk;
+  if (chunk.startsWith(have)) return chunk;
+  if (have.endsWith(chunk) || have.includes(chunk)) return have;
+  return have + chunk;
+}
+
 /** Turn Agent Engine's stream (one JSON event per line, or server-sent events) into text, steps and sources. */
 export function parseEngineStream(raw: string): { text: string; steps: AgentStep[]; sources: string[] } {
   const events: any[] = [];
@@ -151,6 +164,7 @@ export function parseEngineStream(raw: string): { text: string; steps: AgentStep
   let text = '';
   for (const e of events) {
     const parts: any[] = e?.content?.parts ?? [];
+    let chunk = '';
     for (const p of parts) {
       const call = p.function_call ?? p.functionCall;
       const resp = p.function_response ?? p.functionResponse;
@@ -160,8 +174,9 @@ export function parseEngineStream(raw: string): { text: string; steps: AgentStep
       }
       for (const s of resp?.response?.sources ?? []) sources.add(String(s));
       if (resp?.name === 'run_sql') sources.add('BigQuery query');
-      if (typeof p.text === 'string' && !p.thought && (e?.content?.role ?? 'model') === 'model') text = p.text; // the last text is the answer
+      if (typeof p.text === 'string' && !p.thought && (e?.content?.role ?? 'model') === 'model') chunk += p.text;
     }
+    text = joinAnswer(text, chunk);
   }
   return { text: text.trim(), steps, sources: [...sources] };
 }
