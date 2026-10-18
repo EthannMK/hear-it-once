@@ -1542,12 +1542,21 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
 /* ------------------------------------------------------------------ what it is worth
    Six short claims in one band. The page has a fixed height on a desktop, so these are labels, not
    paragraphs: the evidence behind each one is on the Guardrails screen. */
-.value { margin-top: 20px; padding: 14px 18px; display: grid; gap: 10px; }
-.vgrid { display: flex; flex-wrap: wrap; gap: 8px; }
+.value { margin-top: 20px; padding: 14px 0; display: grid; gap: 10px; overflow: hidden; }
+.value .cap { padding: 0 18px; }
+.vtrack { display: flex; width: max-content; }
+.vrun { display: flex; gap: 10px; padding-left: 10px; }
 .value .v { display: inline-flex; align-items: center; gap: 7px; padding: 6px 13px; border: 1px solid var(--hair); border-radius: 999px; background: var(--ivory); }
 .value .v .i { width: 15px; height: 15px; color: var(--violet-d, #4a4760); flex: none; }
 .value .v b { font: 600 0.84rem var(--sans); color: var(--text); white-space: nowrap; }
-@media (max-width: 560px) { .value .v b { white-space: normal; } }
+/* One run is exactly half the track, so a loop that ends at -50% lands where it started. */
+@keyframes vdrift { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-50%, 0, 0); } }
+@media (prefers-reduced-motion: no-preference) {
+  .vtrack { animation: vdrift 34s linear infinite; }
+  .value:hover .vtrack, .value:focus-within .vtrack { animation-play-state: paused; }
+}
+/* Edges fade instead of cutting a chip in half at the border of the card. */
+.value { -webkit-mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(90deg, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
 
 /* ------------------------------------------------------------------ who built it */
 .credit { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; max-width: 1120px; margin: 8px auto 26px; padding: 14px 28px 0; border-top: 1px solid var(--hair); }
@@ -1557,4 +1566,4 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
 @media (max-width: 760px) { .credit { margin-bottom: 18px; } }
 
 /* The one disclosure the landing page owes a visitor, in its own quiet line. */
-.synth { margin: 18px 0 0; font-size: 0.78rem; color: var(--text-2); text-align: center; }
+.synth { margin: 18px 0 0; font-size: 0.82rem; text-align: center; }
