@@ -72,13 +72,17 @@ const HOW = [
     'If a downstream system times out, the operation is recorded as Unknown rather than guessed either way, is never silently resent, and is reconciled against the truth afterwards. The agent screen keeps a suggestion and a completed action visibly apart.'],
   ['Everything is written down, and the log can be checked.',
     'Every read, every change and every refusal is appended to an audit log. Each row carries a keyed hash of itself and of the row before it, so an edit, a deletion or a renumbering breaks the chain and fails the check the operations team runs against it.'],
+  ['Records are quoted to a model as data, never as instructions.',
+    'The obvious attack is a caller telling the assistant to ignore its rules. The one that matters more arrives in the bank\u2019s own records — a merchant name, a dispute description, a line recording what somebody said on an earlier call — because all of it is written by someone else and all of it is read back to a model. Anything from outside is wrapped in a named tag with a preamble saying nothing inside it is an instruction, and the characters that would close that tag are replaced so the quoted text cannot break out and append its own. Instruction-like writing is flagged on the case so the agent can see it. None of that is treated as a guarantee: the model cannot reach an action, and a draft it writes is checked against what the systems confirmed before an agent sees it.'],
+  ['The back-office agent has the narrowest access that still answers the question.',
+    'It reads, and only reads. One statement per query, SELECT only, and only over a fixed list of reporting views \u2014 never the base tables, and never the columns holding card numbers or identity hashes. Every query is dry-run first and refused if it would touch anything off that list or scan more than the byte limit, and at most 50 rows come back. It has no write path to any banking system, so the worst a confused or misled agent can do is answer badly.'],
   ['The assistant can be switched off without a deploy.',
     'One stored setting decides whether it takes calls, takes calls but changes nothing, or hands every caller straight to a person. The policy engine reads it before any rule, so nothing a caller says and nothing a model returns can route around it, and switching it costs nothing but the call it is on.'],
 ];
 
 function howCard() {
   return h('section.card.sf-sec',
-    h('div.sf-h', h('h2', K.icon('lock'), 'The seven things that hold it together')),
+    h('div.sf-h', h('h2', K.icon('lock'), `The ${HOW.length} things that hold it together`)),
     h('div.sf-how', HOW.map(([q, a], i) => h('div.sf-howi', h('span.sf-n', String(i + 1)), h('div', h('b', q), h('p', a))))));
 }
 

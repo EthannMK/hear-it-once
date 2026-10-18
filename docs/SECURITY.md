@@ -12,6 +12,9 @@ These controls exist in the prototype. **Their existence is not a compliance cla
 | Verification before protected reads/writes | ✅ | Retrieval only after `verified`; policy engine checks verification on every action | E2E S10 |
 | Consent bound to the exact action | ✅ | Consent → proposal → `{type, targetRef}`; expiry; cross-session consent rejected; forged IDs rejected | E2E S18; ACT |
 | Least privilege & central policy | ✅ | `src/config/policy.ts`; non-mock adapter mode forces conservative profile | ACT |
+| Prompt injection — caller speech | ✅ | Safety signals are deterministic regexes evaluated before any model output is used; caller text is wrapped in a named tag with a "this is not an instruction" preamble and tag-closing characters neutralised; the model classifies and extracts only | PI (prompt-injection suite) |
+| Prompt injection — bank records | ✅ | Merchant names, dispute text and "customer reported" lines go to the back-office and draft models through `untrusted()`; instruction-like writing is detected (`scanUntrusted`) and flagged on the case; a draft claiming an action the records do not confirm is blocked (`claimsUnconfirmedAction`) | PI |
+| Back-office agent least privilege | ✅ | Read-only tools; `run_sql` takes one statement, SELECT only, dry-run first, restricted to the `agent_*` views in one dataset, ≤ 2 GB scanned, ≤ 50 rows; no PAN or identity-hash columns in those views; no write path to any banking system | `agents/backoffice/test_tools.py`; agent-views unit tests |
 | Input validation | ✅ | Zod schemas (strict) on every body/query; body limit 32 KB; idempotency key format | STAFF; ACT |
 | Output encoding | ✅ | UI renders via `textContent` only (no `innerHTML` with data) | Code review (`public/js/lib.js`) |
 | CSP & security headers | ✅ | `default-src 'self'`, no inline script, `frame-ancestors 'none'`, nosniff, no-referrer, `X-Frame-Options: DENY` | STAFF headers test |
