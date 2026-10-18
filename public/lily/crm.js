@@ -16,7 +16,7 @@ const C = {
   // each section keeps (transaction filters and selection, knowledge search, unsaved notes).
   // It lives here and not in the DOM so a 4-second refresh, or switching section, keeps it.
   tab: 'overview', cop: true,
-  tx: { q: '', status: 'all', days: '90', disputed: false, sel: null, forCust: null, rows: [], total: 0, matching: 0, hasMore: false, cursor: null, oldestAt: null, statuses: [], loading: false, error: null },
+  tx: { q: '', status: 'all', days: '90', disputed: false, sel: null, forCust: null, rows: [], total: 0, matching: 0, hasMore: false, cursor: null, oldestAt: null, statuses: [], loading: false, error: null, seq: 0 },
   kb: { forCase: null, data: null, error: null, loading: false, q: '', sel: null },
   notes: null, notesFor: null,
   side: 'ai', cust: 'account', ai: {}, joined: null, joinedFor: null, lastCall: null,
@@ -920,7 +920,7 @@ function txView(w) {
   const st = C.tx;
   const cust = w.customer?.id ?? null;
   if (!cust) return h('div.ag-tx', h('p.small.muted', 'No customer is identified on this case, so there is no account to read transactions from.'));
-  if (st.forCust !== cust) { Object.assign(st, { forCust: cust, rows: [], total: 0, matching: 0, hasMore: false, cursor: null, sel: null, error: null, loading: false, statuses: [] }); }
+  if (st.forCust !== cust) { Object.assign(st, { forCust: cust, rows: [], total: 0, matching: 0, hasMore: false, cursor: null, sel: null, error: null, loading: false, statuses: [], seq: st.seq + 1 }); }
 
   const q = h('input', { type: 'search', value: st.q, maxlength: '60', placeholder: 'Merchant, amount or reference', 'aria-label': 'Search transactions' });
   const stSel = h('select', { 'aria-label': 'Status' });
@@ -935,7 +935,13 @@ function txView(w) {
 
   // One request per change of filter, and one more for each further page. Nothing is refetched
   // when the agent only switches section.
+  //
+  // Each request carries a sequence number and only the newest one is allowed to write. Typing in
+  // the search box puts several in flight at once, and without this a slow early reply can land
+  // after a fast later one and leave the table showing rows the filters no longer select — with a
+  // count that says those rows match. An agent reading a ledger has to be able to trust the count.
   async function load(append) {
+    const mine = ++st.seq;
     st.loading = true; st.error = null;
     paint();
     const p = new URLSearchParams({ limit: '25' });
@@ -946,16 +952,19 @@ function txView(w) {
     if (append && st.cursor) p.set('cursor', st.cursor);
     try {
       const r = await api(`/api/crm/customers/${encodeURIComponent(cust)}/transactions?${p}`);
+      if (mine !== st.seq) return;
       st.rows = append ? [...st.rows, ...r.items] : r.items;
       st.total = r.total; st.matching = r.matching; st.hasMore = r.hasMore; st.cursor = r.nextCursor;
       st.oldestAt = r.oldestAt; st.statuses = r.statuses;
       C.refreshCount?.('tx', r.total);
       if (st.sel && !st.rows.some((t) => t.id === st.sel)) st.sel = null;
     } catch (e) {
-      st.error = e.message;
+      if (mine === st.seq) st.error = e.message;
     } finally {
-      st.loading = false;
-      if (table.isConnected) { drawStatuses(); paint(); }
+      if (mine === st.seq) {
+        st.loading = false;
+        if (table.isConnected) { drawStatuses(); paint(); }
+      }
     }
   }
 
