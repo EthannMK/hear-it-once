@@ -46,7 +46,7 @@ import { createTicket } from '../crm/crm.ts';
 import { answerFromInfo, NOT_FOUND, NOT_FOUND_AGAIN } from '../kb/bank-info.ts';
 import { THIRD_PARTY, assessContactRisk, checkNationalId, contactChangeKind, parseNationalIdLast4, READ_ALOUD, STEP_UP_MAX_ATTEMPTS, type Assurance, type ContactKind, type Risk } from './security.ts';
 import { sideTalk } from './sidetalk.ts';
-import { FAREWELL, LET_ME_TALK } from '../ai/parsers.ts';
+import { FAREWELL, LET_ME_TALK, RESOLVED } from '../ai/parsers.ts';
 import { normaliseSpoken } from '../live/speech.ts';
 import { type Facts, factsFromCustomerText, setFact, setIssueFacts } from './facts.ts';
 import { readUnavailable, saysCredentialUnavailable } from './unavailable.ts';
@@ -699,6 +699,18 @@ async function onUtterance(s: Session, input: Extract<CallInput, { kind: 'uttera
     const kind = contactChangeKind(text);
     if (kind) return startContactChange(s, kind);
     if (c.wf?.name === 'account_inquiry' && READ_ALOUD.test(text) && !/\b(ignore|override|disregard|developer mode|system prompt|jailbreak)\b/i.test(text) && !extractSlots(text).amountMinor && !extractSlots(text).merchantHint) return startReadout(s);
+  }
+
+  // The customer has said they are finished. Close the call instead of asking what else they need:
+  // left open, a caller who has nothing more to say stops answering, and the unanswered-question
+  // count eventually offers them a person they never asked for. A question that is actually waiting
+  // for an answer still comes first — "that's all" said over a consent prompt is not consent, and
+  // declining it on their behalf would be worse than asking once more.
+  // Only mid-workflow: wrap-up and the survey have a closing script of their own and run it.
+  if (c.stage === 'workflow' && (FAREWELL.test(text) || RESOLVED.test(text)) && c.pending?.kind !== 'consent') {
+    event(s, 'customer_closed_call', { stage: c.stage });
+    say(s, M.GOODBYE);
+    return endCall(s);
   }
 
   switch (c.stage) {

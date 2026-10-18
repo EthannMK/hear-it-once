@@ -172,6 +172,14 @@ export function parseYesNo(text: string, opts: { answeringPrompt?: boolean } = {
 }
 
 /** The caller is closing the call ("that's all, bye", "goodbye", "salamat, bye"). */
+/**
+ * The customer saying they are finished and happy. Separate from FAREWELL because people end a call
+ * by saying the problem is solved rather than by saying goodbye, and a call that is over should be
+ * closed rather than kept open on "anything else?" until the unanswered-question count sends it to
+ * a person. Deliberately narrow: it needs a complete statement, not the word "good" in passing.
+ */
+export const RESOLVED = /^(?:ok(?:ay)?|alright|right|yes|yeah|yep|great|perfect|lovely|cool|thanks?|thank you|cheers)?[\s,.!-]*\b(?:that (?:is|'?s) (?:all|it|everything|fine|great|perfect|sorted|lovely)|all (?:good|sorted|set|done)|we(?:'?re| are) (?:good|done|sorted)|i(?:'?m| am) (?:good|done|all set|happy|satisfied)|no(?:thing)? else|nothing more|that (?:is|'?s) (?:solved|resolved)|it'?s (?:solved|resolved|sorted|fixed)|problem solved|issue (?:is )?(?:solved|resolved|fixed)|you'?ve (?:solved|sorted|fixed) it|happy with that|that answers (?:it|my question))\b[\s.!,]*(?:thanks?|thank you|cheers)?[\s.!,]*$/i;
+
 export const FAREWELL = /\b(good ?bye|bye bye|bye for now|bye now|bye|see you|talk to you later|have a (good|great|nice) (day|evening|night)|that'?s all for now)\b[\s.!,]*$/i;
 
 export function isCorrection(text: string): boolean {

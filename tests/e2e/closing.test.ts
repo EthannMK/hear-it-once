@@ -142,3 +142,37 @@ describe('more ways of saying yes (from judge testing)', () => {
     expect(all<any>('SELECT id FROM handoffs WHERE session_id = ?', [c.sessionId])).toHaveLength(0);
   });
 });
+
+describe('a caller who is satisfied part way through', () => {
+  /**
+   * Reported from testing: the customer said the problem was sorted while a workflow was still
+   * open. Nothing in the flow recognised that as an ending, so Lily kept asking, the unanswered
+   * question count climbed, and the call was offered to a person nobody had asked for.
+   */
+  it('ends the call instead of working towards a transfer', async () => {
+    const c = new Caller(app);
+    await c.start('S01');
+    await c.say("There's a charge from Novaplay for $249 I don't recognise");
+    await c.verify('S01');
+    for (const said of ["All sorted, thanks", "that is all thanks", "I'm good"]) {
+      if (stageOf(c) !== 'workflow') break;
+      await c.say(said);
+    }
+    expect(stageOf(c)).toBe('ended');
+    const last = c.view.transcript.filter((t: any) => t.speaker === 'assistant').pop();
+    expect(last.text).toMatch(/take care|thanks for calling/i);
+    expect(JSON.stringify(c.view).toLowerCase()).not.toMatch(/connect you with a person|transferring you/);
+  });
+
+  it('still asks when something is actually waiting for an answer', async () => {
+    const c = new Caller(app);
+    await c.start('S05');
+    await c.say('Why was I charged a late fee?');
+    await c.verify('S05');
+    if (c.view.proposal) {
+      await c.say("that's all");
+      // A reversal offer is a question. "That's all" is not consent to it, and nothing may run.
+      expect(c.view.actions?.some((a: any) => a.state === 'succeeded')).toBeFalsy();
+    }
+  });
+});

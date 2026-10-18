@@ -107,6 +107,9 @@ export class LiveBridge {
    *
    * `pendingStepBack` is set the moment the transfer is confirmed, and applied once she has finished
    * saying the handover sentence — cutting her off mid-sentence would be worse than the problem.
+   * From that moment the microphone stops reaching the model, so the wait only ever covers her own
+   * speech: a customer who carries on talking is heard by the agent, not answered by Lily, and
+   * nothing they say can start another turn and hold the transfer open.
    * `steppedBack` is the enforced state after that: no caller audio reaches the model, no model audio
    * reaches the browser, and the provider session is closed and not reconnected.
    *
@@ -117,6 +120,8 @@ export class LiveBridge {
   private pendingStepBack = false;
   private stepBackTimer: NodeJS.Timeout | null = null;
   private steppedBack = false;
+  /** Model turns still to finish before the step-back applies: the sentence in progress, then the closing line. */
+  private stepBackAfterTurns = 0;
 
   /* ------------------------------------------------------------------ lifecycle */
 
@@ -204,7 +209,10 @@ export class LiveBridge {
   onClientAudio(b64: string): void {
     // steppedBack is checked here as well as at the session: the close and the next audio frame can
     // race, and a frame that arrives in between must not reach a model that is supposed to be done.
-    if (this.closed || this.muted || this.steppedBack || !this.session || this.reconnecting) return;
+    // pendingStepBack counts the same way. Once the transfer is confirmed the conversation is over
+    // whatever the customer says next; the only thing still owed to them is the sentence Lily is
+    // part way through. What they say meanwhile is still recorded for the agent.
+    if (this.closed || this.muted || this.steppedBack || this.pendingStepBack || !this.session || this.reconnecting) return;
     this.session.sendAudio(b64);
   }
 
@@ -296,6 +304,9 @@ export class LiveBridge {
     this.flushModelTurn(true);
     emitTimeline(this.sessionId, { type: 'voice.barge_in', stage: 'understand', title: 'Customer spoke over Lily — playback stopped', status: 'info', source: 'voice bridge' });
     void handleInput(this.sessionId, { kind: 'interrupt' }).catch(() => undefined);
+    // Talked over while she was finishing the handover line: there is no sentence left to protect,
+    // so the transfer applies now rather than waiting for a turn that will never complete.
+    if (this.pendingStepBack) this.stepBack('the customer spoke during the handover');
   }
 
   private onTurnComplete(): void {
@@ -305,7 +316,7 @@ export class LiveBridge {
     // The outgoing agent has finished the handover sentence: bring in the next one.
     if (this.pendingAgent) void this.performAgentSwitch();
     // She has finished telling the customer they are being transferred. Now she stops listening.
-    if (this.pendingStepBack) this.stepBack('the call is with a person now');
+    if (this.pendingStepBack && --this.stepBackAfterTurns <= 0) this.stepBack('the call is with a person now');
   }
 
   /**
@@ -552,10 +563,17 @@ export class LiveBridge {
     if (e.type === 'handoff.connected') {
       this.syncTurns();
       this.pushView();
-      // Confirmed by the system: only now may Lily say an agent has joined. By this point she has
-      // usually already stepped back, and sendText on a closed session is a no-op.
-      this.session?.sendText(`SYSTEM EVENT (confirmed): ${redactText(e.title)}. Tell the customer in one short sentence that an agent has accepted their case, then stay quiet unless they speak.`);
-      this.stepBack('an agent accepted the handover');
+      // Confirmed by the system: only now may Lily say an agent has joined. If she is part way
+      // through a sentence that one finishes first, then the closing line, and then she is done —
+      // an agent arriving is not a reason to cut the customer off mid-word.
+      if (!this.steppedBack) {
+        const midSentence = this.modelText.trim().length > 0 || this.modelSpoke;
+        this.session?.sendText(`SYSTEM EVENT (confirmed): ${redactText(e.title)}. Tell the customer in one short sentence that an agent has accepted their case, then stop. Do not ask a question and do not offer anything further.`);
+        this.pendingStepBack = true;
+        this.stepBackAfterTurns = midSentence ? 2 : 1;
+        if (this.stepBackTimer) clearTimeout(this.stepBackTimer);
+        this.stepBackTimer = setTimeout(() => this.stepBack('an agent accepted the handover'), 8000);
+      }
     } else if (e.type === 'handoff.queued' || e.type === 'handoff.no_agent') {
       this.syncTurns();
       this.pushView();
@@ -563,6 +581,7 @@ export class LiveBridge {
       // stops; the timer is there in case that turn never completes.
       if (!this.steppedBack && !this.pendingStepBack) {
         this.pendingStepBack = true;
+        this.stepBackAfterTurns = 1;
         this.stepBackTimer = setTimeout(() => this.stepBack('the transfer was confirmed'), 6000);
       }
     } else if (e.type.startsWith('handoff.') || e.type === 'call.closed') {

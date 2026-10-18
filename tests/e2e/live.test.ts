@@ -489,6 +489,28 @@ describe('Lily stops taking the call once it is going to a person', () => {
     expect(client.msgs.some((m) => m.type === 'voice' && /stepped back/i.test(m.message ?? ''))).toBe(true);
   });
 
+  it('hears nothing the customer says between the transfer and stepping back', async () => {
+    const { client, session } = await upToTransfer();
+    // She is still finishing her sentence. The customer carries on talking, as people do.
+    const heardSoFar = session.audioIn.length;
+    client.send({ type: 'audio', data: 'AAAA' });
+    client.send({ type: 'audio', data: 'BBBB' });
+    await sleep(120);
+    // None of it reaches the model: the call is going to a person whatever they say next, and a new
+    // turn here would hold the transfer open while Lily answered someone she is handing over.
+    expect(session.audioIn).toHaveLength(heardSoFar);
+    expect(session.closed).toBe(false);
+  });
+
+  it('stops without waiting when the customer talks over the handover line', async () => {
+    const { session } = await upToTransfer();
+    expect(session.closed).toBe(false);
+    session.interrupt();
+    await sleep(80);
+    // There is no sentence left to protect, so there is nothing to wait for.
+    expect(session.closed).toBe(true);
+  });
+
   it('the call itself stays open: the transfer is not a dropped call', async () => {
     const { session, sessionId } = await upToTransfer();
     session.turnComplete();
