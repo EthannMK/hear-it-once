@@ -251,7 +251,6 @@ function handoverBar(w) {
         h('b', gone ? 'The customer hung up before anyone picked up' : 'The customer is waiting for you'),
         h('span', `${hd.reasonLabel}. ${gone ? 'Their case is below, with everything Lily recorded. A callback is the next step.' : 'Lily told them a colleague will pick up with the full case, so they won’t repeat anything.'}`)),
       h('div.row3',
-        h('button.btn.sm.ghost', { type: 'button', onclick: () => setTab('overview') }, 'Read the AI summary'),
         gone ? null : h('button.btn.dark.cta', { type: 'button', onclick: (e) => act(e.currentTarget, () => api(`/api/handoffs/${hd.id}/accept`, { method: 'POST', body: {} }), 'Handover accepted. The customer has been told you joined.') }, 'Accept handover')));
   }
   if (hd.status === 'connected') {
