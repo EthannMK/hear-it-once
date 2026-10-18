@@ -1540,18 +1540,21 @@ table.dm-txt td.amt { text-align: right; white-space: nowrap; }
 @keyframes ambient { from { opacity: 0; } to { opacity: 0.65; } }
 
 /* ------------------------------------------------------------------ what it is worth
-   The landing page makes the case for the product. Two columns on a desktop, one on a phone. */
-.value { margin-top: 28px; padding: 20px 22px; display: grid; gap: 14px; }
-.vgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; }
-.value .v { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
-.value .vi { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--lav, #eceaff); color: var(--text); }
-.value .vi .i { width: 17px; height: 17px; }
-.value .v b { display: block; font: 600 0.95rem var(--sans); color: var(--text); }
-.value .v p { margin: 2px 0 0; font-size: 0.86rem; color: var(--text-2); line-height: 1.45; }
-@media (max-width: 760px) { .vgrid { grid-template-columns: minmax(0, 1fr); } }
+   Six short claims in one band. The page has a fixed height on a desktop, so these are labels, not
+   paragraphs: the evidence behind each one is on the Guardrails screen. */
+.value { margin-top: 20px; padding: 14px 18px; display: grid; gap: 10px; }
+.vgrid { display: flex; flex-wrap: wrap; gap: 8px; }
+.value .v { display: inline-flex; align-items: center; gap: 7px; padding: 6px 13px; border: 1px solid var(--hair); border-radius: 999px; background: var(--ivory); }
+.value .v .i { width: 15px; height: 15px; color: var(--violet-d, #4a4760); flex: none; }
+.value .v b { font: 600 0.84rem var(--sans); color: var(--text); white-space: nowrap; }
+@media (max-width: 560px) { .value .v b { white-space: normal; } }
 
 /* ------------------------------------------------------------------ who built it */
 .credit { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; max-width: 1120px; margin: 8px auto 26px; padding: 14px 28px 0; border-top: 1px solid var(--hair); }
-.credit .kd { height: 20px; width: auto; opacity: 0.85; }
+.credit .kd { height: 18px; width: auto; opacity: 0.9; }
+.credit .by { font-size: 0.76rem; color: var(--text-2); }
 .credit p { margin: 0; font-size: 0.76rem; color: var(--text-2); text-align: center; }
 @media (max-width: 760px) { .credit { margin-bottom: 18px; } }
+
+/* The one disclosure the landing page owes a visitor, in its own quiet line. */
+.synth { margin: 18px 0 0; font-size: 0.78rem; color: var(--text-2); text-align: center; }

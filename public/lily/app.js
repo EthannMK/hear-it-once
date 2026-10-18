@@ -103,13 +103,15 @@ function render(active, ...nodes) {
 }
 
 /**
- * Who built this and what for. It sits in the shared shell rather than on each screen so it cannot
- * be forgotten on one of them, and it is quiet enough to stay out of the way of a live call.
+ * Who built this and what for, and nothing else. It sits in the shared shell rather than on each
+ * screen so it cannot be forgotten on one of them. The synthetic-data notice belongs to the demo
+ * instructions screen, where someone is about to type a card number and needs to read it.
  */
 function credit() {
   return h('footer.credit',
-    h('img.kd', { src: '/brand/koda.png', alt: 'Team KODA', width: 180, height: 43, loading: 'lazy' }),
-    h('p', 'Built by Team KODA for the Google Cloud AI Builder Cup 2026. Northstar Bank is fictional and all data is synthetic.'));
+    h('span.by', 'Built by'),
+    h('img.kd', { src: '/brand/koda.png', alt: 'KODA', width: 180, height: 43, loading: 'lazy' }),
+    h('p', 'for the Google Cloud AI Builder Cup 2026'));
 }
 let toastT = 0;
 function toast(m) {
@@ -357,6 +359,8 @@ function hero() {
   return wrap;
 }
 
+const K_SYNTH = 'Northstar Bank is a fictional bank. Every customer, card and transaction here is synthetic.';
+
 function drawHome() {
   const ready = !!S.status?.available;
   const bars = h('div.bars', { 'aria-hidden': 'true' }, [14, 26, 38, 48, 34, 44, 24, 16].map((n, i) => h('i', { style: `height:${n}px;--d:${i * 90}ms` })));
@@ -382,21 +386,23 @@ function drawHome() {
             h(`div.st${ready ? '' : '.off'}`, h('i'), ready ? 'Lily is ready to talk' : 'Voice isn’t available right now. You can type to Lily instead.'),
             h('p', icon('info'), h('span', 'You are speaking with an AI. Your browser will ask for the microphone and no audio is stored. No microphone? Start anyway and type.')))),
         hero()),
-      !ready && S.status?.reason && !/scripted/i.test(S.status.reason) ? h('p.banner.warn', S.status.reason) : null,
+      // The voice warning used to repeat here. It is already on the button's own status line a few
+      // inches above, and a second copy in a yellow band was the loudest thing on the page. This
+      // space says the one thing a visitor cannot work out for themselves.
+      h('p.synth', K_SYNTH),
       // Demo data panel removed for now (demoTable() is kept below to bring it back).
-      // What the bank gets out of this, next to what the caller gets. A judge reading the landing
-      // page should see the case for the product, not a list of things to type: the questions are on
-      // the demo instructions screen, where someone about to make a call will look for them.
+      // The case for the product, short enough to read without scrolling. The detail behind each of
+      // these is on the Guardrails screen; the landing page only has to say what they are.
       h('div.card.value',
         h('span.cap', 'Why it is worth building'),
         h('div.vgrid', [
-          ['clock', 'Shorter calls', 'No menu tree and no transfer queue. Lily identifies the caller and pulls the account while they are still describing the problem.'],
-          ['wave', 'Said once, not three times', 'Everything the caller has already said travels with the call, so the person who picks up starts from the full story.'],
-          ['lock', 'The same rules every time', 'Eligibility comes from written policy, not from what an assistant felt like saying. Every decision is logged against the rule it used.'],
-          ['headset', 'People on the calls that need people', 'Routine queries resolve in the conversation; anything sensitive or contested goes to a human with the case already written up.'],
-          ['cc', 'More of the queue answered', 'English and Tagalog today, Burmese next, without hiring a separate team for each language.'],
-          ['activity', 'Measured, not asserted', 'Containment, accuracy and handover quality are scored against the records and shown on the Guardrails screen.'],
-        ].map(([ic, t, d]) => h('div.v', h('span.vi', icon(ic)), h('div', h('b', t), h('p', d)))))),
+          ['clock', 'Lower AHT'],
+          ['wave', 'Say it once'],
+          ['lock', 'Same rules every call'],
+          ['headset', 'People where they count'],
+          ['cc', 'Three languages, one team'],
+          ['activity', 'Measured, not claimed'],
+        ].map(([ic, t]) => h('span.v', icon(ic), h('b', t))))),
       )));
 }
 
